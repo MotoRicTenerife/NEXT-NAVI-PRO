@@ -8,6 +8,7 @@ Questa revisione introduce una struttura Android Gradle effettiva e una prima sc
 
 ### Implementato nel codice attuale
 - Progetto Android nativo Kotlin, minSdk 26, JDK 17, Android SDK 35.
+- Splash screen testuale con fade-in di circa 2 secondi e pulsante «Avvia Navigazione».
 - Dashboard ad alto contrasto NEXT NAVI PRO, con tachimetro digitale.
 - Lettura della velocità dal provider di localizzazione Android; esclusione dei fix più vecchi di 10 secondi o con accuratezza peggiore di 50 metri.
 - Soglie cromatiche iniziali: bianco sotto 50 km/h, giallo da 50 a meno di 120 km/h, rosso da 120 km/h.
@@ -16,7 +17,7 @@ Questa revisione introduce una struttura Android Gradle effettiva e una prima sc
 - Workflow GitHub Actions per compilazione, test Android e pubblicazione dell'APK Debug come artifact.
 
 ### Non ancora implementato / da verificare
-- Splash screen animata e logo grafico definitivo.
+- Logo grafico definitivo con strada/montagna/pin, illuminazione giallo-bianca e asset dedicati.
 - Mappa navigabile, ricerca destinazioni, routing, ricalcolo, istruzioni turn-by-turn e voce.
 - Limiti di velocità provenienti da dati stradali reali.
 - Mappe e routing offline, meteo, curve, registro viaggi e GPX.
