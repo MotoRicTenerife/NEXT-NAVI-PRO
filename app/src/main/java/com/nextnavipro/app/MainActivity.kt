@@ -344,6 +344,7 @@ class MainActivity : Activity(), LocationListener {
     }
 
     private fun applyMapStyle(readyMap: MapLibreMap) {
+        mapStyleReady = false
         val styleUrl = if (negativeTheme) "https://tiles.openfreemap.org/styles/positron" else STYLE_URL
         readyMap.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
             mapStyleReady = true
@@ -387,6 +388,7 @@ class MainActivity : Activity(), LocationListener {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NEGATIVE, negativeTheme).apply()
         themeButton.text = if (negativeTheme) "NEGATIVO" else "POSITIVO"
         applyTheme()
+        map?.let { applyMapStyle(it) }
     }
 
     private fun applyTheme() {
@@ -424,6 +426,63 @@ class MainActivity : Activity(), LocationListener {
         }
         visit(this)
         return result
+    }
+
+    private fun showHomeOptions() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val savedName = prefs.getString("home_name", null)
+        val choices = if (savedName.isNullOrBlank()) {
+            arrayOf("Salva la destinazione selezionata come Casa")
+        } else {
+            arrayOf("Vai a Casa: " + savedName, "Salva la destinazione selezionata come Casa", "Dimentica Casa")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (savedName.isNullOrBlank()) "Indirizzo di casa" else "Casa salvata: " + savedName)
+            .setItems(choices) { _, which ->
+                if (savedName.isNullOrBlank()) {
+                    saveSelectedDestinationAsHome()
+                } else when (which) {
+                    0 -> navigateHome()
+                    1 -> saveSelectedDestinationAsHome()
+                    2 -> {
+                        prefs.edit().remove("home_name").remove("home_description")
+                            .remove("home_lat").remove("home_lon").apply()
+                        Toast.makeText(this, "Indirizzo di casa rimosso.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
+    private fun saveSelectedDestinationAsHome() {
+        val selected = destination
+        if (selected == null) {
+            Toast.makeText(this, "Cerca e seleziona prima un indirizzo da salvare come Casa.", Toast.LENGTH_LONG).show()
+            return
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putString("home_name", selected.name)
+            .putString("home_description", selected.description)
+            .putString("home_lat", selected.point.latitude.toString())
+            .putString("home_lon", selected.point.longitude.toString())
+            .apply()
+        Toast.makeText(this, "Indirizzo di casa salvato: " + selected.name, Toast.LENGTH_LONG).show()
+    }
+
+    private fun navigateHome() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val name = prefs.getString("home_name", null) ?: return
+        val lat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val lon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+            Toast.makeText(this, "Indirizzo di casa non valido: salvalo di nuovo.", Toast.LENGTH_LONG).show()
+            return
+        }
+        destination = PlaceResult(name, NavPoint(lat, lon), prefs.getString("home_description", "").orEmpty())
+        destinationInput.setText(name)
+        routeText.text = "DESTINAZIONE: Casa\n" + name
+        calculateSelectedRoute()
     }
 
     private fun searchDestination() {
@@ -666,7 +725,7 @@ class MainActivity : Activity(), LocationListener {
         (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(Feature.fromGeometry(point))
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 8f
-        if (forceCenter || movedEnough) {
+        if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
             val oldBearing = map?.cameraPosition?.bearing ?: 0.0
             val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldBearing
             val camera = CameraPosition.Builder()
