@@ -5,6 +5,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.text.SpannableString
@@ -45,10 +49,11 @@ import org.maplibre.geojson.Point
 import java.util.Locale
 import kotlin.concurrent.thread
 
-class MainActivity : Activity(), LocationListener {
+class MainActivity : Activity(), LocationListener, SensorEventListener {
     companion object {
         private const val PREFS = "next_navi_settings"
         private const val PREF_NEGATIVE = "negative_theme"
+        private const val PREF_THEME_MODE = "theme_mode"
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val SOURCE_USER = "next-user-position"
@@ -68,6 +73,10 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var routeButton: Button
     private lateinit var modeButton: Button
     private lateinit var themeButton: Button
+    private lateinit var menuButton: Button
+    private var sensorManager: SensorManager? = null
+    private var lightSensor: Sensor? = null
+    private var themeMode: String = "negative"
     private lateinit var limitValue: TextView
     private var mapView: MapView? = null
     private var mapOriginalParent: android.view.ViewGroup? = null
@@ -144,7 +153,7 @@ class MainActivity : Activity(), LocationListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         voiceGuide = TextToSpeech(this) { status ->
             voiceGuideReady = status == TextToSpeech.SUCCESS &&
-                (voiceGuide?.setLanguage(Locale.ITALIAN) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
+                (voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
         }
         negativeTheme = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NEGATIVE, true)
         dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
@@ -293,7 +302,7 @@ class MainActivity : Activity(), LocationListener {
 
         maneuverIcon = TextView(this).apply {
             text = "↑"
-            textSize = 34f
+            textSize = 54f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
@@ -306,16 +315,17 @@ class MainActivity : Activity(), LocationListener {
         }
         speedText = TextView(this).apply {
             text = "000"
-            textSize = 108f
+            textSize = 116f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(150)))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(160)))
         val unit = TextView(this).apply {
             text = "km/h"
-            textSize = 13f
+            textSize = 18f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
             letterSpacing = 0.03f
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, dp(8))
@@ -374,12 +384,14 @@ class MainActivity : Activity(), LocationListener {
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
-            speedText.textSize = 104f
+            speedText.textSize = 116f
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-            navHalf.addView(maneuverIcon, params(-1, dp(42)))
+            navHalf.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.35f))
+            maneuverIcon.textSize = 58f
+            navHalf.addView(maneuverIcon, params(-1, dp(76)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
@@ -554,7 +566,7 @@ class MainActivity : Activity(), LocationListener {
         }
         destinationInput.setTextColor(textColor)
         destinationInput.setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
-        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(32, 36, 40) else Color.rgb(220, 227, 230))
+        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(35, 35, 35))
     }
 
     private fun android.view.View.walkViews(): List<View> {
@@ -710,6 +722,7 @@ class MainActivity : Activity(), LocationListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
@@ -1009,7 +1022,7 @@ class MainActivity : Activity(), LocationListener {
                 else -> ""
             }
             if (spoken.isNotBlank() && voiceGuideReady) {
-                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_ADD, null, "turn-" + maneuverIndex + "-stage-" + stage)
+                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
             }
         }
     }
