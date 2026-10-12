@@ -11,9 +11,9 @@ class NavigationServicesTest {
     }
 
     @Test
-    fun polylineDecoderDecodesKnownTwoPointPolyline() {
+    fun polylineDecoderDecodesKnownTwoPointPolyline6() {
         // Encoded polyline6 for (38.5, -120.2) -> (40.7, -120.95)
-        val decoded = NavigationServices.decodePolyline6("_p~iF~ps|U_ulLnnqC")
+        val decoded = NavigationServices.decodePolyline6("_izlhA~rlgdF_{geC~ywl@")
         assertEquals(2, decoded.size)
         assertEquals(38.5, decoded[0].latitude, 0.00001)
         assertEquals(-120.2, decoded[0].longitude, 0.00001)
