@@ -301,9 +301,36 @@ class MainActivity : Activity(), LocationListener {
         }
         mapColumn.addView(recenterButton, params(-1, dp(42)))
 
-        content.addView(infoColumn, LinearLayout.LayoutParams(0, -1, 0.29f))
-        content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 0.32f))
-        content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 0.39f))
+        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            content.orientation = LinearLayout.VERTICAL
+            val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            navHalf.addView(gpsText, params(-1, dp(24)))
+            val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            limitHalf.addView(limitTitle, params(-1, dp(24)))
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
+            upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
+            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
+            speedText.textSize = 76f
+        } else {
+            content.orientation = LinearLayout.HORIZONTAL
+            val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            navHalf.addView(gpsText, params(-1, dp(24)))
+            val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            limitHalf.addView(limitTitle, params(-1, dp(24)))
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
+            left.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            left.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
+        }
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val controls = LinearLayout(this).apply {
