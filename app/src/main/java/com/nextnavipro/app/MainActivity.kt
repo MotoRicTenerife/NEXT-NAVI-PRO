@@ -254,7 +254,7 @@ class MainActivity : Activity(), LocationListener {
         }
         speedText = TextView(this).apply {
             text = "—"
-            textSize = 82f
+            textSize = 92f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -289,6 +289,8 @@ class MainActivity : Activity(), LocationListener {
         radarText.textSize = 9f
         radarText.maxLines = 1
         radarText.setPadding(dp(2), 0, dp(2), 0)
+        infoColumn.removeView(gpsText)
+        infoColumn.removeView(radarText)
         mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapColumn.addView(mapStatus, params(-1, dp(22)))
@@ -451,6 +453,10 @@ class MainActivity : Activity(), LocationListener {
     private fun applyTheme() {
         if (!::root.isInitialized) return
         root.setBackgroundColor(if (negativeTheme) black else positiveBackground)
+        val panelBackground = if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222)
+        limitValue.setBackgroundColor(panelBackground)
+        routeText.setBackgroundColor(panelBackground)
+        speedText.setBackgroundColor(panelBackground)
         val textColor = if (negativeTheme) white else positiveText
         root.walkViews().forEach { view ->
             if (view is TextView && view !== destinationInput) {
