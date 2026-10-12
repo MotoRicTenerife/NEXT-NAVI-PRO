@@ -323,6 +323,7 @@ class MainActivity : Activity(), LocationListener {
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             navHalf.addView(gpsText, params(-1, dp(24)))
+            navHalf.addView(radarText, params(-1, dp(20)))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
