@@ -107,6 +107,35 @@ class MainActivity : Activity(), LocationListener {
     private val negativeBackground = Color.rgb(220, 224, 227)
     private val inactiveDigitColor = Color.rgb(105, 112, 118)
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!dashboardStarted) return
+
+        // Keep route, destination and latest GPS fix in this Activity while rotating.
+        // Recreate only the view tree and MapView so portrait/landscape layouts are rebuilt.
+        val oldMapView = mapView
+        try {
+            oldMapView?.onPause()
+            oldMapView?.onStop()
+            oldMapView?.onDestroy()
+        } catch (_: Exception) {
+            // A partially initialized map must not prevent navigation from being restored.
+        }
+        mapView = null
+        map = null
+        mapStyleReady = false
+        fullScreenMap = false
+        fullScreenRoot = null
+        mapOriginalParent = null
+        mapOriginalIndex = -1
+        mapOriginalParams = null
+        lastCameraLocation = null
+        buildDashboard(null)
+        currentLocation?.let { updateMapForLocation(it, true) }
+        routeResult?.let { drawRoute(it, false); updateTurnGuidance(currentLocation ?: return) }
+        if (activityResumed) requestGps()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.decorView.systemUiVisibility =
@@ -350,6 +379,7 @@ class MainActivity : Activity(), LocationListener {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            navHalf.addView(maneuverIcon, params(-1, dp(42)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
