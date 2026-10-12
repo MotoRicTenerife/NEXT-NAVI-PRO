@@ -62,6 +62,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var routeButton: Button
     private lateinit var modeButton: Button
     private lateinit var themeButton: Button
+    private lateinit var limitValue: TextView
     private var mapView: MapView? = null
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
@@ -218,7 +219,7 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER
         }
         infoColumn.addView(limitTitle, params(-1, dp(28)))
-        val limitValue = TextView(this).apply {
+        limitValue = TextView(this).apply {
             text = "—"
             textSize = 30f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
@@ -363,14 +364,14 @@ class MainActivity : Activity(), LocationListener {
             mapStyleReady = true
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
-                PropertyFactory.circleColor("#00E5FF"),
+                PropertyFactory.circleColor("#FFD400"),
                 PropertyFactory.circleRadius(7f),
-                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                PropertyFactory.circleStrokeWidth(2f)
+                PropertyFactory.circleStrokeColor("#000000"),
+                PropertyFactory.circleStrokeWidth(2.5f)
             ))
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
-                PropertyFactory.lineColor(if (negativeTheme) "#111111" else "#00BFFF"),
+                PropertyFactory.lineColor(if (negativeTheme) "#00D6C9" else "#FFD400"),
                 PropertyFactory.lineWidth(5f)
             ))
             style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
