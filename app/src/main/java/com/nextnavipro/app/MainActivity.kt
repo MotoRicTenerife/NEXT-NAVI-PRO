@@ -307,6 +307,7 @@ class MainActivity : Activity(), LocationListener {
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             navHalf.addView(gpsText, params(-1, dp(24)))
+            navHalf.addView(radarText, params(-1, dp(20)))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -391,8 +392,8 @@ class MainActivity : Activity(), LocationListener {
                 style.layers.forEach { layer ->
                     when (layer) {
                         is SymbolLayer -> layer.setProperties(
-                            PropertyFactory.textColor("#FFFFFF"),
-                            PropertyFactory.textHaloColor("#000000"),
+                            PropertyFactory.textColor("#111111"),
+                            PropertyFactory.textHaloColor("#FFFFFF"),
                             PropertyFactory.textHaloWidth(1.2f)
                         )
                         is LineLayer -> layer.setProperties(PropertyFactory.lineColor("#111111"))
@@ -401,11 +402,14 @@ class MainActivity : Activity(), LocationListener {
             }
             mapStyleReady = true
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
-                PropertyFactory.circleColor("#FFD400"),
-                PropertyFactory.circleRadius(7f),
-                PropertyFactory.circleStrokeColor("#000000"),
-                PropertyFactory.circleStrokeWidth(2.5f)
+            // A high-contrast arrow stays upright on screen while the map rotates with travel heading.
+            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
+                PropertyFactory.textField("▲"),
+                PropertyFactory.textColor("#FFD400"),
+                PropertyFactory.textHaloColor("#000000"),
+                PropertyFactory.textHaloWidth(2.5f),
+                PropertyFactory.textSize(25f),
+                PropertyFactory.textRotationAlignment("viewport")
             ))
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
@@ -696,6 +700,7 @@ class MainActivity : Activity(), LocationListener {
         fullScreenRoot = page
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         val flagButton = makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") { }
         flagButton.setOnClickListener {
             selectionMode = !selectionMode
@@ -717,6 +722,35 @@ class MainActivity : Activity(), LocationListener {
         fullScreenMap = false
         fullScreenRoot = null
         setContentView(root)
+    }
+
+    private fun showSavedPois() {
+        val saved = getSharedPreferences(PREFS, MODE_PRIVATE).all
+            .filterKeys { it.startsWith("poi_") }
+            .mapNotNull { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@mapNotNull null
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                Triple(key.removePrefix("poi_"), lat, lon)
+            }
+            .sortedBy { it.first.lowercase(Locale.ROOT) }
+        if (saved.isEmpty()) {
+            Toast.makeText(this, "Non hai ancora salvato luoghi di interesse.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Luoghi salvati")
+            .setItems(saved.map { it.first }.toTypedArray()) { _, which ->
+                val poi = saved[which]
+                destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
+                destinationInput.setText(poi.first)
+                routeText.text = "DESTINAZIONE: " + poi.first + "\\nPremi AVVIA PERCORSO"
+                exitMapFullScreen()
+                calculateSelectedRoute()
+            }
+            .setNegativeButton("Chiudi", null)
+            .show()
     }
 
     private fun showPickedPointDialog(point: NavPoint) {
