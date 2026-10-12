@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -93,8 +96,10 @@ class MainActivity : Activity(), LocationListener {
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
     private val black = Color.BLACK
-    private val positiveBackground = Color.rgb(235, 240, 242)
-    private val positiveText = Color.rgb(18, 28, 35)
+    private val positiveBackground = Color.BLACK
+    private val positiveText = Color.WHITE
+    private val negativeBackground = Color.rgb(220, 224, 227)
+    private val inactiveDigitColor = Color.rgb(105, 112, 118)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -253,21 +258,22 @@ class MainActivity : Activity(), LocationListener {
             setPadding(dp(2), 0, dp(2), 0)
         }
         speedText = TextView(this).apply {
-            text = "—"
-            textSize = 92f
+            text = "000"
+            textSize = 108f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        speedText.setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(126)))
+        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(150)))
         val unit = TextView(this).apply {
             text = "km/h"
-            textSize = 12f
+            textSize = 13f
             letterSpacing = 0.03f
-            gravity = Gravity.CENTER
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            setPadding(0, 0, 0, dp(8))
         }
-        speedColumn.addView(unit, params(-1, dp(30)))
+        speedColumn.addView(unit, params(-1, dp(46)))
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1f))
         routeButton = makeButton("AVVIA PERCORSO") {
@@ -320,7 +326,7 @@ class MainActivity : Activity(), LocationListener {
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
-            speedText.textSize = 88f
+            speedText.textSize = 104f
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -442,6 +448,21 @@ class MainActivity : Activity(), LocationListener {
             setOnClickListener { action() }
         }
 
+    private fun updateSpeedDisplay(speed: Int?) {
+        val value = (speed ?: 0).coerceIn(0, 999)
+        val digits = String.format(Locale.US, "%03d", value)
+        val styled = SpannableString(digits)
+        val activeColor = if (negativeTheme) Color.rgb(25, 30, 34) else white
+        val leadingZeros = if (speed == null) 3 else digits.indexOfFirst { it != '0' }.let { if (it < 0) 2 else it }
+        for (i in 0 until leadingZeros) {
+            styled.setSpan(ForegroundColorSpan(inactiveDigitColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        for (i in leadingZeros until digits.length) {
+            styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        speedText.text = styled
+    }
+
     private fun toggleTheme() {
         negativeTheme = !negativeTheme
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NEGATIVE, negativeTheme).apply()
@@ -452,8 +473,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun applyTheme() {
         if (!::root.isInitialized) return
-        root.setBackgroundColor(if (negativeTheme) black else positiveBackground)
-        val panelBackground = if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222)
+        root.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
+        val panelBackground = if (negativeTheme) negativeBackground else positiveBackground
         limitValue.setBackgroundColor(panelBackground)
         routeText.setBackgroundColor(panelBackground)
         speedText.setBackgroundColor(panelBackground)
@@ -461,9 +482,9 @@ class MainActivity : Activity(), LocationListener {
         root.walkViews().forEach { view ->
             if (view is TextView && view !== destinationInput) {
                 view.setTextColor(when {
-                    view === speedText -> if ((speedText.text.toString().toIntOrNull() ?: 0) >= 120) Color.RED else if ((speedText.text.toString().toIntOrNull() ?: 0) >= 50) yellow else textColor
+                    view === speedText -> textColor
                     view === gpsText -> if (negativeTheme) yellow else Color.rgb(130, 85, 0)
-                    view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 90, 125)
+                    view === routeText -> if (negativeTheme) Color.rgb(0, 85, 105) else cyan
                     view === radarText -> Color.rgb(255, 70, 55)
                     view.text.toString().contains("NEXT NAVI PRO") -> yellow
                     else -> textColor
@@ -471,7 +492,7 @@ class MainActivity : Activity(), LocationListener {
             }
             if (view is Button) {
                 view.setTextColor(textColor)
-                view.setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+                view.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(35, 35, 35))
             }
         }
         destinationInput.setTextColor(textColor)
@@ -837,12 +858,7 @@ class MainActivity : Activity(), LocationListener {
         }
         currentLocation = Location(location)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
-        speedText.text = if (location.hasSpeed()) speed.toInt().toString() else "—"
-        speedText.setTextColor(when {
-            speed >= 120f -> Color.RED
-            speed >= 50f -> yellow
-            else -> if (negativeTheme) white else positiveText
-        })
+        updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
         gpsText.setTextColor(if (negativeTheme) yellow else Color.rgb(130, 85, 0))
         updateMapForLocation(location, lastCameraLocation == null)
