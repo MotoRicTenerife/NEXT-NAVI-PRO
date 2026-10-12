@@ -194,6 +194,10 @@ class MainActivity : Activity(), LocationListener {
         searchRow.addView(homeButton, LinearLayout.LayoutParams(dp(70), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
+        val historyButton = makeButton("RECENTI") { showSearchHistory() }
+        searchRow.addView(historyButton, LinearLayout.LayoutParams(dp(78), dp(46)).apply {
+            setMargins(dp(4), 0, 0, 0)
+        })
         root.addView(searchRow, params(-1, dp(50)))
 
         val content = LinearLayout(this).apply {
@@ -546,6 +550,7 @@ class MainActivity : Activity(), LocationListener {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
                         return@runOnUiThread
                     }
+                    rememberSearch(query)
                     val labels = results.map {
                         if (it.description.isBlank()) it.name else it.name + "\n" + it.description
                     }.toTypedArray()
@@ -648,6 +653,27 @@ class MainActivity : Activity(), LocationListener {
         if (::destinationInput.isInitialized) destinationInput.text.clear()
         val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
         source?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
+    }
+
+    private fun showSearchHistory() {
+        val entries = getSharedPreferences(PREFS, MODE_PRIVATE).getString("search_history", "").orEmpty()
+            .split("\n").filter { it.isNotBlank() }
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "Nessuna ricerca recente.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Ricerche recenti")
+            .setItems(entries.toTypedArray()) { _, which ->
+                destinationInput.setText(entries[which])
+                searchDestination()
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun rememberSearch(query: String) {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val previous = prefs.getString("search_history", "").orEmpty().split("\n").filter { it.isNotBlank() }
+        val latest = (listOf(query.trim()) + previous.filterNot { it.equals(query.trim(), true) }).take(10)
+        prefs.edit().putString("search_history", latest.joinToString("\n")).apply()
     }
 
     private fun requestGps() {
