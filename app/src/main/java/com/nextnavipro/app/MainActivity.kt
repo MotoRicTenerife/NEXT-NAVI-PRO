@@ -242,7 +242,9 @@ class MainActivity : Activity(), LocationListener {
         }
         panel.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        routeButton = makeButton("AVVIA PERCORSO") {\n            if (routeResult != null) clearRoute() else calculateSelectedRoute()\n        }
+        routeButton = makeButton("AVVIA PERCORSO") {
+            if (routeResult != null) clearRoute() else calculateSelectedRoute()
+        }
         panel.addView(routeButton, params(-1, dp(44)))
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
