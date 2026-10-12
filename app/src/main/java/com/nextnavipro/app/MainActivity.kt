@@ -32,6 +32,7 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
@@ -347,6 +348,18 @@ class MainActivity : Activity(), LocationListener {
         mapStyleReady = false
         val styleUrl = if (negativeTheme) "https://tiles.openfreemap.org/styles/positron" else STYLE_URL
         readyMap.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+            if (negativeTheme) {
+                style.layers.forEach { layer ->
+                    when (layer) {
+                        is SymbolLayer -> layer.setProperties(
+                            PropertyFactory.textColor("#FFFFFF"),
+                            PropertyFactory.textHaloColor("#000000"),
+                            PropertyFactory.textHaloWidth(1.2f)
+                        )
+                        is LineLayer -> layer.setProperties(PropertyFactory.lineColor("#111111"))
+                    }
+                }
+            }
             mapStyleReady = true
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
