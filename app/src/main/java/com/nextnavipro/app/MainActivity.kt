@@ -10,6 +10,8 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Build
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
@@ -27,6 +29,8 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var themeButton: Button
     private var carMode = false
     private var nightMode = true
+    private val splashHandler = Handler(Looper.getMainLooper())
+    private var dashboardStarted = false
     private val yellow = Color.rgb(255, 212, 0)
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
@@ -38,6 +42,58 @@ class MainActivity : Activity(), LocationListener {
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        showSplash()
+    }
+
+    private fun showSplash() {
+        val splash = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setBackgroundColor(black)
+        }
+        val brand = TextView(this).apply {
+            text = "NEXT NAVI PRO"
+            textSize = 34f
+            letterSpacing = 0.08f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(yellow)
+            gravity = Gravity.CENTER
+            alpha = 0f
+        }
+        splash.addView(brand, params(-1, dp(76)))
+        val tagline = TextView(this).apply {
+            text = "LA STRADA, SOTTO CONTROLLO"
+            textSize = 12f
+            letterSpacing = 0.12f
+            setTextColor(cyan)
+            gravity = Gravity.CENTER
+        }
+        splash.addView(tagline, params(-1, dp(44)))
+        val start = Button(this).apply {
+            text = "Avvia Navigazione"
+            textSize = 16f
+            isAllCaps = false
+            setTextColor(white)
+            setBackgroundColor(Color.rgb(26, 26, 26))
+            setOnClickListener { launchDashboard() }
+        }
+        val buttonParams = LinearLayout.LayoutParams(-1, dp(58)).apply {
+            setMargins(dp(12), dp(28), dp(12), dp(12))
+        }
+        splash.addView(start, buttonParams)
+        setContentView(splash)
+        brand.startAnimation(android.view.animation.AlphaAnimation(0f, 1f).apply {
+            duration = 1800
+            fillAfter = true
+        })
+        splashHandler.postDelayed({ launchDashboard() }, 2000)
+    }
+
+    private fun launchDashboard() {
+        if (dashboardStarted) return
+        dashboardStarted = true
+        splashHandler.removeCallbacksAndMessages(null)
         buildDashboard()
         requestGps()
     }
@@ -163,7 +219,12 @@ class MainActivity : Activity(), LocationListener {
             val provider = if (providers.contains(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER
                 else if (providers.contains(LocationManager.NETWORK_PROVIDER)) LocationManager.NETWORK_PROVIDER
                 else providers.first()
-            locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
+            } else {
+                @Suppress("DEPRECATION")
+                locationManager.requestLocationUpdates(provider, 500L, 0f, this)
+            }
             val last = locationManager.getLastKnownLocation(provider)
             if (last != null) onLocationChanged(last)
             gpsText.text = "RICERCA POSIZIONE GPS…"
