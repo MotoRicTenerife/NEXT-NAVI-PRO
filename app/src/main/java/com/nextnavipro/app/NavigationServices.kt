@@ -25,15 +25,17 @@ object NavigationServices {
     private const val USER_AGENT = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)"
 
     fun searchPlaces(query: String): List<PlaceResult> {
-        val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=6&lang=it")
+        val cleanQuery = query.trim().replace(Regex("\\s+"), " ")
+        val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=8")
             .openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.setRequestProperty("User-Agent", USER_AGENT)
-            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept", "application/geo+json, application/json")
+            connection.setRequestProperty("Referer", "https://github.com/MotoRicTenerife/NEXT-NAVI-PRO")
             val body = readResponse(connection)
             val features = JSONObject(body).optJSONArray("features") ?: JSONArray()
             val results = ArrayList<PlaceResult>()
@@ -121,9 +123,7 @@ object NavigationServices {
             BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
         }.orEmpty()
         if (status !in 200..299) {
-            val detail = try {
-                JSONObject(text).optString("error").ifBlank { JSONObject(text).optString("message") }
-            } catch (_: Exception) { "" }
+            val detail = text.replace(Regex("\\s+"), " ").take(220)
             throw IllegalStateException(
                 "Server cartografico HTTP " + status +
                     if (detail.isNotBlank()) ": " + detail else ". Riprova più tardi."
