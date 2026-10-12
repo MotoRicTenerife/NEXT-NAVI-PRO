@@ -155,7 +155,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             voiceGuideReady = status == TextToSpeech.SUCCESS &&
                 (voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
         }
-        negativeTheme = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NEGATIVE, true)
+        val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
+        themeMode = preferences.getString(PREF_THEME_MODE, if (preferences.getBoolean(PREF_NEGATIVE, true)) "negative" else "positive") ?: "negative"
+        negativeTheme = when (themeMode) { "positive" -> false; "negative" -> true; else -> preferences.getBoolean(PREF_NEGATIVE, true) }
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
         dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
         if (dashboardStarted) {
             buildDashboard(savedInstanceState)
@@ -242,8 +246,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         searchRow.addView(homeButton, LinearLayout.LayoutParams(dp(70), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
-        val historyButton = makeButton("RECENTI") { showSearchHistory() }
-        searchRow.addView(historyButton, LinearLayout.LayoutParams(dp(78), dp(46)).apply {
+        menuButton = makeButton("MENU") { showMainMenu() }
+        searchRow.addView(menuButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
         root.addView(searchRow, params(-1, dp(50)))
@@ -412,7 +416,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             carMode = !carMode
             modeButton.text = if (carMode) "AUTO" else "MOTO"
         }
-        themeButton = makeButton(if (negativeTheme) "NEGATIVO" else "POSITIVO") { toggleTheme() }
+        themeButton = makeButton(when (themeMode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }) { toggleTheme() }
         controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
             setMargins(dp(2), dp(3), dp(3), dp(1))
         })
@@ -533,11 +537,125 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun toggleTheme() {
-        negativeTheme = !negativeTheme
+        val modes = arrayOf("Automatico (sensore lux)", "Positivo", "Negativo")
+        val values = arrayOf("auto", "positive", "negative")
+        AlertDialog.Builder(this).setTitle("Modalità schermo")
+            .setSingleChoiceItems(modes, values.indexOf(themeMode).coerceAtLeast(0)) { dialog, which ->
+                setThemeMode(values[which])
+                dialog.dismiss()
+            }.setNegativeButton("Annulla", null).show()
+    }
+
+    private fun setThemeMode(mode: String) {
+        themeMode = mode
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_THEME_MODE, mode).apply()
+        when (mode) {
+            "positive" -> applyThemeMode(false)
+            "negative" -> applyThemeMode(true)
+            else -> {
+                val sensor = lightSensor
+                if (sensor != null) sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+                else Toast.makeText(this, "Sensore lux non disponibile: mantengo la modalità corrente.", Toast.LENGTH_LONG).show()
+            }
+        }
+        if (::themeButton.isInitialized) themeButton.text = when (mode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }
+    }
+
+    private fun applyThemeMode(isNegative: Boolean) {
+        if (negativeTheme == isNegative) return
+        negativeTheme = isNegative
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NEGATIVE, negativeTheme).apply()
-        themeButton.text = if (negativeTheme) "NEGATIVO" else "POSITIVO"
         applyTheme()
         map?.let { applyMapStyle(it) }
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (themeMode != "auto" || event.sensor.type != Sensor.TYPE_LIGHT || event.values.isEmpty()) return
+        val lux = event.values[0]
+        if (lux >= 6000f && negativeTheme) applyThemeMode(false)
+        else if (lux < 6000f && !negativeTheme) applyThemeMode(true)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun showMainMenu() {
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti")
+        AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> showFavoriteAddresses()
+                    1 -> saveFavoriteAddress()
+                    2 -> deleteFavoriteAddress()
+                    3 -> testNavigationVoice()
+                    4 -> toggleTheme()
+                    5 -> showSearchHistory()
+                }
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun saveFavoriteAddress() {
+        val selected = destination
+        if (selected == null) {
+            Toast.makeText(this, "Cerca prima un indirizzo da salvare.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val input = EditText(this).apply { setText(selected.name); hint = "Nome preferito" }
+        AlertDialog.Builder(this).setTitle("Salva indirizzo preferito").setView(input)
+            .setPositiveButton("Salva") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotBlank()) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString("favorite_" + name, selected.point.latitude.toString() + "," + selected.point.longitude)
+                        .apply()
+                    Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
+                }
+            }.setNegativeButton("Annulla", null).show()
+    }
+
+    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> =
+        getSharedPreferences(PREFS, MODE_PRIVATE).all.filterKeys { it.startsWith("favorite_") }
+            .mapNotNull { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@mapNotNull null
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                Triple(key.removePrefix("favorite_"), lat, lon)
+            }.sortedBy { it.first.lowercase(Locale.ROOT) }
+
+    private fun showFavoriteAddresses() {
+        val favorites = readFavoriteAddresses()
+        if (favorites.isEmpty()) {
+            Toast.makeText(this, "Nessun indirizzo preferito salvato.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Indirizzi preferiti")
+            .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
+                val favorite = favorites[which]
+                destination = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
+                destinationInput.setText(favorite.first)
+                routeText.text = "DESTINAZIONE: " + favorite.first + "\nPremi AVVIA PERCORSO"
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun deleteFavoriteAddress() {
+        val favorites = readFavoriteAddresses()
+        if (favorites.isEmpty()) {
+            Toast.makeText(this, "Nessun preferito da eliminare.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Elimina preferito")
+            .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorites[which].first).apply()
+                Toast.makeText(this, "Preferito eliminato.", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Annulla", null).show()
+    }
+
+    private fun testNavigationVoice() {
+        if (!voiceGuideReady) {
+            Toast.makeText(this, "Voce non pronta o lingua TTS non disponibile.", Toast.LENGTH_LONG).show()
+            return
+        }
+        voiceGuide?.speak("Avvio la navigazione. Tra trecento metri, prosegui.", TextToSpeech.QUEUE_FLUSH, null, "voice-test")
     }
 
     private fun applyTheme() {
@@ -1134,6 +1252,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         super.onResume()
         activityResumed = true
         mapView?.onResume()
+        if (themeMode == "auto") lightSensor?.let { sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         if (dashboardStarted) requestGps()
     }
 
@@ -1144,6 +1263,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsUpdatesRequested = false
         }
         mapView?.onPause()
+        sensorManager?.unregisterListener(this)
         super.onPause()
     }
 
