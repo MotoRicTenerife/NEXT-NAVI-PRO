@@ -46,14 +46,14 @@ class MainActivity : Activity(), LocationListener {
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val SOURCE_USER = "next-user-position"
-        private const val SOURCE_ROUTE = "next-active-route"
+        private const val SOURCE_ROUTE = "next-active-route"\n    private const val SOURCE_RADARS = "next-speed-cameras"
     }
 
     private lateinit var locationManager: LocationManager
     private lateinit var root: LinearLayout
     private lateinit var speedText: TextView
     private lateinit var gpsText: TextView
-    private lateinit var routeText: TextView
+    private lateinit var routeText: TextView\n    private lateinit var radarText: TextView
     private lateinit var destinationInput: EditText
     private lateinit var searchButton: Button
     private lateinit var routeButton: Button
@@ -70,7 +70,7 @@ class MainActivity : Activity(), LocationListener {
     private var negativeTheme = true
     private var currentLocation: Location? = null
     private var destination: PlaceResult? = null
-    private var routeResult: RouteResult? = null
+    private var routeResult: RouteResult? = null\n    private var radarCameras: List<RadarCamera> = emptyList()\n    private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
     private var isSearching = false
     private var isCalculatingRoute = false
@@ -324,6 +324,7 @@ class MainActivity : Activity(), LocationListener {
                     view === speedText -> if ((speedText.text.toString().toIntOrNull() ?: 0) >= 120) Color.RED else if ((speedText.text.toString().toIntOrNull() ?: 0) >= 50) yellow else textColor
                     view === gpsText -> if (negativeTheme) yellow else Color.rgb(130, 85, 0)
                     view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 90, 125)
+                    view === radarText -> Color.rgb(255, 70, 55)
                     view.text.toString().contains("NEXT NAVI PRO") -> yellow
                     else -> textColor
                 })
@@ -526,6 +527,58 @@ class MainActivity : Activity(), LocationListener {
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
         updateMapForLocation(location, lastCameraLocation == null)
         applyTheme()
+    }
+
+    private fun refreshRadarsIfNeeded(location: Location) {
+        val center = NavPoint(location.latitude, location.longitude)
+        radarCameras = RadarCache.loadNear(this, center)
+        drawRadars()
+        val now = System.currentTimeMillis()
+        if (now - lastRadarAttemptMs < 15L * 60L * 1000L) {
+            updateRadarLabel()
+            return
+        }
+        if (!RadarCache.shouldRefresh(this, center, now)) {
+            updateRadarLabel()
+            return
+        }
+        lastRadarAttemptMs = now
+        radarText.text = if (radarCameras.isEmpty()) "RADAR OSM • aggiornamento dati…" else "RADAR OSM: " + radarCameras.size + " • aggiornamento…"
+        Thread({
+            try {
+                val fresh = RadarService.fetchNear(center)
+                runOnUiThread {
+                    radarCameras = fresh
+                    RadarCache.save(this, center, fresh)
+                    drawRadars()
+                    updateRadarLabel()
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    updateRadarLabel()
+                    if (radarCameras.isEmpty()) radarText.text = "RADAR OSM • server non disponibile"
+                }
+            }
+        }, "osm-radar-refresh").start()
+    }
+
+    private fun updateRadarLabel() {
+        if (!::radarText.isInitialized) return
+        radarText.text = if (radarCameras.isEmpty()) {
+            "RADAR OSM • nessun dato disponibile"
+        } else {
+            "RADAR OSM: " + radarCameras.size + " • dati comunitari"
+        }
+        radarText.setTextColor(Color.rgb(255, 70, 55))
+    }
+
+    private fun drawRadars() {
+        if (!mapStyleReady) return
+        val source = map?.style?.getSource(SOURCE_RADARS) as? GeoJsonSource ?: return
+        val features = radarCameras.map { camera ->
+            Feature.fromGeometry(Point.fromLngLat(camera.point.longitude, camera.point.latitude))
+        }
+        source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
     }
 
     private fun updateMapForLocation(location: Location, forceCenter: Boolean) {
