@@ -1,50 +1,34 @@
-# NEXT NAVI PRO — 0.2.0-alpha02
+# NEXT NAVI PRO
 
-Progetto Android nativo per la prima base installabile dell'interfaccia NEXT NAVI PRO. Package: `com.nextnavipro.app`.
+Android navigation prototype focused on real GPS, high-contrast motorcycle/car display and open map data.
 
-## Stato reale della versione alpha02
+## Current online implementation (0.3.0-alpha03)
 
-Questa revisione introduce una struttura Android Gradle effettiva e una prima schermata di guida con velocità GPS reale. **Non è ancora un navigatore completo e non va considerata una versione stabile.**
+- Native vector map using MapLibre Android and the OpenFreeMap Liberty style.
+- Live position from Android location providers; stale or low-accuracy fixes are not treated as valid.
+- Photon geocoding for destination search.
+- Valhalla public demo routing for route preview and route geometry overlay.
+- Persistent positive/negative UI theme.
+- Automatic route line drawing and GPS-follow camera.
+- Moto/Auto display mode. Routing currently uses Valhalla's `auto` costing profile for both modes; this is not yet motorcycle-specific routing.
+- Online services require data connectivity. This version is not an offline navigator yet.
 
-### Implementato nel codice attuale
-- Progetto Android nativo Kotlin, minSdk 26, JDK 17, Android SDK 35.
-- Splash screen testuale con fade-in di circa 2 secondi e pulsante «Avvia Navigazione».
-- Dashboard ad alto contrasto NEXT NAVI PRO, con tachimetro digitale.
-- Lettura della velocità dal provider di localizzazione Android; esclusione dei fix più vecchi di 10 secondi o con accuratezza peggiore di 50 metri.
-- Soglie cromatiche iniziali: bianco sotto 50 km/h, giallo da 50 a meno di 120 km/h, rosso da 120 km/h.
-- Pulsanti iniziali per modalità Moto/Auto e tema Giorno/Notte.
-- Gestione del permesso di localizzazione e layout che si adatta all'orientamento.
-- Workflow GitHub Actions per compilazione, test Android e pubblicazione dell'APK Debug come artifact.
+## Public service and attribution notes
 
-### Non ancora implementato / da verificare
-- Logo grafico definitivo con strada/montagna/pin, illuminazione giallo-bianca e asset dedicati.
-- Mappa navigabile, ricerca destinazioni, routing, ricalcolo, istruzioni turn-by-turn e voce.
-- Limiti di velocità provenienti da dati stradali reali.
-- Mappe e routing offline, meteo, curve, registro viaggi e GPX.
-- Persistenza delle impostazioni e soglie configurabili.
-- Test su dispositivo fisico e verifica di fluidità, consumo e affidabilità GPS.
+- OpenFreeMap: https://openfreemap.org/ — vector map style URL `https://tiles.openfreemap.org/styles/liberty`.
+- MapLibre Native: https://maplibre.org/ — BSD-2-Clause licensed map renderer.
+- Photon: https://photon.komoot.io/ — OpenStreetMap-based geocoding; public service use is subject to fair-use policies.
+- Valhalla demo: https://valhalla.openstreetmap.de/ — public demo service, best-effort and rate-limited; the app sends an identifying `X-Client-Id` header. Do not treat this public demo as guaranteed production infrastructure.
+- OpenStreetMap-derived data requires appropriate attribution and may carry ODbL obligations. Keep attribution visible and review each dataset's licence before redistribution.
 
-Queste funzioni non devono essere considerate disponibili finché non saranno aggiunte e verificate. Il tachimetro GPS è un supporto informativo e non sostituisce il tachimetro del veicolo né la segnaletica stradale.
+## Next implementation stages
 
-## Compilazione locale
+1. Verify vector map, GPS following and routing on the real device.
+2. Add route progress, rerouting and explicit route error handling.
+3. Add a versioned speed-camera dataset with source, timestamp, deduplication and local storage.
+4. Add verified speed-limit/road geometry data.
+5. Implement regional offline maps and offline routing only after online navigation is stable.
 
-Richiede JDK 17 e Android SDK Platform 35 / Build Tools 35.0.0.
+## Build
 
-```bash
-gradle --no-daemon assembleDebug
-gradle --no-daemon testDebugUnitTest
-```
-
-## Ottenere l'APK tramite GitHub Actions
-
-1. Apri la scheda **Actions** del repository.
-2. Seleziona **Android CI** e apri l'esecuzione associata all'ultimo commit.
-3. Attendi il completamento del job; se fallisce, apri il log del passaggio rosso prima di installare qualsiasi APK.
-4. Se il job termina correttamente, scarica l'artifact `next-navi-pro-debug-apk`.
-5. Trasferisci l'APK sul dispositivo Android e autorizza l'installazione dalla sorgente scelta, se richiesto.
-
-L'APK Debug è destinato esclusivamente alle prove. La build non è firmata per la distribuzione pubblica.
-
-## Prove consigliate
-
-Prima prova da fermo: installazione, avvio, permessi, tema e orientamento. Successivamente confrontare la velocità GPS con il veicolo in condizioni sicure, con il telefono fissato e senza interagire con esso durante la guida.
+GitHub Actions runs `gradle assembleDebug` and `gradle testDebugUnitTest`, then uploads the debug APK artifact.
