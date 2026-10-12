@@ -193,7 +193,7 @@ class MainActivity : Activity(), LocationListener {
         destinationInput = EditText(this).apply {
             hint = "Cerca destinazione"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setPadding(dp(10), 0, dp(8), 0)
             setTextColor(if (negativeTheme) white else positiveText)
