@@ -273,7 +273,7 @@ class MainActivity : Activity(), LocationListener {
             map = readyMap
             readyMap.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
                 mapStyleReady = true
-                style.addSource(GeoJsonSource(SOURCE_USER, Feature.fromGeometry(Point.fromLngLat(-16.6291, 28.2916))))
+                style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
                 style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
                     PropertyFactory.circleColor("#00E5FF"),
                     PropertyFactory.circleRadius(7f),
@@ -517,7 +517,7 @@ class MainActivity : Activity(), LocationListener {
         }
         currentLocation = Location(location)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
-        speedText.text = speed.toInt().toString()
+        speedText.text = if (location.hasSpeed()) speed.toInt().toString() else "—"
         speedText.setTextColor(when {
             speed >= 120f -> Color.RED
             speed >= 50f -> yellow
