@@ -26,6 +26,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.speech.tts.TextToSpeech
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -60,6 +61,7 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var speedText: TextView
     private lateinit var gpsText: TextView
     private lateinit var routeText: TextView
+    private lateinit var maneuverIcon: TextView
     private lateinit var radarText: TextView
     private lateinit var destinationInput: EditText
     private lateinit var searchButton: Button
@@ -85,6 +87,10 @@ class MainActivity : Activity(), LocationListener {
     private var currentLocation: Location? = null
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
+    private var voiceGuide: TextToSpeech? = null
+    private var voiceGuideReady = false
+    private var announcedManeuverIndex = -1
+    private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
@@ -107,6 +113,10 @@ class MainActivity : Activity(), LocationListener {
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        voiceGuide = TextToSpeech(this) { status ->
+            voiceGuideReady = status == TextToSpeech.SUCCESS &&
+                (voiceGuide?.setLanguage(Locale.ITALIAN) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
+        }
         negativeTheme = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NEGATIVE, true)
         dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
         if (dashboardStarted) {
@@ -171,7 +181,7 @@ class MainActivity : Activity(), LocationListener {
         }
         destinationInput = EditText(this).apply {
             hint = "Cerca indirizzo o località"
-            textSize = 14f
+            textSize = 12f
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             setPadding(dp(10), 0, dp(8), 0)
@@ -239,9 +249,9 @@ class MainActivity : Activity(), LocationListener {
         infoColumn.addView(gpsText, params(-1, dp(38)))
         routeText = TextView(this).apply {
             text = "Nessun percorso attivo"
-            textSize = 12f
+            textSize = 11f
             gravity = Gravity.CENTER
-            setPadding(dp(3), dp(5), dp(3), dp(5))
+            setPadding(dp(3), dp(2), dp(3), dp(3))
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         infoColumn.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -251,6 +261,14 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER
         }
         infoColumn.addView(radarText, params(-1, dp(36)))
+
+        maneuverIcon = TextView(this).apply {
+            text = "↑"
+            textSize = 34f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
+        }
 
         val speedColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -317,6 +335,7 @@ class MainActivity : Activity(), LocationListener {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            navHalf.addView(maneuverIcon, params(-1, dp(42)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
@@ -654,7 +673,10 @@ class MainActivity : Activity(), LocationListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    announcedManeuverIndex = -1
+                    announcedStage = 0
                     drawRoute(result, true)
+                    updateTurnGuidance(currentLocation)
                     val durationMinutes = (result.durationSeconds / 60.0).toInt()
                     routeText.text = String.format(
                         Locale.ITALY, "%.1f km  •  circa %d min\n%s",
@@ -695,6 +717,9 @@ class MainActivity : Activity(), LocationListener {
 
     private fun clearRoute() {
         routeResult = null
+        announcedManeuverIndex = -1
+        announcedStage = 0
+        if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
         destination = null
         if (::routeText.isInitialized) routeText.text = "MAPPA ONLINE  •  Nessun percorso attivo"
         if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
@@ -863,7 +888,93 @@ class MainActivity : Activity(), LocationListener {
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
         gpsText.setTextColor(if (negativeTheme) yellow else Color.rgb(130, 85, 0))
         updateMapForLocation(location, lastCameraLocation == null)
+        updateTurnGuidance(location)
         refreshRadarsIfNeeded(location)
+    }
+
+    private fun updateTurnGuidance(location: Location?) {
+        val route = routeResult ?: return
+        val here = location ?: return
+        if (route.points.size < 2 || route.maneuvers.isEmpty()) return
+        var nearestIndex = 0
+        var nearestMeters = Float.MAX_VALUE
+        for (i in route.points.indices) {
+            val point = route.points[i]
+            val distance = FloatArray(1)
+            Location.distanceBetween(here.latitude, here.longitude, point.latitude, point.longitude, distance)
+            if (distance[0] < nearestMeters) {
+                nearestMeters = distance[0]
+                nearestIndex = i
+            }
+        }
+        val nextPair = route.maneuvers.withIndex().firstOrNull { (_, maneuver) ->
+            maneuver.pointIndex > nearestIndex + 2
+        } ?: route.maneuvers.withIndex().lastOrNull()
+        if (nextPair == null) return
+        val maneuverIndex = nextPair.index
+        val maneuver = nextPair.value
+        var distanceToTurn = 0.0
+        val to = maneuver.pointIndex.coerceAtLeast(nearestIndex).coerceAtMost(route.points.lastIndex)
+        for (i in nearestIndex.coerceAtMost(to) until to) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val segment = FloatArray(1)
+            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
+            distanceToTurn += segment[0]
+        }
+        val instruction = maneuver.instruction
+        val lower = instruction.lowercase(Locale.ITALIAN)
+        val roundabout = lower.contains("rotonda") || lower.contains("rotatoria") ||
+            lower.contains("uscita") || maneuver.type == 26 || maneuver.type == 27
+        val icon = when {
+            roundabout -> "↻"
+            lower.contains("sinistra") -> "↰"
+            lower.contains("destra") -> "↱"
+            lower.contains("inversione") || lower.contains("u-turn") -> "↶"
+            else -> "↑"
+        }
+        if (::maneuverIcon.isInitialized) {
+            maneuverIcon.text = icon
+            maneuverIcon.setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
+        }
+        val shortInstruction = if (roundabout && !lower.contains("rotonda") && !lower.contains("rotatoria")) {
+            "Rotonda: " + instruction
+        } else instruction
+        if (::routeText.isInitialized) {
+            val distanceLabel = when {
+                distanceToTurn < 10.0 -> "ORA"
+                distanceToTurn < 100.0 -> distanceToTurn.toInt().toString() + " m"
+                else -> ((distanceToTurn / 10.0).toInt() * 10).toString() + " m"
+            }
+            routeText.text = shortInstruction + "\n" + distanceLabel
+        }
+        val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
+        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
+        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
+        val stage = when {
+            distanceToTurn <= 10.0 -> 4
+            distanceToTurn <= 50.0 -> 3
+            distanceToTurn <= mediumThreshold -> 2
+            distanceToTurn <= earlyThreshold -> 1
+            else -> 0
+        }
+        if (maneuverIndex != announcedManeuverIndex) {
+            announcedManeuverIndex = maneuverIndex
+            announcedStage = 0
+        }
+        if (stage > announcedStage) {
+            announcedStage = stage
+            val spoken = when (stage) {
+                1 -> "Tra poco, " + instruction
+                2 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
+                3 -> "Tra cinquanta metri, " + instruction
+                4 -> instruction
+                else -> ""
+            }
+            if (spoken.isNotBlank() && voiceGuideReady) {
+                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_ADD, null, "turn-" + maneuverIndex + "-stage-" + stage)
+            }
+        }
     }
 
     private fun refreshRadarsIfNeeded(location: Location) {
@@ -1007,6 +1118,9 @@ class MainActivity : Activity(), LocationListener {
         splashHandler.removeCallbacksAndMessages(null)
         mapView?.onDestroy()
         mapView = null
+        voiceGuide?.stop()
+        voiceGuide?.shutdown()
+        voiceGuide = null
         super.onDestroy()
     }
 
