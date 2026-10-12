@@ -362,6 +362,7 @@ class MainActivity : Activity(), LocationListener {
 
         setContentView(root)
         applyTheme()
+        updateSpeedDisplay(currentLocation?.let { if (it.hasSpeed()) (it.speed * 3.6f).toInt() else null })
         setupMap(newMapView, savedState)
         if (activityStarted) newMapView.onStart()
         if (activityResumed) newMapView.onResume()
