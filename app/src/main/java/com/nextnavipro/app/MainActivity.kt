@@ -461,6 +461,13 @@ class MainActivity : Activity(), LocationListener {
             }
             mapStyleReady = true
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
+            // A solid location dot remains visible even if the map style lacks the arrow glyph.
+            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
+                PropertyFactory.circleColor("#FFD400"),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor("#000000"),
+                PropertyFactory.circleStrokeWidth(2.5f)
+            ))
             // A high-contrast arrow stays upright on screen while the map rotates with travel heading.
             style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
                 PropertyFactory.textField("▲"),
