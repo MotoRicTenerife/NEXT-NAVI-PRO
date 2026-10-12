@@ -46,14 +46,16 @@ class MainActivity : Activity(), LocationListener {
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val SOURCE_USER = "next-user-position"
-        private const val SOURCE_ROUTE = "next-active-route"\n    private const val SOURCE_RADARS = "next-speed-cameras"
+        private const val SOURCE_ROUTE = "next-active-route"
+        private const val SOURCE_RADARS = "next-speed-cameras"
     }
 
     private lateinit var locationManager: LocationManager
     private lateinit var root: LinearLayout
     private lateinit var speedText: TextView
     private lateinit var gpsText: TextView
-    private lateinit var routeText: TextView\n    private lateinit var radarText: TextView
+    private lateinit var routeText: TextView
+    private lateinit var radarText: TextView
     private lateinit var destinationInput: EditText
     private lateinit var searchButton: Button
     private lateinit var routeButton: Button
@@ -70,7 +72,9 @@ class MainActivity : Activity(), LocationListener {
     private var negativeTheme = true
     private var currentLocation: Location? = null
     private var destination: PlaceResult? = null
-    private var routeResult: RouteResult? = null\n    private var radarCameras: List<RadarCamera> = emptyList()\n    private var lastRadarAttemptMs = 0L
+    private var routeResult: RouteResult? = null
+    private var radarCameras: List<RadarCamera> = emptyList()
+    private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
     private var isSearching = false
     private var isCalculatingRoute = false
@@ -234,6 +238,12 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER
         }
         panel.addView(gpsText, params(-1, dp(30)))
+        radarText = TextView(this).apply {
+            text = "RADAR OSM • dati comunitari"
+            textSize = 10f
+            gravity = Gravity.CENTER
+        }
+        panel.addView(radarText, params(-1, dp(22)))
         routeText = TextView(this).apply {
             text = "MAPPA ONLINE  •  Nessun percorso attivo"
             textSize = 13f
@@ -285,11 +295,19 @@ class MainActivity : Activity(), LocationListener {
                     PropertyFactory.lineColor("#00BFFF"),
                     PropertyFactory.lineWidth(6f)
                 ))
+                style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
+                style.addLayer(CircleLayer("next-radar-circles", SOURCE_RADARS).withProperties(
+                    PropertyFactory.circleColor("#FF3B30"),
+                    PropertyFactory.circleRadius(6f),
+                    PropertyFactory.circleStrokeColor("#FFFFFF"),
+                    PropertyFactory.circleStrokeWidth(1.5f)
+                ))
                 readyMap.cameraPosition = CameraPosition.Builder()
                     .target(LatLng(28.2916, -16.6291))
                     .zoom(10.5)
                     .build()
                 currentLocation?.let { updateMapForLocation(it, true) }
+                drawRadars()
                 routeResult?.let { drawRoute(it, false) }
             }
         }
@@ -378,6 +396,9 @@ class MainActivity : Activity(), LocationListener {
                         .setTitle("Scegli destinazione")
                         .setItems(labels) { _, which ->
                             destination = results[which]
+                            routeResult = null
+                            val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
+                            routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
                             destinationInput.setText(results[which].name)
                             routeText.text = "DESTINAZIONE: " + results[which].name + "\nPremi AVVIA PERCORSO"
                             routeButton.text = "AVVIA PERCORSO"
@@ -525,8 +546,9 @@ class MainActivity : Activity(), LocationListener {
             else -> if (negativeTheme) white else positiveText
         })
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
+        gpsText.setTextColor(if (negativeTheme) yellow else Color.rgb(130, 85, 0))
         updateMapForLocation(location, lastCameraLocation == null)
-        applyTheme()
+        refreshRadarsIfNeeded(location)
     }
 
     private fun refreshRadarsIfNeeded(location: Location) {
