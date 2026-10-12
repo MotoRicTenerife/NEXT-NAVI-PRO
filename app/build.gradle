@@ -26,5 +26,6 @@ android {
     kotlinOptions { jvmTarget = '17' }
 }
 dependencies {
-    implementation 'org.maplibre.gl:android-sdk:11.11.0'\n    testImplementation 'junit:junit:4.13.2'
+    implementation 'org.maplibre.gl:android-sdk:11.11.0'
+    testImplementation 'junit:junit:4.13.2'
 }
