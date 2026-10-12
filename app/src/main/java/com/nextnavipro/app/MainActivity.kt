@@ -297,6 +297,8 @@ class MainActivity : Activity(), LocationListener {
         }
         mapColumn.addView(recenterButton, params(-1, dp(42)))
 
+        // Move navigation and speed-limit views into their orientation-specific thirds.
+        listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText).forEach { infoColumn.removeView(it) }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
