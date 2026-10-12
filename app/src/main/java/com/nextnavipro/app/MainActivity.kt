@@ -68,6 +68,8 @@ class MainActivity : Activity(), LocationListener {
     private var mapOriginalIndex: Int = -1
     private var mapOriginalParams: android.view.ViewGroup.LayoutParams? = null
     private var fullScreenRoot: LinearLayout? = null
+    private var fullScreenMap = false
+    private var selectionMode = false
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
     private var dashboardStarted = false
@@ -134,7 +136,7 @@ class MainActivity : Activity(), LocationListener {
             setMargins(dp(12), dp(28), dp(12), dp(12))
         })
         setContentView(splash)
-        brand.startAnimation(android.view.animation.AlphaAnimation(0f, 1f).apply {
+        logo.startAnimation(android.view.animation.AlphaAnimation(0f, 1f).apply {
             duration = 1200
             fillAfter = true
         })
@@ -694,10 +696,12 @@ class MainActivity : Activity(), LocationListener {
         fullScreenRoot = page
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        bar.addView(makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") {
+        val flagButton = makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") { }
+        flagButton.setOnClickListener {
             selectionMode = !selectionMode
-            text = if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI"
-        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+            flagButton.text = if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI"
+        }
+        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 1f))
         page.addView(bar, params(-1, dp(48)))
         page.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
