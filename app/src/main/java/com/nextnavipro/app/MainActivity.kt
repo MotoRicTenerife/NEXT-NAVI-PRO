@@ -64,6 +64,10 @@ class MainActivity : Activity(), LocationListener {
     private lateinit var themeButton: Button
     private lateinit var limitValue: TextView
     private var mapView: MapView? = null
+    private var mapOriginalParent: android.view.ViewGroup? = null
+    private var mapOriginalIndex: Int = -1
+    private var mapOriginalParams: android.view.ViewGroup.LayoutParams? = null
+    private var fullScreenRoot: LinearLayout? = null
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
     private var dashboardStarted = false
@@ -355,6 +359,17 @@ class MainActivity : Activity(), LocationListener {
             readyMap.uiSettings.isRotateGesturesEnabled = true
             readyMap.uiSettings.isScrollGesturesEnabled = true
             readyMap.uiSettings.isZoomGesturesEnabled = true
+            readyMap.uiSettings.isRotateGesturesEnabled = true
+            readyMap.addOnMapClickListener { point ->
+                if (fullScreenMap && selectionMode) {
+                    val picked = NavPoint(point.latitude, point.longitude)
+                    showPickedPointDialog(picked)
+                    true
+                } else {
+                    enterMapFullScreen()
+                    true
+                }
+            }
             readyMap.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                     followGps = false
@@ -662,6 +677,63 @@ class MainActivity : Activity(), LocationListener {
         val previous = prefs.getString("search_history", "").orEmpty().split("\n").filter { it.isNotBlank() }
         val latest = (listOf(query.trim()) + previous.filterNot { it.equals(query.trim(), true) }).take(10)
         prefs.edit().putString("search_history", latest.joinToString("\n")).apply()
+    }
+
+    private fun enterMapFullScreen() {
+        if (fullScreenMap) return
+        val view = mapView ?: return
+        val parent = view.parent as? android.view.ViewGroup ?: return
+        mapOriginalParent = parent
+        mapOriginalIndex = parent.indexOfChild(view)
+        mapOriginalParams = view.layoutParams
+        parent.removeView(view)
+        fullScreenMap = true
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(black) }
+        fullScreenRoot = page
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        bar.addView(makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") {
+            selectionMode = !selectionMode
+            text = if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI"
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        page.addView(bar, params(-1, dp(48)))
+        page.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(page)
+    }
+
+    private fun exitMapFullScreen() {
+        val view = mapView ?: return
+        (view.parent as? android.view.ViewGroup)?.removeView(view)
+        val parent = mapOriginalParent
+        if (parent != null) {
+            parent.addView(view, mapOriginalIndex.coerceIn(0, parent.childCount), mapOriginalParams)
+        }
+        fullScreenMap = false
+        fullScreenRoot = null
+        setContentView(root)
+    }
+
+    private fun showPickedPointDialog(point: NavPoint) {
+        AlertDialog.Builder(this).setTitle("Punto sulla mappa")
+            .setItems(arrayOf("Usa come destinazione", "Salva come luogo di interesse")) { _, which ->
+                if (which == 0) {
+                    destination = PlaceResult("Punto sulla mappa", point, "Punto selezionato sulla mappa")
+                    destinationInput.setText("Punto sulla mappa")
+                    exitMapFullScreen()
+                    calculateSelectedRoute()
+                } else {
+                    val input = EditText(this).apply { hint = "Nome del luogo" }
+                    AlertDialog.Builder(this).setTitle("Salva luogo di interesse").setView(input)
+                        .setPositiveButton("Salva") { _, _ ->
+                            val name = input.text.toString().trim()
+                            if (name.isNotBlank()) {
+                                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
+                                Toast.makeText(this, "Luogo salvato: " + name, Toast.LENGTH_SHORT).show()
+                            }
+                        }.setNegativeButton("Annulla", null).show()
+                }
+            }.setNegativeButton("Annulla", null).show()
     }
 
     private fun requestGps() {
