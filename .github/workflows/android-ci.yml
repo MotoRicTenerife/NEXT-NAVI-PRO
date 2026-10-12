@@ -9,6 +9,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -21,10 +24,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.7'
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4.0.1
-      - name: Install Android platform
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install Android platform and build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - name: Run unit tests
