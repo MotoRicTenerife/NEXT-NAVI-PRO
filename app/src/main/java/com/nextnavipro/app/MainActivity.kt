@@ -112,24 +112,12 @@ class MainActivity : Activity(), LocationListener {
             setPadding(dp(24), dp(24), dp(24), dp(24))
             setBackgroundColor(black)
         }
-        val brand = TextView(this).apply {
-            text = "NEXT NAVI PRO"
-            textSize = 34f
-            letterSpacing = 0.08f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(yellow)
-            gravity = Gravity.CENTER
-            alpha = 0f
+        val logo = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.next_navi_logo)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            contentDescription = "NEXT NAVI PRO"
         }
-        splash.addView(brand, params(-1, dp(76)))
-        val tagline = TextView(this).apply {
-            text = "LA STRADA, SOTTO CONTROLLO"
-            textSize = 12f
-            letterSpacing = 0.12f
-            setTextColor(cyan)
-            gravity = Gravity.CENTER
-        }
-        splash.addView(tagline, params(-1, dp(44)))
+        splash.addView(logo, LinearLayout.LayoutParams(-1, 0, 1f))
         val start = Button(this).apply {
             text = "Avvia Navigazione"
             textSize = 16f
