@@ -1,0 +1,175 @@
+package com.nextnavipro.app
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import kotlin.math.roundToInt
+
+data class NavPoint(val latitude: Double, val longitude: Double)
+data class PlaceResult(val name: String, val point: NavPoint, val description: String)
+data class RouteResult(
+    val points: List<NavPoint>,
+    val distanceKm: Double,
+    val durationSeconds: Int,
+    val firstInstruction: String
+)
+
+object NavigationServices {
+    private const val CONNECT_TIMEOUT_MS = 10000
+    private const val READ_TIMEOUT_MS = 15000
+    private const val USER_AGENT = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)"
+
+    fun searchPlaces(query: String): List<PlaceResult> {
+        val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=6&lang=it")
+            .openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            val body = readResponse(connection)
+            val features = JSONObject(body).optJSONArray("features") ?: JSONArray()
+            val results = ArrayList<PlaceResult>()
+            for (i in 0 until features.length()) {
+                val feature = features.optJSONObject(i) ?: continue
+                val geometry = feature.optJSONObject("geometry") ?: continue
+                val coordinates = geometry.optJSONArray("coordinates") ?: continue
+                if (coordinates.length() < 2) continue
+                val lon = coordinates.optDouble(0, Double.NaN)
+                val lat = coordinates.optDouble(1, Double.NaN)
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
+                val properties = feature.optJSONObject("properties") ?: JSONObject()
+                val name = properties.optString("name").takeIf { it.isNotBlank() }
+                    ?: properties.optString("street").takeIf { it.isNotBlank() }
+                    ?: "Luogo senza nome"
+                val detailParts = listOf(
+                    properties.optString("street").takeIf { it.isNotBlank() && it != name },
+                    properties.optString("housenumber").takeIf { it.isNotBlank() },
+                    properties.optString("city").takeIf { it.isNotBlank() },
+                    properties.optString("state").takeIf { it.isNotBlank() },
+                    properties.optString("country").takeIf { it.isNotBlank() }
+                ).filterNotNull()
+                results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", ")))
+            }
+            return results
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    fun calculateRoute(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): RouteResult {
+        // Valhalla's public demo supports the auto profile; motorcycle is currently routed
+        // through the compatible road-car profile until a dedicated hosted profile is available.
+        val request = JSONObject()
+            .put("locations", JSONArray()
+                .put(JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
+                .put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
+            .put("costing", "auto")
+            .put("units", "kilometers")
+            .put("language", "it-IT")
+            .put("shape_format", "polyline6")
+            .put("directions_options", JSONObject().put("units", "kilometers"))
+        val connection = URL("https://valhalla1.openstreetmap.de/route").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("X-Client-Id", "NEXT-NAVI-PRO (github.com/MotoRicTenerife/NEXT-NAVI-PRO)")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
+            val body = readResponse(connection)
+            val root = JSONObject(body)
+            val trip = root.optJSONObject("trip") ?: throw IllegalStateException(
+                root.optJSONObject("error")?.optString("message") ?: "Il server non ha restituito un percorso."
+            )
+            val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("Percorso senza tappe.")
+            if (legs.length() == 0) throw IllegalStateException("Percorso vuoto.")
+            val leg = legs.getJSONObject(0)
+            val encodedShape = leg.optString("shape")
+            val decoded = decodePolyline6(encodedShape)
+            if (decoded.size < 2) throw IllegalStateException("Geometria del percorso non valida.")
+            val summary = trip.optJSONObject("summary") ?: JSONObject()
+            val legSummary = leg.optJSONObject("summary") ?: summary
+            val distance = legSummary.optDouble("length", summary.optDouble("length", 0.0))
+            val seconds = legSummary.optDouble("time", summary.optDouble("time", 0.0)).roundToInt()
+            val maneuvers = leg.optJSONArray("maneuvers")
+            val instruction = if (maneuvers != null && maneuvers.length() > 0) {
+                maneuvers.optJSONObject(0)?.optString("instruction").orEmpty()
+            } else {
+                "Segui il percorso evidenziato."
+            }
+            return RouteResult(decoded, distance, seconds, instruction.ifBlank { "Segui il percorso evidenziato." })
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun readResponse(connection: HttpURLConnection): String {
+        val status = connection.responseCode
+        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+        val text = stream?.use { input ->
+            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
+        }.orEmpty()
+        if (status !in 200..299) {
+            val detail = try {
+                JSONObject(text).optString("error").ifBlank { JSONObject(text).optString("message") }
+            } catch (_: Exception) { "" }
+            throw IllegalStateException(
+                "Server cartografico HTTP " + status +
+                    if (detail.isNotBlank()) ": " + detail else ". Riprova più tardi."
+            )
+        }
+        return text
+    }
+
+    internal fun decodePolyline6(encoded: String): List<NavPoint> {
+        if (encoded.isBlank()) return emptyList()
+        val result = ArrayList<NavPoint>()
+        var index = 0
+        var latitude = 0L
+        var longitude = 0L
+        while (index < encoded.length) {
+            var shift = 0
+            var value = 0L
+            var chunk: Int
+            do {
+                if (index >= encoded.length) return emptyList()
+                chunk = encoded[index++].code - 63
+                if (chunk < 0 || chunk > 63) return emptyList()
+                value = value or ((chunk and 0x1f).toLong() shl shift)
+                shift += 5
+                if (shift > 60) return emptyList()
+            } while (chunk >= 0x20)
+            val deltaLat = if ((value and 1L) != 0L) (value shr 1).inv() else value shr 1
+            latitude += deltaLat
+
+            shift = 0
+            value = 0L
+            do {
+                if (index >= encoded.length) return emptyList()
+                chunk = encoded[index++].code - 63
+                if (chunk < 0 || chunk > 63) return emptyList()
+                value = value or ((chunk and 0x1f).toLong() shl shift)
+                shift += 5
+                if (shift > 60) return emptyList()
+            } while (chunk >= 0x20)
+            val deltaLon = if ((value and 1L) != 0L) (value shr 1).inv() else value shr 1
+            longitude += deltaLon
+            val lat = latitude / 1_000_000.0
+            val lon = longitude / 1_000_000.0
+            if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return emptyList()
+            result.add(NavPoint(lat, lon))
+        }
+        return result
+    }
+}
