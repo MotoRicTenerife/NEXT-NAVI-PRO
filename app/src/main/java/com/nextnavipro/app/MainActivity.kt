@@ -2,6 +2,7 @@ package com.nextnavipro.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
@@ -10,39 +11,91 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
-import android.os.Handler
 import android.os.Build
+import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
+import java.util.Locale
+import kotlin.concurrent.thread
 
 class MainActivity : Activity(), LocationListener {
+    companion object {
+        private const val PREFS = "next_navi_settings"
+        private const val PREF_NEGATIVE = "negative_theme"
+        private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+        private const val PERMISSION_LOCATION = 100
+        private const val SOURCE_USER = "next-user-position"
+        private const val SOURCE_ROUTE = "next-active-route"
+    }
+
     private lateinit var locationManager: LocationManager
     private lateinit var root: LinearLayout
     private lateinit var speedText: TextView
     private lateinit var gpsText: TextView
+    private lateinit var routeText: TextView
+    private lateinit var destinationInput: EditText
+    private lateinit var searchButton: Button
+    private lateinit var routeButton: Button
     private lateinit var modeButton: Button
     private lateinit var themeButton: Button
-    private var carMode = false
-    private var nightMode = true
-    private val splashHandler = Handler(Looper.getMainLooper())
+    private var mapView: MapView? = null
+    private var map: MapLibreMap? = null
+    private var mapStyleReady = false
     private var dashboardStarted = false
+    private var activityStarted = false
+    private var activityResumed = false
+    private var gpsUpdatesRequested = false
+    private var carMode = false
+    private var negativeTheme = true
+    private var currentLocation: Location? = null
+    private var destination: PlaceResult? = null
+    private var routeResult: RouteResult? = null
+    private var lastCameraLocation: Location? = null
+    private var isSearching = false
+    private var isCalculatingRoute = false
+    private val splashHandler = Handler(Looper.getMainLooper())
     private val yellow = Color.rgb(255, 212, 0)
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
     private val black = Color.BLACK
+    private val positiveBackground = Color.rgb(235, 240, 242)
+    private val positiveText = Color.rgb(18, 28, 35)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
-        showSplash()
+        negativeTheme = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NEGATIVE, true)
+        dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
+        if (dashboardStarted) {
+            buildDashboard(savedInstanceState)
+            requestGps()
+        } else {
+            showSplash()
+        }
     }
 
     private fun showSplash() {
@@ -78,156 +131,375 @@ class MainActivity : Activity(), LocationListener {
             setBackgroundColor(Color.rgb(26, 26, 26))
             setOnClickListener { launchDashboard() }
         }
-        val buttonParams = LinearLayout.LayoutParams(-1, dp(58)).apply {
+        splash.addView(start, LinearLayout.LayoutParams(-1, dp(58)).apply {
             setMargins(dp(12), dp(28), dp(12), dp(12))
-        }
-        splash.addView(start, buttonParams)
+        })
         setContentView(splash)
         brand.startAnimation(android.view.animation.AlphaAnimation(0f, 1f).apply {
-            duration = 1800
+            duration = 1200
             fillAfter = true
         })
-        splashHandler.postDelayed({ launchDashboard() }, 2000)
+        splashHandler.postDelayed({ launchDashboard() }, 1800)
     }
 
     private fun launchDashboard() {
         if (dashboardStarted) return
         dashboardStarted = true
         splashHandler.removeCallbacksAndMessages(null)
-        buildDashboard()
+        buildDashboard(null)
         requestGps()
     }
 
-    private fun buildDashboard() {
+    private fun buildDashboard(savedState: Bundle?) {
+        MapLibre.getInstance(this)
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(22), dp(12), dp(22), dp(12))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
         }
-        paintBackground()
-        val header = TextView(this).apply {
-            text = "NEXT NAVI PRO"
-            textSize = 22f
-            letterSpacing = 0.16f
-            setTextColor(yellow)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-        }
-        root.addView(header, params(-1, dp(46)))
-        val dashboard = LinearLayout(this).apply {
+        val mapColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        val speedLabel = TextView(this).apply {
-            text = "VELOCITÀ GPS"
-            textSize = 13f
-            letterSpacing = 0.18f
-            setTextColor(cyan)
+        val header = TextView(this).apply {
+            text = "NEXT NAVI PRO"
+            textSize = 20f
+            letterSpacing = 0.12f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
         }
-        dashboard.addView(speedLabel, params(-1, dp(28)))
+        mapColumn.addView(header, params(-1, dp(36)))
+        val newMapView = MapView(this)
+        newMapView.onCreate(savedState)
+        mapView = newMapView
+        mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (landscape) {
+            root.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 0.59f).apply {
+                setMargins(dp(2), 0, dp(5), 0)
+            })
+        } else {
+            root.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.48f))
+        }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        destinationInput = EditText(this).apply {
+            hint = "Cerca destinazione"
+            textSize = 14f
+            singleLine = true
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setPadding(dp(10), 0, dp(8), 0)
+            setTextColor(if (negativeTheme) white else positiveText)
+            setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
+            setBackgroundColor(if (negativeTheme) Color.rgb(32, 36, 40) else Color.rgb(220, 227, 230))
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                    searchDestination()
+                    true
+                } else false
+            }
+        }
+        searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dp(48), 1f))
+        searchButton = makeButton("CERCA") { searchDestination() }
+        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(82), dp(48)).apply {
+            setMargins(dp(4), 0, 0, 0)
+        })
+        panel.addView(searchRow, params(-1, dp(52)))
+
         speedText = TextView(this).apply {
             text = "—"
-            textSize = if (landscape) 88f else 104f
-            setTextColor(white)
+            textSize = if (landscape) 70f else 82f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        dashboard.addView(speedText, params(-1, if (landscape) dp(116) else dp(142)))
+        panel.addView(speedText, params(-1, if (landscape) dp(92) else dp(100)))
         val unit = TextView(this).apply {
-            text = "km/h"
-            textSize = 18f
-            setTextColor(white)
-            gravity = Gravity.CENTER
-        }
-        dashboard.addView(unit, params(-1, dp(30)))
-        gpsText = TextView(this).apply {
-            text = "IN ATTESA DEL GPS"
+            text = "VELOCITÀ GPS  •  km/h"
             textSize = 12f
-            setTextColor(yellow)
+            letterSpacing = 0.08f
             gravity = Gravity.CENTER
         }
-        dashboard.addView(gpsText, params(-1, dp(34)))
-        val roadCard = TextView(this).apply {
-            text = "LIMITE STRADALE   —\n\nNavigazione non ancora attiva"
-            textSize = 15f
-            setTextColor(white)
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            setBackgroundColor(Color.rgb(26, 26, 26))
-        }
-        dashboard.addView(roadCard, params(-1, dp(92)))
-        root.addView(dashboard, LinearLayout.LayoutParams(-1, 0, 1f))
-        val controls = LinearLayout(this).apply {
-            orientation = if (landscape) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        panel.addView(unit, params(-1, dp(24)))
+        gpsText = TextView(this).apply {
+            text = "IN ATTESA DEL GPS REALE"
+            textSize = 12f
             gravity = Gravity.CENTER
         }
-        modeButton = makeButton(if (carMode) "MODALITÀ AUTO" else "MODALITÀ MOTO") {
-            carMode = !carMode
-            modeButton.text = if (carMode) "MODALITÀ AUTO" else "MODALITÀ MOTO"
-            speedText.textSize = if (carMode) 82f else 104f
+        panel.addView(gpsText, params(-1, dp(30)))
+        routeText = TextView(this).apply {
+            text = "MAPPA ONLINE  •  Nessun percorso attivo"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(5), dp(8), dp(5))
         }
-        themeButton = makeButton(if (nightMode) "TEMA NOTTE" else "TEMA GIORNO") {
-            nightMode = !nightMode
-            themeButton.text = if (nightMode) "TEMA NOTTE" else "TEMA GIORNO"
-            paintBackground()
-            gpsText.setTextColor(if (nightMode) yellow else Color.rgb(150, 100, 0))
-        }
-        controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
-            setMargins(dp(4), dp(5), dp(4), dp(5))
-        })
-        controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
-            setMargins(dp(4), dp(5), dp(4), dp(5))
-        })
-        root.addView(controls, params(-1, dp(66)))
-        setContentView(root)
-    }
+        panel.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
 
-    private fun paintBackground() {
-        if (::root.isInitialized) root.setBackgroundColor(
-            if (nightMode) black else Color.rgb(224, 232, 238)
-        )
+        routeButton = makeButton("ANNULLA PERCORSO") { clearRoute() }
+        panel.addView(routeButton, params(-1, dp(44)))
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        modeButton = makeButton(if (carMode) "AUTO" else "MOTO") {
+            carMode = !carMode
+            modeButton.text = if (carMode) "AUTO" else "MOTO"
+        }
+        themeButton = makeButton(if (negativeTheme) "NEGATIVO" else "POSITIVO") { toggleTheme() }
+        controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), dp(3), dp(3), dp(3))
+        })
+        controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(3), dp(3), dp(2), dp(3))
+        })
+        panel.addView(controls, params(-1, dp(52)))
+        if (landscape) {
+            root.addView(panel, LinearLayout.LayoutParams(0, -1, 0.41f))
+        } else {
+            root.addView(panel, LinearLayout.LayoutParams(-1, 0, 0.52f))
+        }
+        setContentView(root)
+        applyTheme()
+        newMapView.getMapAsync { readyMap ->
+            map = readyMap
+            readyMap.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
+                mapStyleReady = true
+                style.addSource(GeoJsonSource(SOURCE_USER, Feature.fromGeometry(Point.fromLngLat(-16.6291, 28.2916))))
+                style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
+                    PropertyFactory.circleColor("#00E5FF"),
+                    PropertyFactory.circleRadius(7f),
+                    PropertyFactory.circleStrokeColor("#FFFFFF"),
+                    PropertyFactory.circleStrokeWidth(2f)
+                ))
+                style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
+                style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
+                    PropertyFactory.lineColor("#00BFFF"),
+                    PropertyFactory.lineWidth(6f)
+                ))
+                readyMap.cameraPosition = CameraPosition.Builder()
+                    .target(LatLng(28.2916, -16.6291))
+                    .zoom(10.5)
+                    .build()
+                currentLocation?.let { updateMapForLocation(it, true) }
+                routeResult?.let { drawRoute(it, false) }
+            }
+        }
+        if (activityStarted) newMapView.onStart()
+        if (activityResumed) newMapView.onResume()
     }
 
     private fun makeButton(label: String, action: () -> Unit): Button =
         Button(this).apply {
             text = label
-            textSize = 12f
+            textSize = 11f
             isAllCaps = false
-            setTextColor(if (nightMode) white else Color.BLACK)
-            setBackgroundColor(if (nightMode) Color.rgb(26, 26, 26) else Color.rgb(205, 215, 222))
+            setTextColor(if (negativeTheme) white else positiveText)
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
             setOnClickListener { action() }
         }
 
-    private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    private fun toggleTheme() {
+        negativeTheme = !negativeTheme
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NEGATIVE, negativeTheme).apply()
+        themeButton.text = if (negativeTheme) "NEGATIVO" else "POSITIVO"
+        applyTheme()
+    }
 
-    @Suppress("DEPRECATION")
+    private fun applyTheme() {
+        if (!::root.isInitialized) return
+        root.setBackgroundColor(if (negativeTheme) black else positiveBackground)
+        val textColor = if (negativeTheme) white else positiveText
+        root.walkViews().forEach { view ->
+            if (view is TextView && view !== destinationInput) {
+                view.setTextColor(when {
+                    view === speedText -> if ((speedText.text.toString().toIntOrNull() ?: 0) >= 120) Color.RED else if ((speedText.text.toString().toIntOrNull() ?: 0) >= 50) yellow else textColor
+                    view === gpsText -> if (negativeTheme) yellow else Color.rgb(130, 85, 0)
+                    view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 90, 125)
+                    view.text.toString().contains("NEXT NAVI PRO") -> yellow
+                    else -> textColor
+                })
+            }
+            if (view is Button) {
+                view.setTextColor(textColor)
+                view.setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+            }
+        }
+        destinationInput.setTextColor(textColor)
+        destinationInput.setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
+        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(32, 36, 40) else Color.rgb(220, 227, 230))
+    }
+
+    private fun android.view.View.walkViews(): List<View> {
+        val result = ArrayList<View>()
+        fun visit(view: View) {
+            result.add(view)
+            if (view is android.view.ViewGroup) {
+                for (i in 0 until view.childCount) visit(view.getChildAt(i))
+            }
+        }
+        visit(this)
+        return result
+    }
+
+    private fun searchDestination() {
+        val query = destinationInput.text.toString().trim()
+        if (query.length < 3) {
+            Toast.makeText(this, "Inserisci almeno 3 caratteri per cercare.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isSearching) return
+        isSearching = true
+        searchButton.isEnabled = false
+        routeText.text = "RICERCA DESTINAZIONE…"
+        thread(name = "photon-search") {
+            try {
+                val results = NavigationServices.searchPlaces(query)
+                runOnUiThread {
+                    isSearching = false
+                    searchButton.isEnabled = true
+                    if (results.isEmpty()) {
+                        routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
+                        return@runOnUiThread
+                    }
+                    val labels = results.map {
+                        if (it.description.isBlank()) it.name else it.name + "\n" + it.description
+                    }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Scegli destinazione")
+                        .setItems(labels) { _, which ->
+                            destination = results[which]
+                            destinationInput.setText(results[which].name)
+                            routeText.text = "DESTINAZIONE: " + results[which].name + "\nPremi AVVIA PERCORSO"
+                            routeButton.text = "AVVIA PERCORSO"
+                            map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                                LatLng(results[which].point.latitude, results[which].point.longitude), 14.0
+                            ), 700)
+                        }
+                        .setNegativeButton("Annulla", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    isSearching = false
+                    searchButton.isEnabled = true
+                    routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
+                }
+            }
+        }
+    }
+
+    private fun calculateSelectedRoute() {
+        val target = destination ?: run {
+            searchDestination()
+            return
+        }
+        val location = currentLocation
+        if (location == null || !location.hasAccuracy() || location.accuracy > 50f) {
+            routeText.text = "ATTENDO UNA POSIZIONE GPS PRECISA"
+            Toast.makeText(this, "Attendi GPS valido prima di calcolare il percorso.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (isCalculatingRoute) return
+        isCalculatingRoute = true
+        routeButton.isEnabled = false
+        routeText.text = "CALCOLO PERCORSO ONLINE…"
+        val origin = NavPoint(location.latitude, location.longitude)
+        thread(name = "valhalla-route") {
+            try {
+                val result = NavigationServices.calculateRoute(
+                    origin, target.point, motorcycle = !carMode
+                )
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    routeButton.isEnabled = true
+                    routeResult = result
+                    drawRoute(result, true)
+                    val durationMinutes = (result.durationSeconds / 60.0).toInt()
+                    routeText.text = String.format(
+                        Locale.ITALY, "%.1f km  •  circa %d min\n%s",
+                        result.distanceKm, durationMinutes, result.firstInstruction
+                    )
+                    routeButton.text = "ANNULLA PERCORSO"
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    routeButton.isEnabled = true
+                    routeText.text = "PERCORSO NON DISPONIBILE • " + (error.message ?: "Errore")
+                }
+            }
+        }
+    }
+
+    private fun drawRoute(result: RouteResult, fitCamera: Boolean) {
+        if (!mapStyleReady) return
+        val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource ?: return
+        val points = result.points.map { Point.fromLngLat(it.longitude, it.latitude) }
+        source.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(points)))
+        if (fitCamera && points.isNotEmpty()) {
+            val boundsBuilder = org.maplibre.android.geometry.LatLngBounds.Builder()
+            result.points.forEach { boundsBuilder.include(LatLng(it.latitude, it.longitude)) }
+            try {
+                map?.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), dp(44)),
+                    900
+                )
+            } catch (_: Exception) {
+                map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                    LatLng(result.points.first().latitude, result.points.first().longitude), 13.0
+                ), 700)
+            }
+        }
+    }
+
+    private fun clearRoute() {
+        routeResult = null
+        destination = null
+        if (::routeText.isInitialized) routeText.text = "MAPPA ONLINE  •  Nessun percorso attivo"
+        if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
+        if (::destinationInput.isInitialized) destinationInput.text.clear()
+        val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
+        source?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
+    }
+
     private fun requestGps() {
+        if (!dashboardStarted || gpsUpdatesRequested) return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 100)
+            requestPermissions(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                PERMISSION_LOCATION
+            )
             return
         }
         try {
             val providers = locationManager.getProviders(true)
-            if (providers.isEmpty()) {
-                gpsText.text = "GPS NON DISPONIBILE"
+            val provider = when {
+                providers.contains(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                providers.contains(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                else -> null
+            }
+            if (provider == null) {
+                gpsText.text = "LOCALIZZAZIONE DISATTIVATA"
                 return
             }
-            val provider = if (providers.contains(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER
-                else if (providers.contains(LocationManager.NETWORK_PROVIDER)) LocationManager.NETWORK_PROVIDER
-                else providers.first()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, 800L, 0f, this, Looper.getMainLooper())
             } else {
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this)
+                @Suppress("DEPRECATION")
+                locationManager.requestLocationUpdates(provider, 800L, 0f, this)
             }
+            gpsUpdatesRequested = true
             val last = locationManager.getLastKnownLocation(provider)
             if (last != null) onLocationChanged(last)
-            gpsText.text = "RICERCA POSIZIONE GPS…"
+            else gpsText.text = "RICERCA GPS REALE…"
         } catch (_: SecurityException) {
             gpsText.text = "PERMESSO GPS NEGATO"
         } catch (_: Exception) {
@@ -237,44 +509,115 @@ class MainActivity : Activity(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0)
-        if (ageMs > 10_000 || !location.hasAccuracy() || location.accuracy > 50f) {
+        if (ageMs > 10000 || !location.hasAccuracy() || location.accuracy > 50f) {
             gpsText.text = "GPS INSUFFICIENTE"
             return
         }
-        speedText.text = (if (location.hasSpeed()) location.speed * 3.6f else 0f).toInt().toString()
+        currentLocation = Location(location)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
+        speedText.text = speed.toInt().toString()
         speedText.setTextColor(when {
             speed >= 120f -> Color.RED
             speed >= 50f -> yellow
-            else -> white
+            else -> if (negativeTheme) white else positiveText
         })
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
+        updateMapForLocation(location, lastCameraLocation == null)
+        applyTheme()
     }
 
-    override fun onProviderDisabled(provider: String) { gpsText.text = "GPS DISATTIVATO" }
-    override fun onProviderEnabled(provider: String) { gpsText.text = "RICERCA POSIZIONE GPS…" }
+    private fun updateMapForLocation(location: Location, forceCenter: Boolean) {
+        if (!mapStyleReady) return
+        val point = Point.fromLngLat(location.longitude, location.latitude)
+        (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(Feature.fromGeometry(point))
+        val previous = lastCameraLocation
+        val movedEnough = previous == null || previous.distanceTo(location) >= 8f
+        if (forceCenter || movedEnough) {
+            val oldBearing = map?.cameraPosition?.bearing ?: 0.0
+            val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldBearing
+            val camera = CameraPosition.Builder()
+                .target(LatLng(location.latitude, location.longitude))
+                .zoom(if (routeResult == null) 16.0 else 16.5)
+                .bearing(bearing)
+                .build()
+            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 650)
+            lastCameraLocation = Location(location)
+        }
+    }
+
+    override fun onProviderDisabled(provider: String) {
+        gpsText.text = "LOCALIZZAZIONE DISATTIVATA"
+    }
+
+    override fun onProviderEnabled(provider: String) {
+        gpsText.text = "RICERCA GPS REALE…"
+        gpsUpdatesRequested = false
+        requestGps()
+    }
+
+    @Deprecated("Deprecated in Android")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100) {
+        if (requestCode == PERMISSION_LOCATION) {
             if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) requestGps()
             else {
                 gpsText.text = "PERMESSO GPS NEGATO"
-                Toast.makeText(this, "Concedi il permesso di localizzazione per leggere la velocità GPS.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Concedi la localizzazione per usare GPS e navigazione.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        activityStarted = true
+        mapView?.onStart()
+    }
+
     override fun onResume() {
         super.onResume()
-        if (::locationManager.isInitialized &&
-            (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED)) requestGps()
+        activityResumed = true
+        mapView?.onResume()
+        if (dashboardStarted) requestGps()
     }
 
     override fun onPause() {
+        activityResumed = false
+        if (gpsUpdatesRequested) {
+            locationManager.removeUpdates(this)
+            gpsUpdatesRequested = false
+        }
+        mapView?.onPause()
         super.onPause()
-        if (::locationManager.isInitialized) locationManager.removeUpdates(this)
     }
+
+    override fun onStop() {
+        activityStarted = false
+        mapView?.onStop()
+        super.onStop()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        mapView?.onLowMemory()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("dashboard_started", dashboardStarted)
+        mapView?.onSaveInstanceState(outState)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onDestroy() {
+        splashHandler.removeCallbacksAndMessages(null)
+        mapView?.onDestroy()
+        mapView = null
+        super.onDestroy()
+    }
+
+    private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
