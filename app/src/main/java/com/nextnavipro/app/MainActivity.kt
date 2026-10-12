@@ -76,6 +76,7 @@ class MainActivity : Activity(), LocationListener {
     private var radarCameras: List<RadarCamera> = emptyList()
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
+    private var followGps = true
     private var isSearching = false
     private var isCalculatingRoute = false
     private val splashHandler = Handler(Looper.getMainLooper())
@@ -156,46 +157,18 @@ class MainActivity : Activity(), LocationListener {
 
     private fun buildDashboard(savedState: Bundle?) {
         MapLibre.getInstance(this)
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         root = LinearLayout(this).apply {
-            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-        }
-        val mapColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-        }
-        val header = TextView(this).apply {
-            text = "NEXT NAVI PRO"
-            textSize = 20f
-            letterSpacing = 0.12f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-        }
-        mapColumn.addView(header, params(-1, dp(36)))
-        val newMapView = MapView(this)
-        newMapView.onCreate(savedState)
-        mapView = newMapView
-        mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
-        if (landscape) {
-            root.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 0.59f).apply {
-                setMargins(dp(2), 0, dp(5), 0)
-            })
-        } else {
-            root.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.48f))
+            setPadding(dp(5), dp(4), dp(5), dp(4))
         }
 
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
         val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         destinationInput = EditText(this).apply {
-            hint = "Cerca destinazione"
+            hint = "Cerca indirizzo o località"
             textSize = 14f
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
@@ -210,52 +183,127 @@ class MainActivity : Activity(), LocationListener {
                 } else false
             }
         }
-        searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dp(48), 1f))
+        searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dp(46), 1f))
         searchButton = makeButton("CERCA") { searchDestination() }
-        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(82), dp(48)).apply {
+        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
-        panel.addView(searchRow, params(-1, dp(52)))
+        val homeButton = makeButton("CASA") { showHomeOptions() }
+        searchRow.addView(homeButton, LinearLayout.LayoutParams(dp(70), dp(46)).apply {
+            setMargins(dp(4), 0, 0, 0)
+        })
+        root.addView(searchRow, params(-1, dp(50)))
 
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val infoColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
+        val brand = TextView(this).apply {
+            text = "NEXT NAVI PRO"
+            textSize = 12f
+            letterSpacing = 0.04f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        infoColumn.addView(brand, params(-1, dp(34)))
+        val limitTitle = TextView(this).apply {
+            text = "LIMITE"
+            textSize = 12f
+            gravity = Gravity.CENTER
+        }
+        infoColumn.addView(limitTitle, params(-1, dp(28)))
+        val limitValue = TextView(this).apply {
+            text = "—"
+            textSize = 30f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(if (negativeTheme) Color.rgb(35, 35, 35) else Color.WHITE)
+        }
+        infoColumn.addView(limitValue, params(-1, dp(54)))
+        gpsText = TextView(this).apply {
+            text = "RICERCA GPS…"
+            textSize = 10f
+            gravity = Gravity.CENTER
+        }
+        infoColumn.addView(gpsText, params(-1, dp(38)))
+        routeText = TextView(this).apply {
+            text = "Nessun percorso attivo"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(dp(3), dp(5), dp(3), dp(5))
+        }
+        infoColumn.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+        radarText = TextView(this).apply {
+            text = "RADAR OSM"
+            textSize = 10f
+            gravity = Gravity.CENTER
+        }
+        infoColumn.addView(radarText, params(-1, dp(36)))
+
+        val speedColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(2), 0, dp(2), 0)
+        }
         speedText = TextView(this).apply {
             text = "—"
-            textSize = if (landscape) 70f else 82f
+            textSize = 82f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        panel.addView(speedText, params(-1, if (landscape) dp(92) else dp(100)))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(116)))
         val unit = TextView(this).apply {
-            text = "VELOCITÀ GPS  •  km/h"
-            textSize = 12f
-            letterSpacing = 0.08f
+            text = "km/h"
+            textSize = 16f
+            letterSpacing = 0.06f
             gravity = Gravity.CENTER
         }
-        panel.addView(unit, params(-1, dp(24)))
-        gpsText = TextView(this).apply {
-            text = "IN ATTESA DEL GPS REALE"
-            textSize = 12f
+        speedColumn.addView(unit, params(-1, dp(30)))
+        val speedCaption = TextView(this).apply {
+            text = "VELOCITÀ GPS"
+            textSize = 11f
             gravity = Gravity.CENTER
         }
-        panel.addView(gpsText, params(-1, dp(30)))
-        radarText = TextView(this).apply {
-            text = "RADAR OSM • dati comunitari"
-            textSize = 10f
-            gravity = Gravity.CENTER
-        }
-        panel.addView(radarText, params(-1, dp(22)))
-        routeText = TextView(this).apply {
-            text = "MAPPA ONLINE  •  Nessun percorso attivo"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(5), dp(8), dp(5))
-        }
-        panel.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-
+        speedColumn.addView(speedCaption, params(-1, dp(28)))
+        val centerSpacer = View(this)
+        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1f))
         routeButton = makeButton("AVVIA PERCORSO") {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
-        panel.addView(routeButton, params(-1, dp(44)))
+        speedColumn.addView(routeButton, params(-1, dp(48)))
+
+        val mapColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val mapHeader = TextView(this).apply {
+            text = "MAPPA"
+            textSize = 12f
+            gravity = Gravity.CENTER
+        }
+        mapColumn.addView(mapHeader, params(-1, dp(30)))
+        val newMapView = MapView(this)
+        mapView = newMapView
+        newMapView.onCreate(savedState)
+        mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
+        val recenterButton = makeButton("CENTRA GPS") {
+            followGps = true
+            lastCameraLocation = null
+            currentLocation?.let { updateMapForLocation(it, true) }
+        }
+        mapColumn.addView(recenterButton, params(-1, dp(42)))
+
+        content.addView(infoColumn, LinearLayout.LayoutParams(0, -1, 0.29f))
+        content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 0.32f))
+        content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 0.39f))
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -265,54 +313,63 @@ class MainActivity : Activity(), LocationListener {
             modeButton.text = if (carMode) "AUTO" else "MOTO"
         }
         themeButton = makeButton(if (negativeTheme) "NEGATIVO" else "POSITIVO") { toggleTheme() }
-        controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-            setMargins(dp(2), dp(3), dp(3), dp(3))
+        controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            setMargins(dp(2), dp(3), dp(3), dp(1))
         })
-        controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
-            setMargins(dp(3), dp(3), dp(2), dp(3))
+        controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            setMargins(dp(3), dp(3), dp(2), dp(1))
         })
-        panel.addView(controls, params(-1, dp(52)))
-        if (landscape) {
-            root.addView(panel, LinearLayout.LayoutParams(0, -1, 0.41f))
-        } else {
-            root.addView(panel, LinearLayout.LayoutParams(-1, 0, 0.52f))
-        }
+        root.addView(controls, params(-1, dp(48)))
+
         setContentView(root)
         applyTheme()
-        newMapView.getMapAsync { readyMap ->
-            map = readyMap
-            readyMap.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
-                mapStyleReady = true
-                style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
-                style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
-                    PropertyFactory.circleColor("#00E5FF"),
-                    PropertyFactory.circleRadius(7f),
-                    PropertyFactory.circleStrokeColor("#FFFFFF"),
-                    PropertyFactory.circleStrokeWidth(2f)
-                ))
-                style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
-                style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
-                    PropertyFactory.lineColor("#00BFFF"),
-                    PropertyFactory.lineWidth(6f)
-                ))
-                style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
-                style.addLayer(CircleLayer("next-radar-circles", SOURCE_RADARS).withProperties(
-                    PropertyFactory.circleColor("#FF3B30"),
-                    PropertyFactory.circleRadius(6f),
-                    PropertyFactory.circleStrokeColor("#FFFFFF"),
-                    PropertyFactory.circleStrokeWidth(1.5f)
-                ))
-                readyMap.cameraPosition = CameraPosition.Builder()
-                    .target(LatLng(28.2916, -16.6291))
-                    .zoom(10.5)
-                    .build()
-                currentLocation?.let { updateMapForLocation(it, true) }
-                drawRadars()
-                routeResult?.let { drawRoute(it, false) }
-            }
-        }
+        setupMap(newMapView, savedState)
         if (activityStarted) newMapView.onStart()
         if (activityResumed) newMapView.onResume()
+    }
+
+    private fun setupMap(mapViewToSetup: MapView, savedState: Bundle?) {
+        mapViewToSetup.getMapAsync { readyMap ->
+            map = readyMap
+            readyMap.uiSettings.isRotateGesturesEnabled = true
+            readyMap.uiSettings.isScrollGesturesEnabled = true
+            readyMap.uiSettings.isZoomGesturesEnabled = true
+            readyMap.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                    followGps = false
+                }
+            }
+            applyMapStyle(readyMap)
+        }
+    }
+
+    private fun applyMapStyle(readyMap: MapLibreMap) {
+        val styleUrl = if (negativeTheme) "https://tiles.openfreemap.org/styles/positron" else STYLE_URL
+        readyMap.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+            mapStyleReady = true
+            style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
+                PropertyFactory.circleColor("#00E5FF"),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2f)
+            ))
+            style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
+                PropertyFactory.lineColor(if (negativeTheme) "#111111" else "#00BFFF"),
+                PropertyFactory.lineWidth(5f)
+            ))
+            style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(CircleLayer("next-radar-circles", SOURCE_RADARS).withProperties(
+                PropertyFactory.circleColor("#FF3B30"),
+                PropertyFactory.circleRadius(6f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(1.5f)
+            ))
+            currentLocation?.let { updateMapForLocation(it, true) }
+            drawRadars()
+            routeResult?.let { drawRoute(it, false) }
+        }
     }
 
     private fun makeButton(label: String, action: () -> Unit): Button =
