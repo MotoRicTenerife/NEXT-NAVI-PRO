@@ -17,6 +17,7 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -222,7 +223,7 @@ class MainActivity : Activity(), LocationListener {
             textSize = 30f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
-            setBackgroundColor(if (negativeTheme) Color.rgb(35, 35, 35) else Color.WHITE)
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         infoColumn.addView(limitValue, params(-1, dp(54)))
         gpsText = TextView(this).apply {
@@ -236,6 +237,7 @@ class MainActivity : Activity(), LocationListener {
             textSize = 12f
             gravity = Gravity.CENTER
             setPadding(dp(3), dp(5), dp(3), dp(5))
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         infoColumn.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
         radarText = TextView(this).apply {
@@ -257,20 +259,15 @@ class MainActivity : Activity(), LocationListener {
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(116)))
+        speedText.setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(126)))
         val unit = TextView(this).apply {
             text = "km/h"
-            textSize = 16f
-            letterSpacing = 0.06f
+            textSize = 12f
+            letterSpacing = 0.03f
             gravity = Gravity.CENTER
         }
         speedColumn.addView(unit, params(-1, dp(30)))
-        val speedCaption = TextView(this).apply {
-            text = "VELOCITÀ GPS"
-            textSize = 11f
-            gravity = Gravity.CENTER
-        }
-        speedColumn.addView(speedCaption, params(-1, dp(28)))
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1f))
         routeButton = makeButton("AVVIA PERCORSO") {
@@ -282,12 +279,19 @@ class MainActivity : Activity(), LocationListener {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        val mapHeader = TextView(this).apply {
-            text = "MAPPA"
-            textSize = 12f
+        val mapStatus = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        mapColumn.addView(mapHeader, params(-1, dp(30)))
+        gpsText.textSize = 9f
+        gpsText.maxLines = 1
+        gpsText.setPadding(dp(2), 0, dp(2), 0)
+        radarText.textSize = 9f
+        radarText.maxLines = 1
+        radarText.setPadding(dp(2), 0, dp(2), 0)
+        mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
+        mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
+        mapColumn.addView(mapStatus, params(-1, dp(22)))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
@@ -306,8 +310,6 @@ class MainActivity : Activity(), LocationListener {
             val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            navHalf.addView(gpsText, params(-1, dp(24)))
-            navHalf.addView(radarText, params(-1, dp(20)))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -316,14 +318,12 @@ class MainActivity : Activity(), LocationListener {
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
-            speedText.textSize = 76f
+            speedText.textSize = 88f
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            navHalf.addView(gpsText, params(-1, dp(24)))
-            navHalf.addView(radarText, params(-1, dp(20)))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -387,9 +387,9 @@ class MainActivity : Activity(), LocationListener {
 
     private fun applyMapStyle(readyMap: MapLibreMap) {
         mapStyleReady = false
-        val styleUrl = if (negativeTheme) "https://tiles.openfreemap.org/styles/positron" else STYLE_URL
+        val styleUrl = if (negativeTheme) STYLE_URL else "https://tiles.openfreemap.org/styles/positron"
         readyMap.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
-            if (negativeTheme) {
+            if (!negativeTheme) {
                 style.layers.forEach { layer ->
                     when (layer) {
                         is SymbolLayer -> layer.setProperties(
@@ -414,7 +414,7 @@ class MainActivity : Activity(), LocationListener {
             ))
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
-                PropertyFactory.lineColor(if (negativeTheme) "#00D6C9" else "#FFD400"),
+                PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
                 PropertyFactory.lineWidth(5f)
             ))
             style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
@@ -544,6 +544,8 @@ class MainActivity : Activity(), LocationListener {
 
     private fun searchDestination() {
         val query = destinationInput.text.toString().trim()
+        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(destinationInput.windowToken, 0)
+        destinationInput.clearFocus()
         if (query.length < 3) {
             Toast.makeText(this, "Inserisci almeno 3 caratteri per cercare.", Toast.LENGTH_SHORT).show()
             return
@@ -555,29 +557,35 @@ class MainActivity : Activity(), LocationListener {
         thread(name = "photon-search") {
             try {
                 val results = NavigationServices.searchPlaces(query)
+                val origin = currentLocation
+                val sortedResults = if (origin != null) results.sortedBy { result ->
+                    val distance = FloatArray(1)
+                    Location.distanceBetween(origin.latitude, origin.longitude, result.point.latitude, result.point.longitude, distance)
+                    distance[0]
+                } else results
                 runOnUiThread {
                     isSearching = false
                     searchButton.isEnabled = true
-                    if (results.isEmpty()) {
+                    if (sortedResults.isEmpty()) {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
                         return@runOnUiThread
                     }
                     rememberSearch(query)
-                    val labels = results.map {
+                    val labels = sortedResults.map {
                         if (it.description.isBlank()) it.name else it.name + "\n" + it.description
                     }.toTypedArray()
                     AlertDialog.Builder(this)
                         .setTitle("Scegli destinazione")
                         .setItems(labels) { _, which ->
-                            destination = results[which]
+                            destination = sortedResults[which]
                             routeResult = null
                             val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
                             routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
-                            destinationInput.setText(results[which].name)
-                            routeText.text = "DESTINAZIONE: " + results[which].name + "\nPremi AVVIA PERCORSO"
+                            destinationInput.setText(sortedResults[which].name)
+                            routeText.text = "DESTINAZIONE: " + sortedResults[which].name + "\nPremi AVVIA PERCORSO"
                             routeButton.text = "AVVIA PERCORSO"
                             map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
-                                LatLng(results[which].point.latitude, results[which].point.longitude), 14.0
+                                LatLng(sortedResults[which].point.latitude, sortedResults[which].point.longitude), 14.0
                             ), 700)
                         }
                         .setNegativeButton("Annulla", null)
