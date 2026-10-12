@@ -12,11 +12,18 @@ import kotlin.math.roundToInt
 
 data class NavPoint(val latitude: Double, val longitude: Double)
 data class PlaceResult(val name: String, val point: NavPoint, val description: String)
+data class RouteManeuver(
+    val pointIndex: Int,
+    val instruction: String,
+    val type: Int,
+    val streetName: String
+)
 data class RouteResult(
     val points: List<NavPoint>,
     val distanceKm: Double,
     val durationSeconds: Int,
-    val firstInstruction: String
+    val firstInstruction: String,
+    val maneuvers: List<RouteManeuver> = emptyList()
 )
 
 object NavigationServices {
@@ -105,12 +112,19 @@ object NavigationServices {
             val distance = legSummary.optDouble("length", summary.optDouble("length", 0.0))
             val seconds = legSummary.optDouble("time", summary.optDouble("time", 0.0)).roundToInt()
             val maneuvers = leg.optJSONArray("maneuvers")
-            val instruction = if (maneuvers != null && maneuvers.length() > 0) {
-                maneuvers.optJSONObject(0)?.optString("instruction").orEmpty()
-            } else {
-                "Segui il percorso evidenziato."
+            val parsedManeuvers = ArrayList<RouteManeuver>()
+            if (maneuvers != null) {
+                for (i in 0 until maneuvers.length()) {
+                    val item = maneuvers.optJSONObject(i) ?: continue
+                    val instructionText = item.optString("instruction").ifBlank { "Prosegui" }
+                    val pointIndex = item.optInt("begin_shape_index", 0).coerceIn(0, decoded.lastIndex)
+                    val streetNames = item.optJSONArray("street_names")
+                    val streetName = if (streetNames != null && streetNames.length() > 0) streetNames.optString(0) else ""
+                    parsedManeuvers.add(RouteManeuver(pointIndex, instructionText, item.optInt("type", 0), streetName))
+                }
             }
-            return RouteResult(decoded, distance, seconds, instruction.ifBlank { "Segui il percorso evidenziato." })
+            val instruction = parsedManeuvers.firstOrNull()?.instruction ?: "Segui il percorso evidenziato."
+            return RouteResult(decoded, distance, seconds, instruction, parsedManeuvers)
         } finally {
             connection.disconnect()
         }
