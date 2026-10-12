@@ -8,6 +8,8 @@
     <application
         android:allowBackup="false"
         android:label="NEXT NAVI PRO"
+        android:icon="@drawable/next_navi_logo"
+        android:roundIcon="@drawable/next_navi_logo"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
