@@ -376,7 +376,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeButton = makeButton("AVVIA PERCORSO") {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
-        speedColumn.addView(routeButton, params(-1, dp(48)))
+        // The route button is placed in the lower control row in landscape and
+        // between the speed display and map in portrait, so it never covers the map.
 
         val mapColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -406,7 +407,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             lastCameraLocation = null
             currentLocation?.let { updateMapForLocation(it, true) }
         }
-        mapColumn.addView(recenterButton, params(-1, dp(42)))
 
         // Move navigation and speed-limit views into their orientation-specific thirds.
         listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText).forEach { infoColumn.removeView(it) }
@@ -423,9 +423,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 0.92f))
+            content.addView(routeButton, params(-1, dp(44)))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
-            speedText.textSize = 132f
+            speedText.textSize = 158f
+            speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -441,7 +443,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             left.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             left.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
+            speedText.textSize = 158f
+            speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -451,9 +455,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
         }
         themeButton = makeButton(when (themeMode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }) { toggleTheme() }
-        controls.addView(themeButton, LinearLayout.LayoutParams(-1, dp(44)).apply {
-            setMargins(dp(2), dp(3), dp(2), dp(1))
-        })
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(1))
+            })
+            controls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(1))
+            })
+            controls.addView(routeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(1))
+            })
+        } else {
+            controls.addView(themeButton, LinearLayout.LayoutParams(-1, dp(44)).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(1))
+            })
+        }
         root.addView(controls, params(-1, dp(48)))
 
         setContentView(root)
@@ -1262,14 +1278,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val instruction = maneuver.instruction
         val lower = instruction.lowercase(Locale.ITALIAN)
-        val roundabout = lower.contains("rotonda") || lower.contains("rotatoria") ||
-            lower.contains("uscita") || maneuver.type == 26 || maneuver.type == 27
+        // "Uscita" can mean an ordinary road exit or a fork, not a roundabout.
+        // Prefer the routing engine's maneuver type; only trust explicit roundabout
+        // wording as a textual fallback.
+        val roundabout = maneuver.type == 26 || maneuver.type == 27 ||
+            lower.contains("rotonda") || lower.contains("rotatoria")
         val icon = when {
-            roundabout -> "↻"
-            lower.contains("sinistra") -> "↰"
-            lower.contains("destra") -> "↱"
-            lower.contains("inversione") || lower.contains("u-turn") -> "↶"
-            else -> "↑"
+            roundabout -> "⟳"
+            maneuver.type in setOf(3, 15, 16, 19, 21, 24, 38) ||
+                lower.contains("sinistra") -> "⬅"
+            maneuver.type in setOf(2, 9, 10, 11, 18, 20, 23, 37) ||
+                lower.contains("destra") -> "➡"
+            maneuver.type in setOf(12, 13) ||
+                lower.contains("inversione") || lower.contains("u-turn") -> "↶"
+            else -> "⬆"
         }
         if (::maneuverIcon.isInitialized) {
             maneuverIcon.text = icon
