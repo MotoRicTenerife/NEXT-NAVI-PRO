@@ -123,6 +123,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastDisplayedSpeed: Int? = null
     private var speedAlertActive = false
     private var speedAlertFlashRed = false
+    private var speedingVoiceActive = false
     private var speedAlertFlashesRemaining = 0
     private val speedAlertHandler = Handler(Looper.getMainLooper())
     private val speedAlertRunnable = object : Runnable {
@@ -159,10 +160,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val mapFollowHandler = Handler(Looper.getMainLooper())
     private val mapFollowRunnable = object : Runnable {
         override fun run() {
-            if (dashboardStarted && activityResumed && fullScreenMap && followGps) {
+            // Timeout only for the embedded dashboard map; never interrupt full-screen exploration.
+            if (dashboardStarted && activityResumed && !fullScreenMap) {
+                followGps = true
                 currentLocation?.let { updateMapForLocation(it, true) }
             }
-            mapFollowHandler.postDelayed(this, 10_000L)
         }
     }
     private var followGps = true
@@ -173,9 +175,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
     private val black = Color.BLACK
-    private val positiveBackground = Color.BLACK
-    private val positiveText = Color.WHITE
-    private val negativeBackground = Color.rgb(220, 224, 227)
+    private val positiveBackground = Color.rgb(220, 224, 227)
+    private val positiveText = Color.rgb(25, 30, 34)
+    private val negativeBackground = Color.rgb(28, 33, 38)
     private val inactiveDigitColor = Color.rgb(105, 112, 118)
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -378,7 +380,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
-            setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
+            setTextColor(if (negativeTheme) white else positiveText)
         }
         routeText.apply {
             textSize = 18f
@@ -540,7 +542,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         setContentView(root)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
-        mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
         applyTheme()
         updateSpeedDisplay(currentLocation?.let { if (it.hasSpeed()) (it.speed * 3.6f).toInt() else null })
         setupMap(newMapView, savedState)
@@ -567,9 +568,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             readyMap.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                    // Manual pan/zoom/rotate takes control until the user explicitly recenters.
+                    // Full-screen: manual control until GPS is tapped. Dashboard: resume after 10 s idle.
                     followGps = false
                     mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    if (!fullScreenMap) mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
                 }
             }
             applyMapStyle(readyMap)
@@ -665,7 +667,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val digits = String.format(Locale.US, "%03d", value)
         val styled = SpannableString(digits)
         val activeColor = if (speedAlertFlashRed) Color.rgb(255, 55, 45)
-            else if (negativeTheme) Color.rgb(25, 30, 34) else white
+            else if (negativeTheme) white else positiveText
         val leadingZeros = if (speed == null) 3 else digits.indexOfFirst { it != '0' }.let { if (it < 0) 2 else it }
         if (speedAlertFlashRed) {
             for (i in digits.indices) {
@@ -867,7 +869,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val lux = event.values[0]
         // Bright sunlight: light panel with dark text; ordinary/dim light: dark panel.
         if (lux >= 6000f && negativeTheme) applyThemeMode(false)
-        else if (lux < 6000f && !negativeTheme) applyThemeMode(true)
+        else if (lux < 2500f && !negativeTheme) applyThemeMode(true)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -967,7 +969,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 view.setTextColor(when {
                     view === speedText -> textColor
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
-                    view === routeText -> if (negativeTheme) Color.rgb(0, 85, 105) else cyan
+                    view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 85, 105)
                     view === radarText -> Color.rgb(255, 70, 55)
                     view.text.toString().contains("NEXT NAVI PRO") -> yellow
                     else -> textColor
@@ -975,12 +977,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             if (view is Button) {
                 view.setTextColor(textColor)
-                view.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(35, 35, 35))
+                view.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(205, 216, 222))
             }
         }
         destinationInput.setTextColor(textColor)
         destinationInput.setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
-        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(35, 35, 35))
+        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(235, 239, 241))
         renderSpeedDigits(lastDisplayedSpeed)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
     }
@@ -1226,6 +1228,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         mapOriginalParams = view.layoutParams
         parent.removeView(view)
         fullScreenMap = true
+        followGps = false
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(black) }
         fullScreenRoot = page
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1251,6 +1255,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             parent.addView(view, mapOriginalIndex.coerceIn(0, parent.childCount), mapOriginalParams)
         }
         fullScreenMap = false
+        followGps = true
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        currentLocation?.let { updateMapForLocation(it, true) }
         fullScreenRoot = null
         setContentView(root)
     }
@@ -1482,10 +1489,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun updateSpeedLimitDisplay() {
+        val location = currentLocation
+        val limit = currentSpeedLimit
+        val speedKmh = location?.takeIf { it.hasSpeed() }?.speed?.times(3.6f)?.roundToInt()
+
+        // Announce once per overspeed episode and only when an explicit OSM limit is known.
+        if (limit != null && speedKmh != null && speedKmh > limit + 3) {
+            if (!speedingVoiceActive) {
+                speedingVoiceActive = true
+                if (voiceGuideReady) {
+                    voiceGuide?.speak(
+                        "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari.",
+                        TextToSpeech.QUEUE_ADD, null, "speed-limit-overspeed"
+                    )
+                }
+            }
+        } else if (limit == null || speedKmh == null || speedKmh <= limit + 1) {
+            speedingVoiceActive = false
+        }
+
         if (!::limitValue.isInitialized) return
-        limitValue.text = currentSpeedLimit?.toString() ?: "—"
-        if (currentSpeedLimit != null && currentLocation?.hasSpeed() == true &&
-            currentLocation!!.speed * 3.6f > currentSpeedLimit!! + 3f) {
+        limitValue.text = limit?.toString() ?: "—"
+        if (limit != null && speedKmh != null && speedKmh > limit + 3) {
             limitValue.setTextColor(Color.rgb(255, 55, 45))
         } else {
             limitValue.setTextColor(if (negativeTheme) white else positiveText)
