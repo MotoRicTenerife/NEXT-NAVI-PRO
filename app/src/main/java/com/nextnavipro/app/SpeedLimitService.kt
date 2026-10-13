@@ -47,7 +47,7 @@ object SpeedLimitService {
         require(point.longitude.isFinite() && point.longitude in -180.0..180.0)
         val lat = point.latitude.toString()
         val lon = point.longitude.toString()
-        val query = "[out:json][timeout:12];way[highway](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
+        val query = "[out:json][timeout:12];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
         val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
