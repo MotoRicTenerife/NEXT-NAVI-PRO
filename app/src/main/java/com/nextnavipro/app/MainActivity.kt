@@ -3,8 +3,6 @@ package com.nextnavipro.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -1726,12 +1724,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 displayedMarkerLocation = Location(interpolated)
                 updateUserMarker(interpolated)
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    if (gpsMarkerAnimator === animator) gpsMarkerAnimator = null
+                if (animation.animatedFraction >= 1f && gpsMarkerAnimator === animation) {
+                    gpsMarkerAnimator = null
                 }
-            })
+            }
         }
         gpsMarkerAnimator = animator
         animator.start()
