@@ -1,46 +1,50 @@
 # NEXT NAVI PRO
 
-Android navigation prototype focused on real GPS, high-contrast motorcycle/car display and open map data.
+Android navigation prototype for cars and motorcycles, with a high-contrast dashboard and open map data.
 
-## Current online implementation (0.3.0-alpha04)
+## Current online implementation (0.3.0-alpha05)
 
-- Native vector map using MapLibre Android and OpenFreeMap Liberty style.
-- Live position from Android location providers; stale or low-accuracy fixes are not treated as valid, and no placeholder coordinate is shown as the user's position.
-- Photon geocoding for destination search.
-- Valhalla public demo routing for route calculation and route geometry overlay.
-- Persistent positive/negative UI theme.
-- GPS-follow camera, destination selection, route distance/time summary, and route clearing.
-- OpenStreetMap speed-camera overlay around the current GPS position. The app caches the returned community data locally and rate-limits refresh attempts.
-- Automatic display layout for portrait/landscape and Moto/Auto UI modes.
-- Unit tests for Valhalla polyline6 route geometry decoding.
+- Native vector map rendered with MapLibre Android and OpenFreeMap styles. The map is hidden on the main dashboard and opened with the **NAVIGATORE** button.
+- Live Android location fixes are checked for age, accuracy and implausible jumps. Position smoothing adapts to reported accuracy, and the map marker is interpolated between accepted fixes.
+- Photon destination search and Valhalla route calculation/geometry.
+- Typed Valhalla maneuver icons for left/right/fork/roundabout guidance. Text alone is not allowed to turn a typed fork into a roundabout.
+- Road matching against nearby drivable OpenStreetMap ways, returning the matched road name (`name`), route reference (`ref`) and explicit numeric speed limit (`maxspeed`) when available.
+- Speed-limit display remains unknown when a confident road match or explicit numeric value is unavailable; the app does not invent statutory defaults.
+- Configurable speedometer border bands (green/yellow/red) and a motorway overspeed alert. A valid mapped limit takes priority; when absent, the user-configured alarm threshold is only an alarm setting and is **not** shown as a legal speed limit.
+- Persistent positive/negative display themes, automatic portrait/landscape layout and saved preferences.
+- Community speed-camera markers cached locally and refreshed with rate limiting.
+- Unit tests for Valhalla polyline decoding, conservative speed-limit parsing and maneuver icon precedence.
 
-## Known limitations
+## Known limitations and safety notes
 
-- Routing currently uses Valhalla's `auto` costing profile for both display modes; it is not yet a dedicated motorcycle profile.
-- Route preview and geometry are implemented, but turn-by-turn progress, deviation detection, and automatic rerouting are still pending.
-- Radar pins are visual map markers only. There are no audio radar alerts yet: we must first match the user's actual road and direction to avoid warnings for cameras on parallel or opposite carriageways.
-- Speed-limit data is not yet displayed. We will only show numeric limits when a road-matched, traceable source provides a valid value.
-- Online services require data connectivity. This version is not a complete offline navigator.
-- Public demo endpoints (Photon, Valhalla and Overpass) are best-effort services, may impose rate limits, and are not production guarantees.
+- Routing currently uses Valhalla's public `auto` costing profile for both display modes; a dedicated motorcycle profile is not configured.
+- Route progress is still based on proximity to the route geometry, not a full probabilistic map-matching engine. Junctions, parallel carriageways and dense road networks need real-device field testing.
+- Road names, references and speed limits currently come from nearby OpenStreetMap ways via the public Overpass API. Coverage and tagging can be incomplete. The official Cabildo de Tenerife road-network dataset has been identified as a valuable independent geometry/reference source, but has **not yet been integrated**.
+- Numeric legal limits are shown only when an explicit OSM `maxspeed` value can be associated with the matched road. Missing/conditional values remain unknown; the app does not infer a legal limit from road class.
+- Speed-camera pins are visual only; there are no audio radar alerts yet because road/direction matching must be validated first.
+- Online services require connectivity. This is not yet a complete offline navigator.
+- Public demo endpoints (Photon, Valhalla and Overpass) are best-effort services and may impose rate limits. A successful CI build does not replace GPS, route and alert validation on the actual phone and on-road network.
 
 ## Open data and services
 
 - **MapLibre Native:** https://maplibre.org/ — BSD-2-Clause licensed native vector map renderer.
-- **OpenFreeMap:** https://openfreemap.org/ — map style URL `https://tiles.openfreemap.org/styles/liberty`.
-- **Photon:** https://photon.komoot.io/ — OpenStreetMap-based geocoding; public service use is subject to fair-use policies.
-- **Valhalla demo:** https://valhalla.openstreetmap.de/ — public routing demo. The app sends an identifying `X-Client-Id` header.
-- **Overpass API:** https://overpass-api.de/ — public OpenStreetMap query service used for community speed-camera points. Results can be incomplete or stale.
+- **OpenFreeMap:** https://openfreemap.org/ — map styles, including `https://tiles.openfreemap.org/styles/liberty`.
+- **Photon:** https://photon.komoot.io/ — OpenStreetMap-based geocoding; subject to fair-use policies.
+- **Valhalla demo:** https://valhalla.openstreetmap.de/ — public routing demo; the app requests Italian instructions.
+- **Overpass API:** https://overpass-api.de/ — public OpenStreetMap query service for road matching, explicit speed-limit values and community camera points.
+- **OpenStreetMap tagging for speed limits:** https://wiki.openstreetmap.org/wiki/Key:maxspeed — numeric and contextual `maxspeed` conventions.
+- **Cabildo de Tenerife road network:** https://datos.tenerife.es/datos/conjuntos-de-datos/vias-competencia-del-cabildo-insular-de-tenerife — official road-axis GeoJSON/GeoPackage/CSV distributions, CC BY. This source is under review for a local or cached cross-check of road identifiers and names.
 - **OpenStreetMap:** https://www.openstreetmap.org/ — community-maintained data. Keep attribution visible and review ODbL obligations before redistributing derived datasets.
 
 ## Next implementation stages
 
-1. Test map rendering, GPS following, destination search and route calculation on the real Samsung device.
-2. Add route progress, reliable road matching, deviation detection and automatic rerouting.
-3. Integrate additional speed-camera datasets (including verified Spanish public data and suitable licensed feeds), deduplicate them and preserve source/update timestamps.
-4. Add speed limits only after reliable road matching and explicit data-quality handling.
-5. Add alerts after route/direction matching can avoid false positives.
-6. Prepare downloadable regional vector maps, local road graphs, offline search and offline routing after online navigation is stable.
+1. Complete CI verification of the current changes and inspect the produced debug APK.
+2. Test GPS smoothness, route instructions, road names, speed limits, speedometer bands and motorway alert behavior on the real Samsung device.
+3. Compare OSM road geometry/references with the official Cabildo dataset and investigate local mismatches before applying any correction.
+4. Improve road matching at forks, roundabouts and parallel carriageways; validate speed-limit freshness and prevent stale values from persisting after road changes.
+5. Add direction-aware radar alerts only after road matching is dependable.
+6. Prepare regional offline vector maps, road graphs, search and routing after online navigation is stable.
 
 ## Build
 
-GitHub Actions runs `gradle assembleDebug` and `gradle testDebugUnitTest`, then uploads the debug APK artifact.
+GitHub Actions runs `gradle assembleDebug` and `gradle testDebugUnitTest`, then uploads a debug APK artifact. The APK is a test build and has not been validated for safe standalone navigation.
