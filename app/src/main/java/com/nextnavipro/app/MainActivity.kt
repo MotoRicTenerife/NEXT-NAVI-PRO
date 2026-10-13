@@ -498,6 +498,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             mapStyleReady = true
             style.addImage("next-user-arrow-icon", createGpsArrowBitmap())
+            style.addImage("next-place-flag-icon", createPlaceFlagBitmap())
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
@@ -510,16 +511,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 PropertyFactory.circleStrokeColor("#FFFFFF"),
                 PropertyFactory.circleStrokeWidth(1.5f)
             ))
-            // Add the live-position layers LAST so neither the route line nor radar markers
-            // can paint over them. The dot uses circles only (no font/glyph dependency).
+            // GPS position is represented by the bitmap arrow alone; no dot underneath.
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
-                PropertyFactory.circleColor("#FFD400"),
-                PropertyFactory.circleRadius(10f),
-                PropertyFactory.circleStrokeColor("#000000"),
-                PropertyFactory.circleStrokeWidth(3f)
-            ))
-            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
+            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties
                 PropertyFactory.iconImage("next-user-arrow-icon"),
                 PropertyFactory.iconSize(1.0f),
                 PropertyFactory.iconRotate(Expression.get("bearing")),
@@ -527,29 +521,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true)
             ))
-            // Saved places and selected destination get dedicated vector layers; these
-            // markers are independent of the map style's bundled icon fonts.
+            // Saved places and destination use a native bitmap flag, not text glyphs or circles.
             style.addSource(GeoJsonSource(SOURCE_SAVED_POIS, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(CircleLayer("next-saved-poi-circles", SOURCE_SAVED_POIS).withProperties(
-                PropertyFactory.circleColor("#FF3B30"),
-                PropertyFactory.circleRadius(9f),
-                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                PropertyFactory.circleStrokeWidth(2.5f)
-            ))
-            style.addLayer(SymbolLayer("next-saved-poi-labels", SOURCE_SAVED_POIS).withProperties(
-                PropertyFactory.textField("⚑"),
-                PropertyFactory.textColor("#FF3B30"),
-                PropertyFactory.textHaloColor("#FFFFFF"),
-                PropertyFactory.textHaloWidth(2f),
-                PropertyFactory.textSize(22f),
-                PropertyFactory.textAllowOverlap(true)
+            style.addLayer(SymbolLayer("next-saved-poi-flags", SOURCE_SAVED_POIS).withProperties(
+                PropertyFactory.iconImage("next-place-flag-icon"),
+                PropertyFactory.iconSize(0.85f),
+                PropertyFactory.iconAnchor("bottom"),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true)
             ))
             style.addSource(GeoJsonSource(SOURCE_DESTINATION, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(CircleLayer("next-destination-marker", SOURCE_DESTINATION).withProperties(
-                PropertyFactory.circleColor("#FF3B30"),
-                PropertyFactory.circleRadius(11f),
-                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                PropertyFactory.circleStrokeWidth(3f)
+            style.addLayer(SymbolLayer("next-destination-flag", SOURCE_DESTINATION).withProperties(
+                PropertyFactory.iconImage("next-place-flag-icon"),
+                PropertyFactory.iconSize(1.0f),
+                PropertyFactory.iconAnchor("bottom"),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true)
             ))
             refreshSavedPoiMarkers()
             refreshDestinationMarker()
@@ -1269,6 +1256,48 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         canvas.drawPath(path, shadow)
         canvas.drawPath(path, fill)
+        return bitmap
+    }
+
+    private fun createPlaceFlagBitmap(): Bitmap {
+        // Draw the flag natively so it renders regardless of the map style's fonts/glyphs.
+        val width = 96
+        val height = 112
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val pole = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeWidth = 12f
+            strokeCap = Paint.Cap.ROUND
+        }
+        val poleFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            strokeCap = Paint.Cap.ROUND
+        }
+        val flagOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.STROKE
+            strokeWidth = 10f
+            strokeJoin = Paint.Join.ROUND
+        }
+        val flagFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(255, 59, 48)
+            style = Paint.Style.FILL
+        }
+        canvas.drawLine(24f, 12f, 24f, 100f, pole)
+        canvas.drawLine(24f, 12f, 24f, 100f, poleFill)
+        val flag = Path().apply {
+            moveTo(28f, 16f)
+            lineTo(82f, 28f)
+            lineTo(60f, 46f)
+            lineTo(28f, 42f)
+            close()
+        }
+        canvas.drawPath(flag, flagOutline)
+        canvas.drawPath(flag, flagFill)
         return bitmap
     }
 
