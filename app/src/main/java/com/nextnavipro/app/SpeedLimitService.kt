@@ -21,6 +21,7 @@ data class RoadMatch(
     val name: String?,
     val ref: String?,
     val speedLimitKmh: Int?,
+    val highwayType: String?,
     val distanceMeters: Float,
     val roadBearing: Float
 ) {
@@ -107,6 +108,7 @@ object SpeedLimitService {
                         name = tags.optString("name").takeIf { it.isNotBlank() && it != "null" },
                         ref = tags.optString("ref").takeIf { it.isNotBlank() && it != "null" },
                         speedLimitKmh = parseLimit(tags.optString("maxspeed")),
+                        highwayType = tags.optString("highway").takeIf { it.isNotBlank() && it != "null" },
                         distanceMeters = wayBestDistance,
                         roadBearing = wayBestBearing
                     )
