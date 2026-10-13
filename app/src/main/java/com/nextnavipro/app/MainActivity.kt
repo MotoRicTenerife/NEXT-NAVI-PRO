@@ -906,7 +906,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (view is TextView && view !== destinationInput) {
                 view.setTextColor(when {
                     view === speedText -> textColor
-                    view === gpsText -> if (gpsText.text.toString().contains("GPS OK")) Color.rgb(0, 190, 70) else Color.rgb(235, 45, 45)
+                    view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
                     view === routeText -> if (negativeTheme) Color.rgb(0, 85, 105) else cyan
                     view === radarText -> Color.rgb(255, 70, 55)
                     view.text.toString().contains("NEXT NAVI PRO") -> yellow
