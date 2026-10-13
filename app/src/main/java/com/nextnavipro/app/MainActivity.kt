@@ -111,6 +111,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
     private var currentSpeedLimit: Int? = null
+    private var currentRoadMatch: RoadMatch? = null
     private var lastRadarAlertId: Long = -1L
     private var lastRadarAlertMs = 0L
     private var lastRerouteAttemptMs = 0L
@@ -1136,8 +1137,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         currentLocation = Location(smoothed)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
-        gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
-        gpsText.setTextColor(Color.rgb(0, 190, 70))
+        updateGpsStatus(location)
         updateMapForLocation(smoothed, lastCameraLocation == null)
         updateTurnGuidance(smoothed)
         refreshRadarsIfNeeded(smoothed)
@@ -1172,14 +1172,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
-        val point = NavPoint(location.latitude, location.longitude)
-        thread(name = "osm-speed-limit") {
-            val limit = try { SpeedLimitService.findNear(point, location.bearing.takeIf { location.hasBearing() }) } catch (_: Exception) { null }
+        val queryLocation = Location(location)
+        val point = NavPoint(queryLocation.latitude, queryLocation.longitude)
+        // Ignore bearing while almost stationary: Android may retain a stale course.
+        val bearing = queryLocation.bearing.takeIf {
+            queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
+        }
+        thread(name = "osm-road-match") {
+            val match = try { SpeedLimitService.findRoadNear(point, bearing) } catch (_: Exception) { null }
             runOnUiThread {
-                currentSpeedLimit = limit
+                // A slow Overpass response must not overwrite a newer road match.
+                if (lastSpeedLimitQueryMs != now) return@runOnUiThread
+                val latest = currentLocation
+                if (latest != null && latest.distanceTo(queryLocation) > 180f) return@runOnUiThread
+                currentRoadMatch = match
+                currentSpeedLimit = match?.speedLimitKmh
+                latest?.let { updateGpsStatus(it) }
                 updateSpeedLimitDisplay()
             }
         }
+    }
+
+    private fun updateGpsStatus(location: Location) {
+        if (!::gpsText.isInitialized) return
+        val roadName = currentRoadMatch?.displayName
+        gpsText.text = if (!roadName.isNullOrBlank()) {
+            roadName
+        } else {
+            "GPS OK  •  ±" + location.accuracy.toInt() + " m"
+        }
+        gpsText.setTextColor(Color.rgb(0, 190, 70))
     }
 
     private fun updateSpeedLimitDisplay() {
