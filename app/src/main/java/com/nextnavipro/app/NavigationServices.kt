@@ -31,10 +31,15 @@ object NavigationServices {
     private const val READ_TIMEOUT_MS = 15000
     private const val USER_AGENT = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)"
 
-    fun searchPlaces(query: String): List<PlaceResult> {
+    fun searchPlaces(query: String, near: NavPoint? = null): List<PlaceResult> {
         val cleanQuery = query.trim().replace(Regex("\\s+"), " ")
         val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
-        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=8")
+        // Photon supports location-biased search. Supplying the current GPS fix helps
+        // brand queries (e.g. "Mercadona") return nearby branches instead of distant matches.
+        val proximity = near?.let {
+            "&lat=" + it.latitude + "&lon=" + it.longitude + "&zoom=14"
+        }.orEmpty()
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20&lang=it" + proximity)
             .openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
