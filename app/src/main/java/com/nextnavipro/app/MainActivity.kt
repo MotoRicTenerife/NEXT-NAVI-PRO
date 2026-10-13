@@ -1366,9 +1366,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
-        if (previous != null && (previous.distanceTo(location) < 100f || now - lastSpeedLimitQueryMs < 12_000L)) {
+        // Public Overpass is rate-limited: refresh at least every 6 s, or sooner
+        // if the vehicle has moved over 250 m. Avoid showing a previous road's
+        // name/limit while the new road match is being resolved.
+        if (previous != null && previous.distanceTo(location) < 250f &&
+            now - lastSpeedLimitQueryMs < 6_000L) {
             updateSpeedLimitDisplay()
             return
+        }
+        if (previous != null && previous.distanceTo(location) > 180f) {
+            currentRoadMatch = null
+            currentSpeedLimit = null
+            updateGpsStatus(location)
+            updateSpeedLimitDisplay()
         }
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
@@ -1384,7 +1394,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // A slow Overpass response must not overwrite a newer road match.
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
-                if (latest != null && latest.distanceTo(queryLocation) > 180f) return@runOnUiThread
+                if (latest != null && latest.distanceTo(queryLocation) > 180f) {
+                    currentRoadMatch = null
+                    currentSpeedLimit = null
+                    updateGpsStatus(latest)
+                    updateSpeedLimitDisplay()
+                    return@runOnUiThread
+                }
                 currentRoadMatch = match
                 currentSpeedLimit = match?.speedLimitKmh
                 latest?.let { updateGpsStatus(it) }
