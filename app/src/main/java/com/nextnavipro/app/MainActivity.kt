@@ -59,6 +59,7 @@ import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.util.Locale
 import kotlin.concurrent.thread
+import kotlin.math.roundToInt
 
 class MainActivity : Activity(), LocationListener, SensorEventListener {
     companion object {
