@@ -674,7 +674,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val outlineColor = speedGaugeColor(speed)
         for (i in digits.indices) {
-            styled.setSpan(SpeedDigitOutlineSpan(outlineColor, dp(1.6f).toFloat()), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            styled.setSpan(SpeedDigitOutlineSpan(outlineColor, dp(2).toFloat()), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         speedText.text = styled
     }
