@@ -584,8 +584,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         if (themeMode != "auto" || event.sensor.type != Sensor.TYPE_LIGHT || event.values.isEmpty()) return
         val lux = event.values[0]
-        if (lux >= 6000f && negativeTheme) applyThemeMode(false)
-        else if (lux < 6000f && !negativeTheme) applyThemeMode(true)
+        // Bright sunlight: light panel with dark text; ordinary/dim light: dark panel.
+        if (lux >= 6000f && !negativeTheme) applyThemeMode(true)
+        else if (lux < 6000f && negativeTheme) applyThemeMode(false)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
