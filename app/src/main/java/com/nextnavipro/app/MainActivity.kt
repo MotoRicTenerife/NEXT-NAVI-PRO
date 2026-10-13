@@ -109,6 +109,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
     private var lastSpeedLimitQueryLocation: Location? = null
+    private var lastSpeedLimitQueryMs = 0L
     private var currentSpeedLimit: Int? = null
     private var lastRadarAlertId: Long = -1L
     private var lastRadarAlertMs = 0L
@@ -1145,11 +1146,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         val previous = lastSpeedLimitQueryLocation
-        if (previous != null && previous.distanceTo(location) < 35f) {
+        val now = System.currentTimeMillis()
+        if (previous != null && (previous.distanceTo(location) < 100f || now - lastSpeedLimitQueryMs < 12_000L)) {
             updateSpeedLimitDisplay()
             return
         }
         lastSpeedLimitQueryLocation = Location(location)
+        lastSpeedLimitQueryMs = now
         val point = NavPoint(location.latitude, location.longitude)
         thread(name = "osm-speed-limit") {
             val limit = try { SpeedLimitService.findNear(point, location.bearing.takeIf { location.hasBearing() }) } catch (_: Exception) { null }
