@@ -455,48 +455,67 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             mapColumn.addView(recenterButton, params(-1, dp(36)))
         }
 
-        // Move navigation and speed-limit views into their orientation-specific thirds.
+        // Keep the map in the dashboard in both orientations. The speedometer stays
+        // in the central column/band; the map is the right-hand (landscape) or lower
+        // (portrait) pane rather than being used to position the speedometer.
         listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText).forEach { infoColumn.removeView(it) }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             content.orientation = LinearLayout.VERTICAL
-            val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-            val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-            navHalf.addView(maneuverIcon, LinearLayout.LayoutParams(-1, dp(118)))
+            val upper = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            val navHalf = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+            maneuverIcon.textSize = 104f
+            navHalf.addView(maneuverIcon, params(-1, dp(112)))
+            routeText.translationY = 0f
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            routeText.translationY = -dp(8).toFloat()
-            val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            val limitHalf = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 0.92f))
-            content.addView(routeButton, params(-1, dp(44)))
-            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
+            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.85f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.15f))
+            content.addView(routeButton, params(-1, dp(44)))
+            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
         } else {
             content.orientation = LinearLayout.HORIZONTAL
-            val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-            val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-            navHalf.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.35f))
-            maneuverIcon.textSize = 160f
-            navHalf.addView(maneuverIcon, params(-1, dp(142)))
+            val left = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            val navHalf = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+            navHalf.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.2f))
+            maneuverIcon.textSize = 132f
+            navHalf.addView(maneuverIcon, params(-1, dp(132)))
+            routeText.translationY = 0f
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            routeText.translationY = -dp(8).toFloat()
-            val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            val limitHalf = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
             left.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             left.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
+            content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        // Keep the map visible in its dedicated third: bottom in portrait, right in landscape.
-        // NAVIGATORE still opens the expanded map view.
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val controls = LinearLayout(this).apply {
