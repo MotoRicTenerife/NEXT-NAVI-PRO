@@ -513,7 +513,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             ))
             // GPS position is represented by the bitmap arrow alone; no dot underneath.
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties
+            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
                 PropertyFactory.iconImage("next-user-arrow-icon"),
                 PropertyFactory.iconSize(1.0f),
                 PropertyFactory.iconRotate(Expression.get("bearing")),
