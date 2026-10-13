@@ -29,6 +29,12 @@ class SpeedLimitServiceTest {
         assertNull(SpeedLimitService.parseLimit("30 @ (school_hours)"))
     }
 
+    @Test fun roadMatchingIgnoresArbitraryDigitizedWayDirection() {
+        assertEquals(0f, SpeedLimitService.headingAxisDifference(0f, 180f), 0.001f)
+        assertEquals(10f, SpeedLimitService.headingAxisDifference(10f, 190f), 0.001f)
+        assertEquals(90f, SpeedLimitService.headingAxisDifference(0f, 90f), 0.001f)
+    }
+
     @Test fun rejectsImplausibleNumericValues() {
         assertNull(SpeedLimitService.parseLimit("0"))
         assertNull(SpeedLimitService.parseLimit("250"))
