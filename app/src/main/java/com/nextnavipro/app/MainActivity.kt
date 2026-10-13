@@ -1502,22 +1502,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             distanceToTurn += segment[0]
         }
         val instruction = maneuver.instruction
-        val lower = instruction.lowercase(Locale.ITALIAN)
-        // "Uscita" can mean an ordinary road exit or a fork, not a roundabout.
-        // Prefer the routing engine's maneuver type; only trust explicit roundabout
-        // wording as a textual fallback.
-        val roundabout = maneuver.type == 26 || maneuver.type == 27 ||
-            lower.contains("rotonda") || lower.contains("rotatoria")
-        val icon = when {
-            roundabout -> "⟳"
-            maneuver.type in setOf(3, 15, 16, 19, 21, 24, 38) ||
-                lower.contains("sinistra") -> "⬅"
-            maneuver.type in setOf(2, 9, 10, 11, 18, 20, 23, 37) ||
-                lower.contains("destra") -> "➡"
-            maneuver.type in setOf(12, 13) ||
-                lower.contains("inversione") || lower.contains("u-turn") -> "↶"
-            else -> "⬆"
-        }
+        // Trust the routing engine's typed maneuver. Instruction text alone can
+        // mention a roundabout/exit while the actual maneuver is a fork or turn.
+        val roundabout = ManeuverIconResolver.isRoundabout(maneuver.type)
+        val icon = ManeuverIconResolver.icon(maneuver.type, instruction)
         if (::maneuverIcon.isInitialized) {
             maneuverIcon.text = icon
             maneuverIcon.setTextColor(if (negativeTheme) white else Color.BLACK)
