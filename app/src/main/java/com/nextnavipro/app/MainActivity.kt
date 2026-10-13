@@ -41,6 +41,11 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.expressions.Expression
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -332,13 +337,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         speedText = TextView(this).apply {
             text = "000"
-            textSize = 116f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            textSize = 132f
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(160)))
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -393,6 +399,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(maneuverIcon, LinearLayout.LayoutParams(-1, dp(118)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            routeText.translationY = -dp(8).toFloat()
+            routeText.translationY = -dp(8).toFloat()
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -401,7 +409,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
-            speedText.textSize = 116f
+            speedText.textSize = 132f
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -489,6 +497,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
             mapStyleReady = true
+            style.addImage("next-user-arrow-icon", createGpsArrowBitmap())
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
@@ -511,14 +520,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 PropertyFactory.circleStrokeWidth(3f)
             ))
             style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
-                PropertyFactory.textField("▲"),
-                PropertyFactory.textColor("#FFD400"),
-                PropertyFactory.textHaloColor("#000000"),
-                PropertyFactory.textHaloWidth(3f),
-                PropertyFactory.textSize(32f),
-                PropertyFactory.textRotationAlignment("viewport"),
+                PropertyFactory.iconImage("next-user-arrow-icon"),
+                PropertyFactory.iconSize(1.0f),
+                PropertyFactory.iconRotate(Expression.get("bearing")),
+                PropertyFactory.iconRotationAlignment("map"),
                 PropertyFactory.iconAllowOverlap(true),
-                PropertyFactory.textAllowOverlap(true)
+                PropertyFactory.iconIgnorePlacement(true)
             ))
             // Saved places and selected destination get dedicated vector layers; these
             // markers are independent of the map style's bundled icon fonts.
@@ -1246,6 +1253,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
     }
 
+    private fun createGpsArrowBitmap(): Bitmap {
+        // Native bitmap avoids missing glyphs/fonts in vector map styles.
+        val size = 96
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 12f; strokeJoin = Paint.Join.ROUND }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 212, 0); style = Paint.Style.FILL }
+        val path = Path().apply {
+            moveTo(size * 0.5f, size * 0.06f)
+            lineTo(size * 0.86f, size * 0.91f)
+            lineTo(size * 0.5f, size * 0.70f)
+            lineTo(size * 0.14f, size * 0.91f)
+            close()
+        }
+        canvas.drawPath(path, shadow)
+        canvas.drawPath(path, fill)
+        return bitmap
+    }
+
     private fun refreshSavedPoiMarkers() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
@@ -1274,7 +1300,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateMapForLocation(location: Location, forceCenter: Boolean) {
         if (!mapStyleReady) return
         val point = Point.fromLngLat(location.longitude, location.latitude)
-        (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(Feature.fromGeometry(point))
+        val positionFeature = Feature.fromGeometry(point).apply {
+            addNumberProperty("bearing", if (location.hasBearing()) location.bearing.toDouble() else 0.0)
+        }
+        (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(positionFeature)
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 8f
         if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
