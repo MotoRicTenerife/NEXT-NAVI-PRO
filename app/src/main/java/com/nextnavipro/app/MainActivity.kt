@@ -400,7 +400,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, LinearLayout.LayoutParams(-1, dp(118)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             routeText.translationY = -dp(8).toFloat()
-            routeText.translationY = -dp(8).toFloat()
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -418,6 +417,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             maneuverIcon.textSize = 160f
             navHalf.addView(maneuverIcon, params(-1, dp(142)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            routeText.translationY = -dp(8).toFloat()
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
