@@ -1298,7 +1298,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         if (::maneuverIcon.isInitialized) {
             maneuverIcon.text = icon
-            maneuverIcon.setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
+            maneuverIcon.setTextColor(if (negativeTheme) white else Color.BLACK)
         }
         val shortInstruction = if (roundabout && !lower.contains("rotonda") && !lower.contains("rotatoria")) {
             "Rotonda: " + instruction
