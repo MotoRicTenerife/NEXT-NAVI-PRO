@@ -21,6 +21,7 @@ import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -1126,14 +1127,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0)
+        // elapsedRealtimeNanos is monotonic and avoids wall-clock changes making a fresh fix look stale.
+        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
         if (ageMs > 10000 || !location.hasAccuracy() || location.accuracy > 50f) {
             gpsText.text = "GPS INSUFFICIENTE"
             return
         }
         val previousRaw = lastRawGpsLocation
+        if (previousRaw != null && isImplausibleGpsJump(previousRaw, location)) {
+            // Do not promote a rejected fix to the reference point; the next fix is
+            // compared with the last accepted raw fix instead of the bad jump.
+            gpsText.text = "GPS SALTO SCARTATO"
+            return
+        }
         lastRawGpsLocation = Location(location)
-        val smoothed = smoothLocation(previousRaw, location)
+        val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
@@ -1146,17 +1158,43 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         checkRadarProximityAlert(smoothed)
     }
 
+    private fun isImplausibleGpsJump(previous: Location, incoming: Location): Boolean {
+        val elapsedDeltaNs = incoming.elapsedRealtimeNanos - previous.elapsedRealtimeNanos
+        val dtSeconds = if (elapsedDeltaNs > 0L) {
+            elapsedDeltaNs / 1_000_000_000f
+        } else {
+            ((incoming.time - previous.time).coerceAtLeast(1L)) / 1000f
+        }.coerceAtLeast(0.001f)
+        val previousSpeed = if (previous.hasSpeed()) previous.speed else 0f
+        val incomingSpeed = if (incoming.hasSpeed()) incoming.speed else 0f
+        val plausibleSpeed = maxOf(previousSpeed, incomingSpeed, 8f)
+        val uncertainty = (if (previous.hasAccuracy()) previous.accuracy else 25f) +
+            (if (incoming.hasAccuracy()) incoming.accuracy else 25f)
+        val maximumPlausibleDistance = (plausibleSpeed * dtSeconds * 2.5f + uncertainty).coerceAtLeast(35f)
+        return previous.distanceTo(incoming) > maximumPlausibleDistance
+    }
+
     private fun smoothLocation(previous: Location?, incoming: Location): Location {
-        // Reject impossible jumps; keep the real fix as source of truth and smooth only small jitter.
+        // Accuracy-adaptive low-pass filtering: follow good fixes quickly, damp noisy fixes
+        // more strongly, and avoid smoothing across large movements or tight turns.
         val result = Location(incoming)
         if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
-            val dt = ((incoming.time - previous.time).coerceAtLeast(1L)) / 1000f
             val jump = previous.distanceTo(incoming)
-            val maxPlausible = (maxOf(previous.speed, incoming.speed, 8f) * dt * 2.5f + previous.accuracy + incoming.accuracy).coerceAtLeast(35f)
-            if (jump > maxPlausible && incoming.accuracy > 20f) return Location(previous)
-            if (jump < 35f && incoming.accuracy <= 30f) {
-                result.latitude = previous.latitude * 0.28 + incoming.latitude * 0.72
-                result.longitude = previous.longitude * 0.28 + incoming.longitude * 0.72
+            if (jump < 35f) {
+                val accuracyAlpha = when {
+                    incoming.accuracy <= 10f -> 0.72f
+                    incoming.accuracy <= 20f -> 0.62f
+                    incoming.accuracy <= 35f -> 0.48f
+                    else -> 0.35f
+                }
+                val speed = if (incoming.hasSpeed()) incoming.speed else 0f
+                val alpha = when {
+                    speed >= 15f -> (accuracyAlpha + 0.15f).coerceAtMost(0.88f)
+                    speed < 2.5f -> (accuracyAlpha - 0.15f).coerceAtLeast(0.20f)
+                    else -> accuracyAlpha
+                }
+                result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
+                result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
             }
         }
         smoothedGpsLocation = Location(result)
