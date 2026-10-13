@@ -57,6 +57,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val SOURCE_USER = "next-user-position"
+        private const val SOURCE_SAVED_POIS = "next-saved-pois"
+        private const val SOURCE_DESTINATION = "next-destination"
         private const val SOURCE_ROUTE = "next-active-route"
         private const val SOURCE_RADARS = "next-speed-cameras"
     }
@@ -318,6 +320,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             textSize = 18f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
+            includeFontPadding = false
             maxLines = 3
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }
@@ -517,6 +520,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.textAllowOverlap(true)
             ))
+            // Saved places and selected destination get dedicated vector layers; these
+            // markers are independent of the map style's bundled icon fonts.
+            style.addSource(GeoJsonSource(SOURCE_SAVED_POIS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(CircleLayer("next-saved-poi-circles", SOURCE_SAVED_POIS).withProperties(
+                PropertyFactory.circleColor("#FF3B30"),
+                PropertyFactory.circleRadius(9f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2.5f)
+            ))
+            style.addLayer(SymbolLayer("next-saved-poi-labels", SOURCE_SAVED_POIS).withProperties(
+                PropertyFactory.textField("⚑"),
+                PropertyFactory.textColor("#FF3B30"),
+                PropertyFactory.textHaloColor("#FFFFFF"),
+                PropertyFactory.textHaloWidth(2f),
+                PropertyFactory.textSize(22f),
+                PropertyFactory.textAllowOverlap(true)
+            ))
+            style.addSource(GeoJsonSource(SOURCE_DESTINATION, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(CircleLayer("next-destination-marker", SOURCE_DESTINATION).withProperties(
+                PropertyFactory.circleColor("#FF3B30"),
+                PropertyFactory.circleRadius(11f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(3f)
+            ))
+            refreshSavedPoiMarkers()
+            refreshDestinationMarker()
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
@@ -570,7 +599,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else Toast.makeText(this, "Sensore lux non disponibile: mantengo la modalità corrente.", Toast.LENGTH_LONG).show()
             }
         }
-        if (::themeButton.isInitialized) themeButton.text = when (mode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }
+        if (::themeButton.isInitialized) themeButton.text = when (mode) { "auto" -> "AUTO LUCE"; "positive" -> "NEGATIVO"; else -> "POSITIVO" }
     }
 
     private fun applyThemeMode(isNegative: Boolean) {
@@ -585,8 +614,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (themeMode != "auto" || event.sensor.type != Sensor.TYPE_LIGHT || event.values.isEmpty()) return
         val lux = event.values[0]
         // Bright sunlight: light panel with dark text; ordinary/dim light: dark panel.
-        if (lux >= 6000f && !negativeTheme) applyThemeMode(true)
-        else if (lux < 6000f && negativeTheme) applyThemeMode(false)
+        if (lux >= 6000f && negativeTheme) applyThemeMode(false)
+        else if (lux < 6000f && !negativeTheme) applyThemeMode(true)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -683,7 +712,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (view is TextView && view !== destinationInput) {
                 view.setTextColor(when {
                     view === speedText -> textColor
-                    view === gpsText -> if (negativeTheme) yellow else Color.rgb(130, 85, 0)
+                    view === gpsText -> if (gpsText.text.toString().contains("GPS OK")) Color.rgb(0, 190, 70) else Color.rgb(235, 45, 45)
                     view === routeText -> if (negativeTheme) Color.rgb(0, 85, 105) else cyan
                     view === radarText -> Color.rgb(255, 70, 55)
                     view.text.toString().contains("NEXT NAVI PRO") -> yellow
@@ -764,6 +793,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         destination = PlaceResult(name, NavPoint(lat, lon), prefs.getString("home_description", "").orEmpty())
+        refreshDestinationMarker()
         destinationInput.setText(name)
         routeText.text = "DESTINAZIONE: Casa\n" + name
         calculateSelectedRoute()
@@ -902,6 +932,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         announcedStage = 0
         if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
         destination = null
+        refreshDestinationMarker()
         if (::routeText.isInitialized) routeText.text = "MAPPA ONLINE  •  Nessun percorso attivo"
         if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
         if (::destinationInput.isInitialized) destinationInput.text.clear()
@@ -987,6 +1018,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(saved.map { it.first }.toTypedArray()) { _, which ->
                 val poi = saved[which]
                 destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
+                refreshDestinationMarker()
                 destinationInput.setText(poi.first)
                 routeText.text = "DESTINAZIONE: " + poi.first + "\\nPremi AVVIA PERCORSO"
                 exitMapFullScreen()
@@ -1001,6 +1033,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(arrayOf("Usa come destinazione", "Salva come luogo di interesse")) { _, which ->
                 if (which == 0) {
                     destination = PlaceResult("Punto sulla mappa", point, "Punto selezionato sulla mappa")
+                    refreshDestinationMarker()
                     destinationInput.setText("Punto sulla mappa")
                     exitMapFullScreen()
                     calculateSelectedRoute()
@@ -1012,6 +1045,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             if (name.isNotBlank()) {
                                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
+                                refreshSavedPoiMarkers()
                                 Toast.makeText(this, "Luogo salvato: " + name, Toast.LENGTH_SHORT).show()
                             }
                         }.setNegativeButton("Annulla", null).show()
@@ -1067,7 +1101,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
-        gpsText.setTextColor(if (negativeTheme) yellow else Color.rgb(130, 85, 0))
+        gpsText.setTextColor(Color.rgb(0, 190, 70))
         updateMapForLocation(location, lastCameraLocation == null)
         updateTurnGuidance(location)
         refreshRadarsIfNeeded(location)
@@ -1210,6 +1244,31 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Feature.fromGeometry(Point.fromLngLat(camera.point.longitude, camera.point.latitude))
         }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
+    }
+
+    private fun refreshSavedPoiMarkers() {
+        if (!mapStyleReady) return
+        val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
+        val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
+            .filterKeys { it.startsWith("poi_") }
+            .mapNotNull { (_, value) ->
+                val coords = (value as? String)?.split(",") ?: return@mapNotNull null
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                Feature.fromGeometry(Point.fromLngLat(lon, lat))
+            }
+        source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
+    }
+
+    private fun refreshDestinationMarker() {
+        if (!mapStyleReady) return
+        val source = map?.style?.getSource(SOURCE_DESTINATION) as? GeoJsonSource ?: return
+        val point = destination?.point
+        val features = if (point == null) emptyArray() else arrayOf(
+            Feature.fromGeometry(Point.fromLngLat(point.longitude, point.latitude))
+        )
+        source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
     }
 
     private fun updateMapForLocation(location: Location, forceCenter: Boolean) {
