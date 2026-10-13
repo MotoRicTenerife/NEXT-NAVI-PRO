@@ -306,10 +306,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         maneuverIcon = TextView(this).apply {
             text = "↑"
-            textSize = 54f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            // Oversized, heavy navigation symbol; the container below is enlarged too
+            // so the glyph is not clipped on portrait screens.
+            textSize = 160f
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
+            includeFontPadding = false
             setTextColor(if (negativeTheme) Color.rgb(25, 30, 34) else white)
+        }
+        routeText.apply {
+            textSize = 18f
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 3
+            setPadding(dp(8), dp(6), dp(8), dp(6))
         }
 
         val speedColumn = LinearLayout(this).apply {
@@ -378,7 +388,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-            navHalf.addView(maneuverIcon, params(-1, dp(42)))
+            navHalf.addView(maneuverIcon, LinearLayout.LayoutParams(-1, dp(118)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
@@ -394,8 +404,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val left = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
             val navHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             navHalf.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.35f))
-            maneuverIcon.textSize = 58f
-            navHalf.addView(maneuverIcon, params(-1, dp(76)))
+            maneuverIcon.textSize = 160f
+            navHalf.addView(maneuverIcon, params(-1, dp(142)))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
             limitHalf.addView(limitTitle, params(-1, dp(24)))
@@ -477,22 +487,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             mapStyleReady = true
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
-            // A solid location dot remains visible even if the map style lacks the arrow glyph.
-            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
-                PropertyFactory.circleColor("#FFD400"),
-                PropertyFactory.circleRadius(7f),
-                PropertyFactory.circleStrokeColor("#000000"),
-                PropertyFactory.circleStrokeWidth(2.5f)
-            ))
-            // A high-contrast arrow stays upright on screen while the map rotates with travel heading.
-            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
-                PropertyFactory.textField("▲"),
-                PropertyFactory.textColor("#FFD400"),
-                PropertyFactory.textHaloColor("#000000"),
-                PropertyFactory.textHaloWidth(2.5f),
-                PropertyFactory.textSize(25f),
-                PropertyFactory.textRotationAlignment("viewport")
-            ))
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
@@ -504,6 +498,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 PropertyFactory.circleRadius(6f),
                 PropertyFactory.circleStrokeColor("#FFFFFF"),
                 PropertyFactory.circleStrokeWidth(1.5f)
+            ))
+            // Add the live-position layers LAST so neither the route line nor radar markers
+            // can paint over them. The dot uses circles only (no font/glyph dependency).
+            style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(CircleLayer("next-user-dot", SOURCE_USER).withProperties(
+                PropertyFactory.circleColor("#FFD400"),
+                PropertyFactory.circleRadius(10f),
+                PropertyFactory.circleStrokeColor("#000000"),
+                PropertyFactory.circleStrokeWidth(3f)
+            ))
+            style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
+                PropertyFactory.textField("▲"),
+                PropertyFactory.textColor("#FFD400"),
+                PropertyFactory.textHaloColor("#000000"),
+                PropertyFactory.textHaloWidth(3f),
+                PropertyFactory.textSize(32f),
+                PropertyFactory.textRotationAlignment("viewport"),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.textAllowOverlap(true)
             ))
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
@@ -1115,6 +1128,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> ((distanceToTurn / 10.0).toInt() * 10).toString() + " m"
             }
             routeText.text = shortInstruction + "\n" + distanceLabel
+            routeText.typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
         val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
