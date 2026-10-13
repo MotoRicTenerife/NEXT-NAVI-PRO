@@ -908,6 +908,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destinationInput.setTextColor(textColor)
         destinationInput.setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
         destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(35, 35, 35))
+        renderSpeedDigits(lastDisplayedSpeed)
+        updateSpeedGaugeBorder(lastDisplayedSpeed)
     }
 
     private fun android.view.View.walkViews(): List<View> {
@@ -1779,6 +1781,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onDestroy() {
         splashHandler.removeCallbacksAndMessages(null)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        speedAlertHandler.removeCallbacksAndMessages(null)
+        speedAlertActive = false
+        speedAlertFlashRed = false
         mapView?.onDestroy()
         mapView = null
         voiceGuide?.stop()
