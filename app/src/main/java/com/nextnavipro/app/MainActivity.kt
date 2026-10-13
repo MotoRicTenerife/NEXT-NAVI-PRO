@@ -78,7 +78,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var destinationInput: EditText
     private lateinit var searchButton: Button
     private lateinit var routeButton: Button
-    private lateinit var modeButton: Button
     private lateinit var themeButton: Button
     private lateinit var menuButton: Button
     private var sensorManager: SensorManager? = null
@@ -98,7 +97,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var activityStarted = false
     private var activityResumed = false
     private var gpsUpdatesRequested = false
-    private var carMode = false
     private var negativeTheme = true
     private var currentLocation: Location? = null
     private var destination: PlaceResult? = null
@@ -110,6 +108,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var radarCameras: List<RadarCamera> = emptyList()
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
+    private var lastSpeedLimitQueryLocation: Location? = null
+    private var currentSpeedLimit: Int? = null
+    private var lastRadarAlertId: Long = -1L
+    private var lastRadarAlertMs = 0L
+    private var lastRerouteAttemptMs = 0L
+    private var offRouteFixes = 0
+    private var lastRawGpsLocation: Location? = null
+    private var smoothedGpsLocation: Location? = null
+    private val mapFollowHandler = Handler(Looper.getMainLooper())
+    private val mapFollowRunnable = object : Runnable {
+        override fun run() {
+            if (dashboardStarted && activityResumed && !fullScreenMap && followGps) {
+                currentLocation?.let { updateMapForLocation(it, true) }
+            }
+            mapFollowHandler.postDelayed(this, 10_000L)
+        }
+    }
     private var followGps = true
     private var isSearching = false
     private var isCalculatingRoute = false
@@ -154,6 +169,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -433,20 +449,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        modeButton = makeButton(if (carMode) "AUTO" else "MOTO") {
-            carMode = !carMode
-            modeButton.text = if (carMode) "AUTO" else "MOTO"
-        }
         themeButton = makeButton(when (themeMode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }) { toggleTheme() }
-        controls.addView(modeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-            setMargins(dp(2), dp(3), dp(3), dp(1))
-        })
-        controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-            setMargins(dp(3), dp(3), dp(2), dp(1))
+        controls.addView(themeButton, LinearLayout.LayoutParams(-1, dp(44)).apply {
+            setMargins(dp(2), dp(3), dp(2), dp(1))
         })
         root.addView(controls, params(-1, dp(48)))
 
         setContentView(root)
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
         applyTheme()
         updateSpeedDisplay(currentLocation?.let { if (it.hasSpeed()) (it.speed * 3.6f).toInt() else null })
         setupMap(newMapView, savedState)
@@ -871,7 +882,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         thread(name = "valhalla-route") {
             try {
                 val result = NavigationServices.calculateRoute(
-                    origin, target.point, motorcycle = !carMode
+                    origin, target.point, motorcycle = false
                 )
                 runOnUiThread {
                     isCalculatingRoute = false
@@ -1091,14 +1102,121 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS INSUFFICIENTE"
             return
         }
-        currentLocation = Location(location)
+        val previousRaw = lastRawGpsLocation
+        lastRawGpsLocation = Location(location)
+        val smoothed = smoothLocation(previousRaw, location)
+        currentLocation = Location(smoothed)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         gpsText.text = "GPS OK  •  ±" + location.accuracy.toInt() + " m"
         gpsText.setTextColor(Color.rgb(0, 190, 70))
-        updateMapForLocation(location, lastCameraLocation == null)
-        updateTurnGuidance(location)
-        refreshRadarsIfNeeded(location)
+        updateMapForLocation(smoothed, lastCameraLocation == null)
+        updateTurnGuidance(smoothed)
+        refreshRadarsIfNeeded(smoothed)
+        refreshSpeedLimitIfNeeded(smoothed)
+        checkOffRouteAndReroute(smoothed)
+        checkRadarProximityAlert(smoothed)
+    }
+
+    private fun smoothLocation(previous: Location?, incoming: Location): Location {
+        // Reject impossible jumps; keep the real fix as source of truth and smooth only small jitter.
+        val result = Location(incoming)
+        if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
+            val dt = ((incoming.time - previous.time).coerceAtLeast(1L)) / 1000f
+            val jump = previous.distanceTo(incoming)
+            val maxPlausible = (maxOf(previous.speed, incoming.speed, 8f) * dt * 2.5f + previous.accuracy + incoming.accuracy).coerceAtLeast(35f)
+            if (jump > maxPlausible && incoming.accuracy > 20f) return Location(previous)
+            if (jump < 35f && incoming.accuracy <= 30f) {
+                result.latitude = previous.latitude * 0.28 + incoming.latitude * 0.72
+                result.longitude = previous.longitude * 0.28 + incoming.longitude * 0.72
+            }
+        }
+        smoothedGpsLocation = Location(result)
+        return result
+    }
+
+    private fun refreshSpeedLimitIfNeeded(location: Location) {
+        val previous = lastSpeedLimitQueryLocation
+        if (previous != null && previous.distanceTo(location) < 35f) {
+            updateSpeedLimitDisplay()
+            return
+        }
+        lastSpeedLimitQueryLocation = Location(location)
+        val point = NavPoint(location.latitude, location.longitude)
+        thread(name = "osm-speed-limit") {
+            val limit = try { SpeedLimitService.findNear(point, location.bearing.takeIf { location.hasBearing() }) } catch (_: Exception) { null }
+            runOnUiThread {
+                currentSpeedLimit = limit
+                updateSpeedLimitDisplay()
+            }
+        }
+    }
+
+    private fun updateSpeedLimitDisplay() {
+        if (!::limitValue.isInitialized) return
+        limitValue.text = currentSpeedLimit?.toString() ?: "—"
+        if (currentSpeedLimit != null && currentLocation?.hasSpeed() == true &&
+            currentLocation!!.speed * 3.6f > currentSpeedLimit!! + 5f) {
+            limitValue.setTextColor(Color.rgb(255, 55, 45))
+        } else {
+            limitValue.setTextColor(if (negativeTheme) white else positiveText)
+        }
+    }
+
+    private fun checkRadarProximityAlert(location: Location) {
+        if (!location.hasAccuracy() || location.accuracy > 25f || !location.hasSpeed() || location.speed < 4f) return
+        val camera = radarCameras.mapNotNull { item ->
+            val distance = FloatArray(1)
+            Location.distanceBetween(location.latitude, location.longitude, item.point.latitude, item.point.longitude, distance)
+            if (distance[0] <= 650f) item to distance[0] else null
+        }.minByOrNull { it.second } ?: return
+        val now = System.currentTimeMillis()
+        if (camera.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
+        lastRadarAlertId = camera.first.osmId
+        lastRadarAlertMs = now
+        if (voiceGuideReady) voiceGuide?.speak("Attenzione, possibile autovelox tra circa " + camera.second.toInt() + " metri", TextToSpeech.QUEUE_ADD, null, "radar-" + camera.first.osmId)
+        radarText.text = "⚠ AUTOVELOX • " + camera.second.toInt() + " m"
+    }
+
+    private fun checkOffRouteAndReroute(location: Location) {
+        val route = routeResult ?: return
+        val target = destination ?: return
+        if (!location.hasAccuracy() || location.accuracy > 25f) return
+        val nearest = route.points.minOfOrNull { point ->
+            val d = FloatArray(1)
+            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
+            d[0]
+        } ?: return
+        if (nearest > maxOf(65f, location.accuracy * 2.5f)) offRouteFixes++ else offRouteFixes = 0
+        if (offRouteFixes < 3) return
+        val now = System.currentTimeMillis()
+        if (now - lastRerouteAttemptMs < 20_000L || isCalculatingRoute) return
+        lastRerouteAttemptMs = now
+        offRouteFixes = 0
+        isCalculatingRoute = true
+        if (::routeText.isInitialized) routeText.text = "DEVIAZIONE RILEVATA • RICALCOLO…"
+        thread(name = "valhalla-reroute") {
+            try {
+                val recalculated = NavigationServices.calculateRoute(
+                    NavPoint(location.latitude, location.longitude), target.point, motorcycle = false
+                )
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    routeResult = recalculated
+                    announcedManeuverIndex = -1
+                    announcedStage = 0
+                    drawRoute(recalculated, false)
+                    updateTurnGuidance(currentLocation)
+                    if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + recalculated.firstInstruction
+                    if (voiceGuideReady) voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute")
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    if (::routeText.isInitialized) routeText.text = "DEVIAZIONE • RICALCOLO NON DISPONIBILE"
+                }
+            }
+        }
     }
 
     private fun updateTurnGuidance(location: Location?) {
@@ -1334,7 +1452,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(positionFeature)
         val previous = lastCameraLocation
-        val movedEnough = previous == null || previous.distanceTo(location) >= 8f
+        val movedEnough = previous == null || previous.distanceTo(location) >= 2f
         if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
             val oldBearing = map?.cameraPosition?.bearing ?: 0.0
             val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldBearing
@@ -1343,7 +1461,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 650)
+            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
             lastCameraLocation = Location(location)
         }
     }
@@ -1418,6 +1536,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onDestroy() {
         splashHandler.removeCallbacksAndMessages(null)
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
         mapView?.onDestroy()
         mapView = null
         voiceGuide?.stop()
