@@ -484,7 +484,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             readyMap.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                    // Let the user inspect the map, then resume GPS-follow after ten seconds.
                     followGps = false
+                    mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    mapFollowHandler.postDelayed({
+                        followGps = true
+                        currentLocation?.let { updateMapForLocation(it, true) }
+                        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                        mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+                    }, 10_000L)
                 }
             }
             applyMapStyle(readyMap)
