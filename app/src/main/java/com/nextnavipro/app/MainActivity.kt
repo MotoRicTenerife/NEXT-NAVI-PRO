@@ -47,6 +47,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.drawable.GradientDrawable
+import android.text.InputType
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -113,6 +115,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryMs = 0L
     private var currentSpeedLimit: Int? = null
     private var currentRoadMatch: RoadMatch? = null
+    private var lastDisplayedSpeed: Int? = null
+    private var speedAlertActive = false
+    private var speedAlertFlashRed = false
+    private var speedAlertFlashesRemaining = 0
+    private val speedAlertHandler = Handler(Looper.getMainLooper())
+    private val speedAlertRunnable = object : Runnable {
+        override fun run() {
+            if (!isMotorwaySpeeding()) {
+                speedAlertActive = false
+                speedAlertFlashRed = false
+                speedAlertFlashesRemaining = 0
+                renderSpeedDigits(lastDisplayedSpeed)
+                return
+            }
+            if (speedAlertFlashesRemaining == 0) {
+                speedAlertFlashesRemaining = 6
+                speedAlertFlashRed = true
+            }
+            renderSpeedDigits(lastDisplayedSpeed)
+            speedAlertFlashesRemaining--
+            if (speedAlertFlashesRemaining > 0) {
+                speedAlertFlashRed = !speedAlertFlashRed
+                speedAlertHandler.postDelayed(this, 250L)
+            } else {
+                speedAlertFlashRed = false
+                renderSpeedDigits(lastDisplayedSpeed)
+                speedAlertHandler.postDelayed(this, 3500L)
+            }
+        }
+    }
     private var lastRadarAlertId: Long = -1L
     private var lastRadarAlertMs = 0L
     private var lastRerouteAttemptMs = 0L
@@ -598,18 +630,130 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
 
     private fun updateSpeedDisplay(speed: Int?) {
+        lastDisplayedSpeed = speed
+        renderSpeedDigits(speed)
+        updateSpeedGaugeBorder(speed)
+        updateSpeedingAlertState()
+    }
+
+    private fun renderSpeedDigits(speed: Int?) {
+        if (!::speedText.isInitialized) return
         val value = (speed ?: 0).coerceIn(0, 999)
         val digits = String.format(Locale.US, "%03d", value)
         val styled = SpannableString(digits)
-        val activeColor = if (negativeTheme) Color.rgb(25, 30, 34) else white
+        val activeColor = if (speedAlertFlashRed) Color.rgb(255, 55, 45)
+            else if (negativeTheme) Color.rgb(25, 30, 34) else white
         val leadingZeros = if (speed == null) 3 else digits.indexOfFirst { it != '0' }.let { if (it < 0) 2 else it }
-        for (i in 0 until leadingZeros) {
-            styled.setSpan(ForegroundColorSpan(inactiveDigitColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-        for (i in leadingZeros until digits.length) {
-            styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (speedAlertFlashRed) {
+            for (i in digits.indices) {
+                styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        } else {
+            for (i in 0 until leadingZeros) {
+                styled.setSpan(ForegroundColorSpan(inactiveDigitColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            for (i in leadingZeros until digits.length) {
+                styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
         }
         speedText.text = styled
+    }
+
+    private fun updateSpeedGaugeBorder(speed: Int?) {
+        if (!::speedText.isInitialized) return
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val greenMax = prefs.getInt("speed_green_max", 50).coerceIn(0, 250)
+        val yellowMax = prefs.getInt("speed_yellow_max", 120).coerceIn(greenMax + 1, 300)
+        val borderColor = when {
+            speed == null -> Color.GRAY
+            speed <= greenMax -> Color.rgb(0, 205, 90)
+            speed <= yellowMax -> Color.rgb(255, 190, 0)
+            else -> Color.rgb(255, 55, 45)
+        }
+        speedText.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(if (negativeTheme) negativeBackground else positiveBackground)
+            setStroke(dp(4), borderColor)
+            cornerRadius = dp(8).toFloat()
+        }
+    }
+
+    private fun isMotorwaySpeeding(): Boolean {
+        val road = currentRoadMatch ?: return false
+        if (road.highwayType != "motorway") return false
+        val location = currentLocation ?: return false
+        if (!location.hasSpeed()) return false
+        // A mapped legal limit takes priority. If missing, this is only the user's
+        // configurable alarm threshold; the legal-limit display remains unknown.
+        val threshold = currentSpeedLimit
+            ?: getSharedPreferences(PREFS, MODE_PRIVATE).getInt("motorway_alert_speed", 120)
+        return location.speed * 3.6f > threshold + 3f
+    }
+
+    private fun updateSpeedingAlertState() {
+        if (isMotorwaySpeeding()) {
+            if (!speedAlertActive) {
+                speedAlertActive = true
+                speedAlertFlashesRemaining = 0
+                speedAlertFlashRed = false
+                speedAlertHandler.removeCallbacks(speedAlertRunnable)
+                speedAlertHandler.post(speedAlertRunnable)
+            }
+        } else if (speedAlertActive || speedAlertFlashRed) {
+            speedAlertHandler.removeCallbacks(speedAlertRunnable)
+            speedAlertActive = false
+            speedAlertFlashRed = false
+            speedAlertFlashesRemaining = 0
+            renderSpeedDigits(lastDisplayedSpeed)
+        }
+    }
+
+    private fun showSpeedSettings() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val greenInput = EditText(this).apply {
+            hint = "Soglia verde fino a (km/h)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.getInt("speed_green_max", 50).toString())
+        }
+        val yellowInput = EditText(this).apply {
+            hint = "Soglia gialla fino a (km/h)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.getInt("speed_yellow_max", 120).toString())
+        }
+        val motorwayInput = EditText(this).apply {
+            hint = "Allarme autostrada se limite ignoto (km/h)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.getInt("motorway_alert_speed", 120).toString())
+        }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(greenInput, params(-1, dp(52)))
+            addView(yellowInput, params(-1, dp(52)))
+            addView(motorwayInput, params(-1, dp(52)))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Soglie tachimetro e avvisi")
+            .setView(fields)
+            .setPositiveButton("Salva") { _, _ ->
+                val green = greenInput.text.toString().toIntOrNull()
+                val yellow = yellowInput.text.toString().toIntOrNull()
+                val motorway = motorwayInput.text.toString().toIntOrNull()
+                if (green == null || yellow == null || motorway == null ||
+                    green !in 0..250 || yellow !in (green + 1)..300 || motorway !in 30..250) {
+                    Toast.makeText(this, "Valori non validi: verde 0–250, giallo maggiore del verde e allarme 30–250.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                prefs.edit()
+                    .putInt("speed_green_max", green)
+                    .putInt("speed_yellow_max", yellow)
+                    .putInt("motorway_alert_speed", motorway)
+                    .apply()
+                updateSpeedGaugeBorder(lastDisplayedSpeed)
+                updateSpeedingAlertState()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun toggleTheme() {
@@ -656,7 +800,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -666,6 +810,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     3 -> testNavigationVoice()
                     4 -> toggleTheme()
                     5 -> showSearchHistory()
+                    6 -> showSpeedSettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -742,6 +887,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         limitValue.setBackgroundColor(panelBackground)
         routeText.setBackgroundColor(panelBackground)
         speedText.setBackgroundColor(panelBackground)
+        updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
         root.walkViews().forEach { view ->
             if (view is TextView && view !== destinationInput) {
@@ -1246,7 +1392,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!::limitValue.isInitialized) return
         limitValue.text = currentSpeedLimit?.toString() ?: "—"
         if (currentSpeedLimit != null && currentLocation?.hasSpeed() == true &&
-            currentLocation!!.speed * 3.6f > currentSpeedLimit!! + 5f) {
+            currentLocation!!.speed * 3.6f > currentSpeedLimit!! + 3f) {
             limitValue.setTextColor(Color.rgb(255, 55, 45))
         } else {
             limitValue.setTextColor(if (negativeTheme) white else positiveText)
