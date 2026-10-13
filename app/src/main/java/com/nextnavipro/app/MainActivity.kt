@@ -3,6 +3,9 @@ package com.nextnavipro.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.hardware.Sensor
@@ -24,6 +27,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -96,6 +100,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var selectionMode = false
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
+    private var gpsMarkerAnimator: ValueAnimator? = null
+    private var displayedMarkerLocation: Location? = null
     private var dashboardStarted = false
     private var activityStarted = false
     private var activityResumed = false
@@ -179,6 +185,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         // Keep route, destination and latest GPS fix in this Activity while rotating.
         // Recreate only the view tree and MapView so portrait/landscape layouts are rebuilt.
+        gpsMarkerAnimator?.cancel()
+        gpsMarkerAnimator = null
+        displayedMarkerLocation = null
         val oldMapView = mapView
         try {
             oldMapView?.onPause()
@@ -1298,7 +1307,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
-        updateMapForLocation(smoothed, lastCameraLocation == null)
+        animateGpsMarkerTo(smoothed)
+        updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         refreshRadarsIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
@@ -1688,13 +1698,60 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
     }
 
-    private fun updateMapForLocation(location: Location, forceCenter: Boolean) {
+    private fun animateGpsMarkerTo(target: Location) {
+        if (!mapStyleReady) {
+            displayedMarkerLocation = Location(target)
+            return
+        }
+        val start = displayedMarkerLocation?.let { Location(it) }
+            ?: currentLocation?.let { Location(it) }
+            ?: Location(target)
+        val distance = start.distanceTo(target)
+        gpsMarkerAnimator?.cancel()
+        if (!activityResumed || distance < 1f || distance > 80f) {
+            displayedMarkerLocation = Location(target)
+            updateUserMarker(target)
+            return
+        }
+        val speed = if (target.hasSpeed()) target.speed else 0f
+        val durationMs = ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(180L, 850L)
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            interpolator = LinearInterpolator()
+            addUpdateListener { animation ->
+                val fraction = animation.animatedValue as Float
+                val interpolated = Location(target).apply {
+                    latitude = start.latitude + (target.latitude - start.latitude) * fraction
+                    longitude = start.longitude + (target.longitude - start.longitude) * fraction
+                }
+                displayedMarkerLocation = Location(interpolated)
+                updateUserMarker(interpolated)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (gpsMarkerAnimator === animator) gpsMarkerAnimator = null
+                }
+            })
+        }
+        gpsMarkerAnimator = animator
+        animator.start()
+    }
+
+    private fun updateUserMarker(location: Location) {
         if (!mapStyleReady) return
         val point = Point.fromLngLat(location.longitude, location.latitude)
         val positionFeature = Feature.fromGeometry(point).apply {
             addNumberProperty("bearing", if (location.hasBearing()) location.bearing.toDouble() else 0.0)
         }
         (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(positionFeature)
+    }
+
+    private fun updateMapForLocation(location: Location, forceCenter: Boolean, updateMarker: Boolean = true) {
+        if (!mapStyleReady) return
+        if (updateMarker) {
+            displayedMarkerLocation = Location(location)
+            updateUserMarker(location)
+        }
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
         if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
@@ -1784,6 +1841,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         speedAlertHandler.removeCallbacksAndMessages(null)
         speedAlertActive = false
         speedAlertFlashRed = false
+        gpsMarkerAnimator?.cancel()
+        gpsMarkerAnimator = null
         mapView?.onDestroy()
         mapView = null
         voiceGuide?.stop()
