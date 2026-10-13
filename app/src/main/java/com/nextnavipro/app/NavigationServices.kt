@@ -73,6 +73,45 @@ object NavigationServices {
                 results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", ")))
             }
             return results
+        } catch (error: Exception) {
+            // If Photon is unavailable, try Nominatim once as a fallback.
+            // This is a search fallback only; it never fabricates a result.
+            return searchPlacesNominatim(cleanQuery, near)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun searchPlacesNominatim(query: String, near: NavPoint?): List<PlaceResult> {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val viewbox = near?.let {
+            "&viewbox=${it.longitude - 0.5},${it.latitude + 0.5},${it.longitude + 0.5},${it.latitude - 0.5}"
+        }.orEmpty()
+        val url = "https://nominatim.openstreetmap.org/search?q=" + encoded +
+            "&format=jsonv2&limit=20&addressdetails=1&countrycodes=es&accept-language=it" + viewbox
+        val connection = URL(url).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            val body = readResponse(connection)
+            val items = JSONArray(body)
+            val results = ArrayList<PlaceResult>()
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val lat = item.optString("lat").toDoubleOrNull() ?: continue
+                val lon = item.optString("lon").toDoubleOrNull() ?: continue
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
+                val address = item.optJSONObject("address") ?: JSONObject()
+                val name = item.optString("name").takeIf { it.isNotBlank() }
+                    ?: item.optString("display_name").substringBefore(",").takeIf { it.isNotBlank() }
+                    ?: continue
+                val detail = item.optString("display_name").removePrefix(name).trim().trimStart(',')
+                results.add(PlaceResult(name, NavPoint(lat, lon), detail))
+            }
+            return results
         } finally {
             connection.disconnect()
         }
