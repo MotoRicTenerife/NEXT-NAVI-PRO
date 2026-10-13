@@ -158,7 +158,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val mapFollowHandler = Handler(Looper.getMainLooper())
     private val mapFollowRunnable = object : Runnable {
         override fun run() {
-            if (dashboardStarted && activityResumed && !fullScreenMap && followGps) {
+            if (dashboardStarted && activityResumed && fullScreenMap && followGps) {
                 currentLocation?.let { updateMapForLocation(it, true) }
             }
             mapFollowHandler.postDelayed(this, 10_000L)
@@ -438,7 +438,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.removeView(radarText)
         mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
-        mapColumn.addView(mapStatus, params(-1, dp(22)))
+        root.addView(mapStatus, params(-1, dp(22)))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
@@ -492,6 +492,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
+        // The road map is deliberately hidden on the main dashboard and opened only on request.
+        mapColumn.visibility = View.GONE
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val controls = LinearLayout(this).apply {
@@ -499,18 +501,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
         }
         themeButton = makeButton(when (themeMode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }) { toggleTheme() }
+        val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
-            controls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
             controls.addView(routeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
         } else {
-            controls.addView(themeButton, LinearLayout.LayoutParams(-1, dp(44)).apply {
+            controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(2), dp(3), dp(2), dp(1))
+            })
+            controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
         }
