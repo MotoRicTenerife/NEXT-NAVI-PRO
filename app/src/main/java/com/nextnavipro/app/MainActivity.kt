@@ -728,8 +728,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 strokeWidth = outlineWidth
                 color = outlineColor
             }
-            canvas.drawText(glyph, x, y, outline)
-            canvas.drawText(glyph, x, y, paint)
+            canvas.drawText(glyph, x, y.toFloat(), outline)
+            canvas.drawText(glyph, x, y.toFloat(), paint)
         }
     }
 
