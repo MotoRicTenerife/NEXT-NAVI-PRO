@@ -15,6 +15,9 @@ import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.text.style.ReplacementSpan
+import android.text.TextPaint
+import kotlin.math.roundToInt
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -492,8 +495,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        // The road map is deliberately hidden on the main dashboard and opened only on request.
-        mapColumn.visibility = View.GONE
+        // Keep the map visible in its dedicated third: bottom in portrait, right in landscape.
+        // NAVIGATORE still opens the expanded map view.
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val controls = LinearLayout(this).apply {
@@ -669,26 +672,53 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
+        val outlineColor = speedGaugeColor(speed)
+        for (i in digits.indices) {
+            styled.setSpan(SpeedDigitOutlineSpan(outlineColor, dp(1.6f).toFloat()), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
         speedText.text = styled
     }
 
-    private fun updateSpeedGaugeBorder(speed: Int?) {
-        if (!::speedText.isInitialized) return
+    private fun speedGaugeColor(speed: Int?): Int {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val greenMax = prefs.getInt("speed_green_max", 50).coerceIn(0, 250)
         val yellowMax = prefs.getInt("speed_yellow_max", 120).coerceIn(greenMax + 1, 300)
-        val borderColor = when {
+        return when {
             speed == null -> Color.GRAY
             speed <= greenMax -> Color.rgb(0, 205, 90)
             speed <= yellowMax -> Color.rgb(255, 190, 0)
             else -> Color.rgb(255, 55, 45)
         }
-        speedText.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(if (negativeTheme) negativeBackground else positiveBackground)
-            setStroke(dp(4), borderColor)
-            cornerRadius = dp(8).toFloat()
+    }
+
+    private class SpeedDigitOutlineSpan(
+        private val outlineColor: Int,
+        private val outlineWidth: Float
+    ) : ReplacementSpan() {
+        override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
+            paint.measureText(text, start, end).roundToInt()
+
+        override fun draw(
+            canvas: Canvas, text: CharSequence, start: Int, end: Int,
+            x: Float, top: Int, y: Int, bottom: Int, paint: Paint
+        ) {
+            val glyph = text.subSequence(start, end).toString()
+            val outline = TextPaint(paint).apply {
+                style = Paint.Style.STROKE
+                strokeJoin = Paint.Join.ROUND
+                strokeWidth = outlineWidth
+                color = outlineColor
+            }
+            canvas.drawText(glyph, x, y, outline)
+            canvas.drawText(glyph, x, y, paint)
         }
+    }
+
+    private fun updateSpeedGaugeBorder(speed: Int?) {
+        if (!::speedText.isInitialized) return
+        // The gauge color outlines the glyphs themselves; no rectangular frame.
+        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
+        renderSpeedDigits(speed)
     }
 
     private fun isMotorwaySpeeding(): Boolean {
