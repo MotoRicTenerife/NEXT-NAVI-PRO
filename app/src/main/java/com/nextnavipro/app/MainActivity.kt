@@ -444,11 +444,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         newMapView.onCreate(savedState)
         mapColumn.addView(mapStatus, params(-1, dp(22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
-        val recenterButton = makeButton("CENTRA GPS") {
-            followGps = true
-            lastCameraLocation = null
-            currentLocation?.let { updateMapForLocation(it, true) }
-        }
+        val recenterButton = makeButton("⌖ POSIZIONE") { recenterMapToGps() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             mapColumn.addView(recenterButton, params(-1, dp(36)))
         }
@@ -469,7 +465,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             maneuverIcon.textSize = 104f
             navHalf.addView(maneuverIcon, params(-1, dp(112)))
-            routeText.translationY = 0f
+            routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -495,10 +491,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            navHalf.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.2f))
             maneuverIcon.textSize = 132f
+            maneuverIcon.translationY = -dp(4).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(132)))
-            routeText.translationY = 0f
+            routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -520,7 +516,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        themeButton = makeButton(when (themeMode) { "auto" -> "AUTO LUCE"; "positive" -> "POSITIVO"; else -> "NEGATIVO" }) { toggleTheme() }
+        themeButton = makeButton(themeButtonLabel()) { toggleTheme() }
         val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
@@ -571,15 +567,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             readyMap.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                    // Let the user inspect the map, then resume GPS-follow after ten seconds.
+                    // Manual pan/zoom/rotate takes control until the user explicitly recenters.
                     followGps = false
                     mapFollowHandler.removeCallbacks(mapFollowRunnable)
-                    mapFollowHandler.postDelayed({
-                        followGps = true
-                        currentLocation?.let { updateMapForLocation(it, true) }
-                        mapFollowHandler.removeCallbacks(mapFollowRunnable)
-                        mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
-                    }, 10_000L)
                 }
             }
             applyMapStyle(readyMap)
@@ -820,13 +810,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun toggleTheme() {
-        val modes = arrayOf("Automatico (sensore lux)", "Positivo", "Negativo")
+        val modes = arrayOf("Automatico (sensore lux)", "☀  Positivo", "☾  Negativo")
         val values = arrayOf("auto", "positive", "negative")
         AlertDialog.Builder(this).setTitle("Modalità schermo")
             .setSingleChoiceItems(modes, values.indexOf(themeMode).coerceAtLeast(0)) { dialog, which ->
                 setThemeMode(values[which])
                 dialog.dismiss()
             }.setNegativeButton("Annulla", null).show()
+    }
+
+    private fun themeButtonLabel(): String = when {
+        themeMode == "auto" && !negativeTheme -> "☀ AUTO"
+        themeMode == "auto" && negativeTheme -> "☾ AUTO"
+        !negativeTheme -> "☀ POSITIVO"
+        else -> "☾ NEGATIVO"
+    }
+
+    private fun refreshThemeButton() {
+        if (::themeButton.isInitialized) themeButton.text = themeButtonLabel()
+    }
+
+    private fun recenterMapToGps() {
+        followGps = true
+        lastCameraLocation = null
+        currentLocation?.let { updateMapForLocation(it, true) }
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
     }
 
     private fun setThemeMode(mode: String) {
@@ -841,7 +850,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else Toast.makeText(this, "Sensore lux non disponibile: mantengo la modalità corrente.", Toast.LENGTH_LONG).show()
             }
         }
-        if (::themeButton.isInitialized) themeButton.text = when (mode) { "auto" -> "AUTO LUCE"; "positive" -> "NEGATIVO"; else -> "POSITIVO" }
+        refreshThemeButton()
     }
 
     private fun applyThemeMode(isNegative: Boolean) {
@@ -850,6 +859,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NEGATIVE, negativeTheme).apply()
         applyTheme()
         map?.let { applyMapStyle(it) }
+        refreshThemeButton()
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -1221,6 +1231,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        bar.addView(makeButton("⌖ GPS") { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         val flagButton = makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") { }
         flagButton.setOnClickListener {
             selectionMode = !selectionMode
