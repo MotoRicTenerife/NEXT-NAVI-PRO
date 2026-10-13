@@ -407,6 +407,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             lastCameraLocation = null
             currentLocation?.let { updateMapForLocation(it, true) }
         }
+        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            mapColumn.addView(recenterButton, params(-1, dp(36)))
+        }
 
         // Move navigation and speed-limit views into their orientation-specific thirds.
         listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText).forEach { infoColumn.removeView(it) }
