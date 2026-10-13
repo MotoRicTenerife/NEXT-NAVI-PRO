@@ -15,9 +15,7 @@ import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
-import android.text.style.ReplacementSpan
 import android.text.TextPaint
-import kotlin.math.roundToInt
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -78,7 +76,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private lateinit var locationManager: LocationManager
     private lateinit var root: LinearLayout
-    private lateinit var speedText: TextView
+    private lateinit var speedText: SpeedometerTextView
     private lateinit var gpsText: TextView
     private lateinit var routeText: TextView
     private lateinit var maneuverIcon: TextView
@@ -396,7 +394,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
             setPadding(dp(2), 0, dp(2), 0)
         }
-        speedText = TextView(this).apply {
+        speedText = SpeedometerTextView(this).apply {
             text = "000"
             textSize = 132f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
@@ -441,10 +439,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.removeView(radarText)
         mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
-        root.addView(mapStatus, params(-1, dp(22)))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
+        mapColumn.addView(mapStatus, params(-1, dp(22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         val recenterButton = makeButton("CENTRA GPS") {
             followGps = true
@@ -691,11 +689,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 styled.setSpan(ForegroundColorSpan(activeColor), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
-        val outlineColor = speedGaugeColor(speed)
-        for (i in digits.indices) {
-            styled.setSpan(SpeedDigitOutlineSpan(outlineColor, dp(2).toFloat()), i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
+        // The outline is drawn by SpeedometerTextView; keep the digits in the normal
+        // TextView rendering pipeline so foreground colors and glyphs cannot disappear.
+        speedText.outlineColor = speedGaugeColor(speed)
         speedText.text = styled
+        speedText.invalidate()
     }
 
     private fun speedGaugeColor(speed: Int?): Int {
@@ -710,26 +708,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private class SpeedDigitOutlineSpan(
-        private val outlineColor: Int,
-        private val outlineWidth: Float
-    ) : ReplacementSpan() {
-        override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
-            paint.measureText(text, start, end).roundToInt()
-
-        override fun draw(
-            canvas: Canvas, text: CharSequence, start: Int, end: Int,
-            x: Float, top: Int, y: Int, bottom: Int, paint: Paint
-        ) {
-            val glyph = text.subSequence(start, end).toString()
-            val outline = TextPaint(paint).apply {
-                style = Paint.Style.STROKE
-                strokeJoin = Paint.Join.ROUND
-                strokeWidth = outlineWidth
-                color = outlineColor
+    private inner class SpeedometerTextView(context: android.content.Context) : TextView(context) {
+        var outlineColor: Int = Color.GRAY
+            set(value) {
+                field = value
+                invalidate()
             }
-            canvas.drawText(glyph, x, y.toFloat(), outline)
-            canvas.drawText(glyph, x, y.toFloat(), paint)
+
+        override fun onDraw(canvas: Canvas) {
+            val textLayout = layout
+            val label = text?.toString().orEmpty()
+            if (textLayout != null && label.isNotEmpty() && textLayout.lineCount > 0) {
+                val p = TextPaint(paint)
+                p.style = Paint.Style.STROKE
+                p.strokeJoin = Paint.Join.ROUND
+                p.strokeWidth = dp(2).toFloat()
+                p.color = outlineColor
+                p.alpha = 255
+                val x = compoundPaddingLeft + textLayout.getLineLeft(0)
+                val baseline = extendedPaddingTop + textLayout.getLineBaseline(0).toFloat()
+                canvas.drawText(label, x, baseline, p)
+            }
+            // Android renders the real SpannableString on top, preserving per-digit colors.
+            super.onDraw(canvas)
         }
     }
 
