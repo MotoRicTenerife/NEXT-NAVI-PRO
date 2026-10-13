@@ -95,7 +95,7 @@ object SpeedLimitService {
                     }
                 }
                 if (wayBestDistance > MAX_MATCH_DISTANCE_METERS) continue
-                val headingDelta = bearing?.let { angularDifference(it, wayBestBearing) }
+                val headingDelta = bearing?.let { headingAxisDifference(it, wayBestBearing) }
                 if (headingDelta != null && wayBestDistance > 8f &&
                     headingDelta > MAX_HEADING_DIFFERENCE_DEGREES) continue
 
@@ -159,8 +159,12 @@ object SpeedLimitService {
         return distance to bearing.toFloat()
     }
 
-    private fun angularDifference(a: Float, b: Float): Float {
+    /**
+     * Road geometry direction is arbitrary in OSM: the same segment can be digitized
+     * in either direction. Compare the axis (0..90 degrees), not a one-way heading.
+     */
+    internal fun headingAxisDifference(a: Float, b: Float): Float {
         val diff = abs((a - b + 540f) % 360f - 180f)
-        return min(diff, 360f - diff)
+        return min(diff, abs(180f - diff))
     }
 }
