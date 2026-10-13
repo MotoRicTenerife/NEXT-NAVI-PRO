@@ -31,7 +31,7 @@ class SpeedLimitServiceTest {
 
     @Test fun roadMatchingIgnoresArbitraryDigitizedWayDirection() {
         assertEquals(0f, SpeedLimitService.headingAxisDifference(0f, 180f), 0.001f)
-        assertEquals(10f, SpeedLimitService.headingAxisDifference(10f, 190f), 0.001f)
+        assertEquals(10f, SpeedLimitService.headingAxisDifference(10f, 200f), 0.001f)
         assertEquals(90f, SpeedLimitService.headingAxisDifference(0f, 90f), 0.001f)
     }
 
