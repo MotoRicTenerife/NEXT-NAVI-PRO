@@ -1072,8 +1072,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeText.text = "RICERCA DESTINAZIONE…"
         thread(name = "photon-search") {
             try {
-                val results = NavigationServices.searchPlaces(query)
                 val origin = currentLocation
+                val near = origin?.let { NavPoint(it.latitude, it.longitude) }
+                val results = NavigationServices.searchPlaces(query, near)
                 val sortedResults = if (origin != null) results.sortedBy { result ->
                     val distance = FloatArray(1)
                     Location.distanceBetween(origin.latitude, origin.longitude, result.point.latitude, result.point.longitude, distance)
@@ -1087,8 +1088,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         return@runOnUiThread
                     }
                     rememberSearch(query)
-                    val labels = sortedResults.map {
-                        if (it.description.isBlank()) it.name else it.name + "\n" + it.description
+                    val labels = sortedResults.map { place ->
+                        val distanceLabel = origin?.let { here ->
+                            val distance = FloatArray(1)
+                            Location.distanceBetween(here.latitude, here.longitude, place.point.latitude, place.point.longitude, distance)
+                            if (distance[0] < 1000f) {
+                                " • " + distance[0].roundToInt() + " m"
+                            } else {
+                                " • " + String.format(Locale.ITALY, "%.1f km", distance[0] / 1000f)
+                            }
+                        }.orEmpty()
+                        place.name + distanceLabel + if (place.description.isBlank()) "" else "\n" + place.description
                     }.toTypedArray()
                     AlertDialog.Builder(this)
                         .setTitle("Scegli destinazione")
