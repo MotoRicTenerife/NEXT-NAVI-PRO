@@ -2345,9 +2345,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * Updates remaining distance and ETA from the active route geometry and the latest
      * accepted GPS fix. No ETA/distance is shown as a real value unless a route and GPS fix exist.
      */
+    private val routeProgressTracker = RouteProgressTracker()
+
     private fun resetRouteProgress() {
         routeProgressInitialized = false
         lastRouteProgressIndex = 0
+        routeProgressTracker.reset()
     }
 
     /**
@@ -2356,29 +2359,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * Bearing is a soft tie-breaker only when the device reports meaningful forward motion.
      */
     private fun findRouteProgressIndex(route: RouteResult, location: Location): Pair<Int, Float> {
-        val lastIndex = route.points.lastIndex
-        if (lastIndex <= 0) return 0 to Float.MAX_VALUE
-        // Search a local forward window after the first match. Segment projection avoids
-        // the vertex-quantization error of choosing only the nearest sampled route point.
-        val start = if (routeProgressInitialized) (lastRouteProgressIndex - 2).coerceAtLeast(0) else 0
-        val end = if (routeProgressInitialized) minOf(lastIndex - 1, lastRouteProgressIndex + 250) else lastIndex - 1
+        if (route.points.size < 2) return 0 to Float.MAX_VALUE
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 20.0
         val heading = location.bearing.takeIf {
-            location.hasBearing() && location.hasSpeed() && location.speed >= 4.0f &&
+            location.hasBearing() && location.hasSpeed() && location.speed >= 3.0f &&
                 (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
         }
-        val match = RouteMapMatcher.match(
-            route.points, location.latitude, location.longitude, start, end, heading
-        )
-        val bestIndex = match?.segmentIndex ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
-        val bestDistance = match.distanceMeters.toFloat()
-        val reportedAccuracy = if (location.hasAccuracy()) location.accuracy else 20f
-        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
-        if (bestDistance <= confidenceLimit) {
-            lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, bestIndex) else bestIndex
-            routeProgressInitialized = true
-            return lastRouteProgressIndex to bestDistance
+        val elapsedMs = if (location.elapsedRealtimeNanos > 0L) {
+            location.elapsedRealtimeNanos / 1_000_000L
+        } else {
+            SystemClock.elapsedRealtime()
         }
-        // Never let a weak match masquerade as a nearby fix to callers of this method.
+        val match = routeProgressTracker.match(
+            points = route.points,
+            latitude = location.latitude,
+            longitude = location.longitude,
+            accuracyMeters = accuracy,
+            bearingDegrees = heading,
+            speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
+            elapsedRealtimeMs = elapsedMs
+        ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
+        val confidenceLimit = minOf(65.0, maxOf(25.0, accuracy * 1.8))
+        if (match.distanceMeters <= confidenceLimit) {
+            lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, match.segmentIndex) else match.segmentIndex
+            routeProgressInitialized = true
+            return lastRouteProgressIndex to match.distanceMeters.toFloat()
+        }
         return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
     }
 
