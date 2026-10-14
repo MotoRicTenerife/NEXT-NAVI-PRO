@@ -2496,7 +2496,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         thread(name = "valhalla-reroute") {
             try {
                 val recalculated = NavigationServices.calculateRoute(
-                    NavPoint(location.latitude, location.longitude), target.point, motorcycle = false
+                    NavPoint(location.latitude, location.longitude), target.point, motorcycle = motorcycleProfile
                 )
                 runOnUiThread {
                     isCalculatingRoute = false
