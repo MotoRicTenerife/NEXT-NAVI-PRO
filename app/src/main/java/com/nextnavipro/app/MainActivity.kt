@@ -1038,7 +1038,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val current = if (motorcycleProfile) "MOTO" else "AUTO"
         AlertDialog.Builder(this)
             .setTitle("Profilo di navigazione")
-            .setMessage("Profilo attuale: $current\\nIl profilo moto usa il costing motorcycle di Valhalla e penalizza i sentieri non asfaltati. I dati di accesso stradale possono comunque essere incompleti.")
+            .setMessage("Profilo attuale: $current\nIl profilo moto usa il costing motorcycle di Valhalla e penalizza i sentieri non asfaltati. I dati di accesso stradale possono comunque essere incompleti.")
             .setSingleChoiceItems(arrayOf("Auto", "Moto / scooter stradale"), if (motorcycleProfile) 1 else 0) { dialog, which ->
                 val newValue = which == 1
                 val changed = motorcycleProfile != newValue
@@ -1189,7 +1189,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         showWeatherForecast()
                     }
                 } else if (latestWeather == null && ::weatherText.isInitialized) {
-                    weatherText.text = "METEO IP\\nnon disponibile"
+                    weatherText.text = "METEO IP\nnon disponibile"
                 }
             }
         }
@@ -1320,7 +1320,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val totalBytes = tracks.sumOf { it.first.length() }
                 val totalMb = totalBytes / (1024.0 * 1024.0)
                 AlertDialog.Builder(this).setTitle("Libreria GPX • " + tracks.size + " percorsi")
-                    .setMessage(String.format(Locale.getDefault(), "Memoria occupata: %.2f MB\\nScegli un percorso per visualizzarlo, seguirlo, esportarlo o eliminarlo.", totalMb))
+                    .setMessage(String.format(Locale.getDefault(), "Memoria occupata: %.2f MB\nScegli un percorso per visualizzarlo, seguirlo, esportarlo o eliminarlo.", totalMb))
                     .setItems(tracks.map { (_, track) ->
                         track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
                     }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
@@ -1332,7 +1332,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showSavedGpxActions(file: File, track: GpxTrack) {
         val actions = arrayOf("Segui questa traccia GPX", "Visualizza sulla mappa", "Esporta / condividi file…", "Elimina percorso")
         AlertDialog.Builder(this).setTitle(track.name)
-            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\\nFile: %s", track.distanceKm, track.points.size, file.name))
+            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\nFile: %s", track.distanceKm, track.points.size, file.name))
             .setItems(actions) { _, which ->
                 when (which) {
                     0 -> loadSavedGpx(file)
@@ -1368,7 +1368,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
         if (::routeText.isInitialized) {
-            routeText.text = "TRACCIA GPX\\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
+            routeText.text = "TRACCIA GPX\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
             routeText.textSize = 14f
         }
         if (::routeButton.isInitialized) routeButton.text = "ANNULLA TRACCIA GPX"
@@ -1407,7 +1407,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     val durationMinutes = (result.durationSeconds / 60.0).toInt()
                     val first = result.maneuvers.firstOrNull()
                     val instruction = first?.let { ManeuverIconResolver.correctedInstruction(it.type, it.instruction) } ?: result.firstInstruction
-                    routeText.text = String.format(Locale.ITALY, "GPX • %.1f km • circa %d min\\n%s", result.distanceKm, durationMinutes, instruction)
+                    routeText.text = String.format(Locale.ITALY, "GPX • %.1f km • circa %d min\n%s", result.distanceKm, durationMinutes, instruction)
                     updateTurnGuidance(currentLocation)
                     Toast.makeText(this, "Traccia agganciata: ${result.maneuvers.size} manovre restituite dal motore stradale.", Toast.LENGTH_LONG).show()
                 }
@@ -1918,7 +1918,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
                 refreshDestinationMarker()
                 destinationInput.setText(poi.first)
-                routeText.text = "DESTINAZIONE: " + poi.first + "\\nPremi AVVIA PERCORSO"
+                routeText.text = "DESTINAZIONE: " + poi.first + "\nPremi AVVIA PERCORSO"
                 exitMapFullScreen()
                 calculateSelectedRoute()
             }
@@ -2627,7 +2627,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateRouteMetrics(route, nearestIndex)
         if (nearestMeters > confidenceLimit) {
             if (::routeText.isInitialized && route.maneuvers.isNotEmpty()) {
-                routeText.text = "POSIZIONE FUORI TRACCIA\\nAttendo un aggancio affidabile alla strada"
+                routeText.text = "POSIZIONE FUORI TRACCIA\nAttendo un aggancio affidabile alla strada"
             }
             return
         }
