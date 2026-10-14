@@ -37,7 +37,7 @@ object WeatherService {
             "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
                 "&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
                 "&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m,wind_gusts_10m" +
-                "&forecast_days=2&timezone=auto"
+                "&past_days=1&forecast_days=2&timezone=auto"
         )
         val connection = url.openConnection() as HttpURLConnection
         try {
