@@ -1,9 +1,5 @@
 package com.nextnavipro.app
 
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sqrt
-
 /**
  * Geometry-only projection. Temporal continuity and plausible progress are handled by
  * RouteProgressTracker so a single noisy fix cannot jump to a distant part of a loop.
@@ -165,7 +161,7 @@ internal class RouteProgressTracker {
             }
         }
         val result = selected ?: return null
-        lastAlongMeters = maxOf(previousAlong ?: along, along)
+        lastAlongMeters = maxOf(previousAlong ?: result.alongRouteMeters, result.alongRouteMeters)
         lastElapsedMs = elapsedRealtimeMs
         lastLatitude = latitude
         lastLongitude = longitude
