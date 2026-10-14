@@ -2289,31 +2289,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun findRouteProgressIndex(route: RouteResult, location: Location): Pair<Int, Float> {
         val lastIndex = route.points.lastIndex
         if (lastIndex <= 0) return 0 to Float.MAX_VALUE
-        val start = if (routeProgressInitialized) (lastRouteProgressIndex - 3).coerceAtLeast(0) else 0
-        val end = if (routeProgressInitialized) minOf(lastIndex, lastRouteProgressIndex + 250) else lastIndex
-        var bestIndex = if (routeProgressInitialized) lastRouteProgressIndex else 0
-        var bestDistance = Float.MAX_VALUE
-        var bestScore = Double.MAX_VALUE
-        val useBearing = location.hasBearing() && location.hasSpeed() && location.speed >= 3.0f
-        for (i in start..end) {
-            val point = route.points[i]
-            val distance = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, distance)
-            var score = distance[0].toDouble()
-            if (useBearing && i < lastIndex) {
-                val segment = FloatArray(3)
-                val next = route.points[i + 1]
-                Location.distanceBetween(point.latitude, point.longitude, next.latitude, next.longitude, segment)
-                val delta = kotlin.math.abs(((segment[1] - location.bearing + 540f) % 360f) - 180f)
-                score += delta.toDouble() * 0.55
-            }
-            if (score < bestScore) {
-                bestScore = score
-                bestDistance = distance[0]
-                bestIndex = i
-            }
+        // Search a local forward window after the first match. Segment projection avoids
+        // the vertex-quantization error of choosing only the nearest sampled route point.
+        val start = if (routeProgressInitialized) (lastRouteProgressIndex - 2).coerceAtLeast(0) else 0
+        val end = if (routeProgressInitialized) minOf(lastIndex - 1, lastRouteProgressIndex + 250) else lastIndex - 1
+        val heading = location.bearing.takeIf {
+            location.hasBearing() && location.hasSpeed() && location.speed >= 4.0f &&
+                (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
         }
-        val confidenceLimit = maxOf(65f, if (location.hasAccuracy()) location.accuracy * 2.5f else 65f)
+        val match = RouteMapMatcher.match(
+            route.points, location.latitude, location.longitude, start, end, heading
+        )
+        val bestIndex = match?.segmentIndex ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
+        val bestDistance = match.distanceMeters.toFloat()
+        val confidenceLimit = maxOf(45f, if (location.hasAccuracy()) location.accuracy * 1.8f else 45f)
         if (bestDistance <= confidenceLimit) {
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, bestIndex) else bestIndex
             routeProgressInitialized = true
