@@ -596,10 +596,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             // Portrait: compact and lift turn guidance so it stays visible on shorter screens.
             maneuverIcon.textSize = 92f
-            maneuverIcon.translationY = -dp(24).toFloat()
+            // Keep the maneuver glyph inside its allocated row; negative translation clipped its label.
+            maneuverIcon.translationY = 0f
             navHalf.addView(maneuverIcon, params(-1, dp(98)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(8).toFloat()
+            routeText.translationY = 0f
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -625,13 +626,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            // Landscape: lift the dashboard by about 1 cm (38 dp) and compact turn guidance.
-            content.translationY = -dp(38).toFloat()
+            // Keep the landscape dashboard inside its measured area. Translating the
+            // whole content row upward caused it to overlap the search/weather/status row.
+            content.translationY = 0f
             maneuverIcon.textSize = 116f
-            maneuverIcon.translationY = -dp(6).toFloat()
+            maneuverIcon.translationY = 0f
             navHalf.addView(maneuverIcon, params(-1, dp(116)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(6).toFloat()
+            routeText.translationY = 0f
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
