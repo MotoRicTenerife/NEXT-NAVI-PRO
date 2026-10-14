@@ -484,7 +484,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(Color.WHITE)
         }
-        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(8) })
+        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
+            // In portrait the route header above can overlap the clock; add more
+            // separation only in portrait while keeping the clock clear of the speedometer.
+            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 8)
+        })
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
