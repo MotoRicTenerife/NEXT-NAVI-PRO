@@ -1059,12 +1059,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
+    private fun gpsDiagnosticsDirectory(): File = File(filesDir, "gps_diagnostics").apply { if (!exists()) mkdirs() }
+
+    private fun savedGpsDiagnosticFiles(): List<File> =
+        gpsDiagnosticsDirectory().listFiles()?.filter { it.isFile && it.extension.equals("csv", true) && it.name != "gps_trace_in_progress.csv" }
+            ?.sortedByDescending { it.lastModified() }.orEmpty()
+
     private fun showGpsDiagnosticsMenu() {
-        val status = if (gpsDiagnosticRecording) "Registrazione attiva • ${gpsDiagnosticSamples.size} campioni" else "Registrazione ferma • ${gpsDiagnosticSamples.size} campioni"
+        val saved = savedGpsDiagnosticFiles()
+        val bytes = saved.sumOf { it.length() } + File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").let { if (it.exists()) it.length() else 0L }
+        val active = if (gpsDiagnosticRecording) "Registrazione ATTIVA • ${gpsDiagnosticSamples.size} campioni" else "Registrazione ferma"
+        val status = "$active\nSessioni salvate: ${saved.size} • Memoria occupata: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB\nLe sessioni salvate restano sul dispositivo."
         val choices = arrayOf(
-            if (gpsDiagnosticRecording) "Ferma registrazione GPS" else "Avvia registrazione diagnostica GPS",
-            "Esporta CSV per analisi",
-            "Azzera campioni"
+            if (gpsDiagnosticRecording) "Ferma e salva registrazione" else "Avvia nuova registrazione",
+            "Gestisci registrazioni salvate",
+            "Esporta CSV dei campioni in corso",
+            "Cancella campioni in corso"
         )
         AlertDialog.Builder(this).setTitle("Diagnostica GPS").setMessage(status)
             .setItems(choices) { _, which ->
@@ -1074,23 +1084,92 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             gpsDiagnosticSamples.clear()
                             gpsDiagnosticRecording = true
                             lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-                            Toast.makeText(this, "Diagnostica GPS avviata. Registra il tragitto e fermati in sicurezza prima di esportare.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "Registrazione GPS avviata. Fermati in sicurezza prima di interromperla.", Toast.LENGTH_LONG).show()
                         } else {
                             gpsDiagnosticRecording = false
-                            Toast.makeText(this, "Registrazione GPS terminata: ${gpsDiagnosticSamples.size} campioni.", Toast.LENGTH_LONG).show()
+                            val file = saveGpsDiagnosticSession()
+                            File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
+                            Toast.makeText(this, if (file != null) "Registrazione salvata: ${gpsDiagnosticSamples.size} campioni." else "Registrazione fermata; nessun file salvato (campioni insufficienti o errore).", Toast.LENGTH_LONG).show()
                         }
                     }
-                    1 -> exportGpsDiagnostics()
-                    2 -> {
-                        if (gpsDiagnosticRecording) {
-                            Toast.makeText(this, "Ferma prima la registrazione.", Toast.LENGTH_LONG).show()
-                        } else {
-                            gpsDiagnosticSamples.clear()
-                            Toast.makeText(this, "Campioni diagnostici cancellati.", Toast.LENGTH_SHORT).show()
-                        }
+                    1 -> showSavedGpsDiagnostics()
+                    2 -> exportGpsDiagnostics()
+                    3 -> if (gpsDiagnosticRecording) {
+                        Toast.makeText(this, "Ferma e salva prima la registrazione.", Toast.LENGTH_LONG).show()
+                    } else {
+                        gpsDiagnosticSamples.clear()
+                        Toast.makeText(this, "Campioni in corso cancellati; le sessioni salvate restano intatte.", Toast.LENGTH_LONG).show()
                     }
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun saveGpsDiagnosticSession(): File? {
+        if (gpsDiagnosticSamples.isEmpty()) return null
+        return try {
+            val file = File(gpsDiagnosticsDirectory(), "gps_trace_${System.currentTimeMillis()}.csv")
+            FileOutputStream(file).use { it.write(GpsTraceDiagnostics.toCsv(gpsDiagnosticSamples).toByteArray(Charsets.UTF_8)) }
+            file
+        } catch (_: Exception) { null }
+    }
+
+    private fun saveGpsDiagnosticCheckpoint() {
+        if (gpsDiagnosticSamples.isEmpty()) return
+        try {
+            val file = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
+            FileOutputStream(file).use { it.write(GpsTraceDiagnostics.toCsv(gpsDiagnosticSamples).toByteArray(Charsets.UTF_8)) }
+        } catch (_: Exception) { /* Keep recording; storage errors are surfaced when the session is stopped. */ }
+    }
+
+    private fun showSavedGpsDiagnostics() {
+        val files = savedGpsDiagnosticFiles()
+        if (files.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("Registrazioni GPS")
+                .setMessage("Nessuna registrazione salvata. Avvia una registrazione e poi scegli «Ferma e salva registrazione».")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        val total = files.sumOf { it.length() }
+        val labels = files.map { file ->
+            val date = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(java.util.Date(file.lastModified()))
+            val mb = String.format(Locale.getDefault(), "%.2f", file.length() / (1024.0 * 1024.0))
+            "$date • $mb MB"
+        }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Registrazioni GPS • ${files.size}")
+            .setMessage("Memoria occupata: ${String.format(Locale.getDefault(), "%.2f", total / (1024.0 * 1024.0))} MB\nSeleziona una sessione da esportare o eliminare.")
+            .setItems(labels) { _, which -> showSavedGpsDiagnosticActions(files[which]) }
+            .setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showSavedGpsDiagnosticActions(file: File) {
+        AlertDialog.Builder(this).setTitle(file.name)
+            .setMessage("Dimensione file: ${String.format(Locale.getDefault(), "%.2f", file.length() / (1024.0 * 1024.0))} MB")
+            .setItems(arrayOf("Esporta CSV…", "Elimina registrazione")) { _, which ->
+                when (which) {
+                    0 -> exportSavedGpsDiagnostic(file)
+                    1 -> AlertDialog.Builder(this).setTitle("Eliminare la registrazione?")
+                        .setMessage("Il file verrà rimosso definitivamente dal dispositivo.")
+                        .setNegativeButton("Annulla", null)
+                        .setPositiveButton("Elimina") { _, _ ->
+                            val deleted = file.delete()
+                            Toast.makeText(this, if (deleted) "Registrazione eliminata." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
+                            showSavedGpsDiagnostics()
+                        }.show()
+                }
+            }.setNegativeButton("Indietro") { _, _ -> showSavedGpsDiagnostics() }.show()
+    }
+
+    private fun exportSavedGpsDiagnostic(file: File) {
+        pendingGpsDiagnosticCsv = try { file.readText(Charsets.UTF_8) } catch (e: Exception) {
+            Toast.makeText(this, "Impossibile leggere la registrazione: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, file.name)
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_GPS_TRACE)
     }
 
     private fun appendGpsDiagnosticSample(location: Location, rejectionStatus: String? = null) {
@@ -1136,6 +1215,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             )
         )
+        if (gpsDiagnosticSamples.size % 25 == 0) saveGpsDiagnosticCheckpoint()
     }
 
     private fun exportGpsDiagnostics() {
