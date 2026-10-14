@@ -61,6 +61,10 @@ import org.maplibre.geojson.Point
 import java.util.Locale
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sqrt
 
 class MainActivity : Activity(), LocationListener, SensorEventListener {
     companion object {
@@ -1933,31 +1937,99 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
     }
 
+    /**
+     * OsmAnd's public guidance documents emphasize filtering poor-accuracy fixes and attaching
+     * tracks to roads. For our live arrow, use the active route as a *visual* map-match only when
+     * a nearby segment is plausible; keep currentLocation raw/smoothed for speed and guidance.
+     * This avoids inventing a position or snapping across to a parallel road.
+     */
+    private fun snapMarkerToActiveRoute(location: Location): Location {
+        val route = routeResult ?: return Location(location)
+        if (route.points.size < 2 || !location.hasAccuracy() || location.accuracy > 25f) {
+            return Location(location)
+        }
+
+        val metersPerLat = 111320.0
+        val metersPerLon = metersPerLat * cos(Math.toRadians(location.latitude))
+        var bestDistance = Double.MAX_VALUE
+        var bestLat = location.latitude
+        var bestLon = location.longitude
+        var bestBearing = Float.NaN
+
+        for (i in 0 until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val ax = (a.longitude - location.longitude) * metersPerLon
+            val ay = (a.latitude - location.latitude) * metersPerLat
+            val bx = (b.longitude - location.longitude) * metersPerLon
+            val by = (b.latitude - location.latitude) * metersPerLat
+            val dx = bx - ax
+            val dy = by - ay
+            val lengthSquared = dx * dx + dy * dy
+            if (lengthSquared < 0.25) continue
+            val fraction = ((-ax * dx + -ay * dy) / lengthSquared).coerceIn(0.0, 1.0)
+            val px = ax + dx * fraction
+            val py = ay + dy * fraction
+            val distance = sqrt(px * px + py * py)
+            if (distance >= bestDistance) continue
+
+            val segmentBearing = ((Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0).toFloat()
+            if (location.hasBearing() && location.hasSpeed() && location.speed >= 3f) {
+                val delta = abs(((location.bearing - segmentBearing + 540f) % 360f) - 180f)
+                if (delta > 55f) continue
+            }
+            bestDistance = distance
+            bestLat = location.latitude + py / metersPerLat
+            bestLon = location.longitude + px / metersPerLon
+            bestBearing = segmentBearing
+        }
+
+        // Tighten the allowed snap radius as the reported GPS accuracy improves.
+        val maxSnapMeters = minOf(25f, maxOf(10f, location.accuracy * 1.25f)).toDouble()
+        if (bestDistance > maxSnapMeters) return Location(location)
+        return Location(location).apply {
+            latitude = bestLat
+            longitude = bestLon
+            if (!bestBearing.isNaN() && hasSpeed() && speed >= 3f) {
+                bearing = bestBearing
+                setBearing(bearing)
+            }
+        }
+    }
+
     private fun animateGpsMarkerTo(target: Location) {
+        val markerTarget = snapMarkerToActiveRoute(target)
         if (!mapStyleReady) {
-            displayedMarkerLocation = Location(target)
+            displayedMarkerLocation = Location(markerTarget)
             return
         }
         val start = displayedMarkerLocation?.let { Location(it) }
-            ?: currentLocation?.let { Location(it) }
-            ?: Location(target)
-        val distance = start.distanceTo(target)
+            ?: currentLocation?.let { snapMarkerToActiveRoute(it) }
+            ?: Location(markerTarget)
+        val distance = start.distanceTo(markerTarget)
         gpsMarkerAnimator?.cancel()
-        if (!activityResumed || distance < 1f || distance > 80f) {
-            displayedMarkerLocation = Location(target)
-            updateUserMarker(target)
+        if (!activityResumed || distance < 0.5f || distance > 80f) {
+            displayedMarkerLocation = Location(markerTarget)
+            updateUserMarker(markerTarget)
             return
         }
-        val speed = if (target.hasSpeed()) target.speed else 0f
-        val durationMs = ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(180L, 850L)
+        val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
+        val durationMs = ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
+        val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
+        val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = durationMs
             interpolator = LinearInterpolator()
             addUpdateListener { animation ->
                 val fraction = animation.animatedValue as Float
-                val interpolated = Location(target).apply {
-                    latitude = start.latitude + (target.latitude - start.latitude) * fraction
-                    longitude = start.longitude + (target.longitude - start.longitude) * fraction
+                val interpolated = Location(markerTarget).apply {
+                    latitude = start.latitude + (markerTarget.latitude - start.latitude) * fraction
+                    longitude = start.longitude + (markerTarget.longitude - start.longitude) * fraction
+                    if (hasBearing()) {
+                        bearing = (startBearing + bearingDelta * fraction + 360f) % 360f
+                        setBearing(bearing)
+                    }
                 }
                 displayedMarkerLocation = Location(interpolated)
                 updateUserMarker(interpolated)
