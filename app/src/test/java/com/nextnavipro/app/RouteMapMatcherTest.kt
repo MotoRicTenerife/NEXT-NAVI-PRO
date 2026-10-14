@@ -51,8 +51,11 @@ class RouteMapMatcherTest {
         val first = tracker.match(route, 28.0, -15.9999, 5.0, 90f, 8.0, 10_000L)
         assertNotNull(first)
         val outlier = tracker.match(route, 28.001, -15.9995, 5.0, 270f, 8.0, 10_250L)
-        assertNotNull(outlier)
-        assertTrue("Outlier must not skip an implausible distance", outlier!!.alongRouteMeters - first!!.alongRouteMeters < 40.0)
+        assertNull("Off-route fix must not advance route progress", outlier)
+        val reacquired = tracker.match(route, 28.0, -15.9998, 5.0, 90f, 8.0, 11_000L)
+        assertNotNull("A later valid fix should reacquire the same route", reacquired)
+        assertTrue("Reacquisition must remain near previous progress",
+            reacquired!!.alongRouteMeters - first!!.alongRouteMeters < 40.0)
     }
 
     @Test fun rejectsInvalidFixAndKeepsRouteProgressWhenNoCandidateExists() {
