@@ -531,11 +531,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(Color.WHITE)
         }
-        // Clock is directly below the tachometer in portrait. Keep ETA and remaining
-        // distance as the final information row below km/h, so the route button cannot cover them.
+        // In portrait, show km/h directly below the tachometer, then the clock.
+        // ETA and remaining distance stay below both; landscape order remains unchanged.
         if (isPortrait) {
-            speedColumn.addView(clockText, params(-1, dp(32)))
             speedColumn.addView(unit, params(-1, dp(30)))
+            speedColumn.addView(clockText, params(-1, dp(32)))
             speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         } else {
             speedColumn.addView(unit, params(-1, dp(34)))
