@@ -1199,6 +1199,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    updateRouteMetrics(currentLocation)
                     if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
                     announcedManeuverIndex = -1
                     announcedStage = 0
@@ -1250,7 +1251,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
         destination = null
         refreshDestinationMarker()
-        if (::routeText.isInitialized) routeText.text = "MAPPA ONLINE  •  Nessun percorso attivo"
+        if (::routeText.isInitialized) routeText.text = "Nessun percorso attivo"
+        if (::routeMetricsText.isInitialized) routeMetricsText.text = "ARRIVO —  •  — km"
         if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
         if (::destinationInput.isInitialized) destinationInput.text.clear()
         val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
@@ -1441,6 +1443,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         animateGpsMarkerTo(smoothed)
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
+        updateRouteMetrics(smoothed)
         refreshRadarsIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
         checkOffRouteAndReroute(smoothed)
@@ -1616,6 +1619,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(recalculated, false)
@@ -1630,6 +1634,59 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
         }
+    }
+
+    /**
+     * Updates remaining distance and ETA from the active route geometry and the latest
+     * accepted GPS fix. No ETA/distance is shown as a real value unless a route and GPS fix exist.
+     */
+    private fun updateRouteMetrics(location: Location?) {
+        if (!::routeMetricsText.isInitialized) return
+        val route = routeResult
+        val here = location
+        if (route == null || here == null || route.points.size < 2) {
+            routeMetricsText.text = "ARRIVO —  •  — km"
+            return
+        }
+
+        var nearestIndex = 0
+        var nearestMeters = Float.MAX_VALUE
+        for (i in route.points.indices) {
+            val point = route.points[i]
+            val distance = FloatArray(1)
+            Location.distanceBetween(here.latitude, here.longitude, point.latitude, point.longitude, distance)
+            if (distance[0] < nearestMeters) {
+                nearestMeters = distance[0]
+                nearestIndex = i
+            }
+        }
+
+        var remainingMeters = nearestMeters.toDouble()
+        for (i in nearestIndex until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val segment = FloatArray(1)
+            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
+            remainingMeters += segment[0].toDouble()
+        }
+
+        var totalGeometryMeters = 0.0
+        for (i in 0 until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val segment = FloatArray(1)
+            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
+            totalGeometryMeters += segment[0].toDouble()
+        }
+        val remainingKm = (remainingMeters / 1000.0).coerceAtLeast(0.0)
+        val totalKm = totalGeometryMeters / 1000.0
+        val remainingSeconds = if (totalKm > 0.01) {
+            (route.durationSeconds * (remainingKm / totalKm)).toLong().coerceAtLeast(0L)
+        } else 0L
+        val arrivalTime = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+            .format(java.util.Date(System.currentTimeMillis() + remainingSeconds * 1000L))
+        val distanceText = String.format(Locale.getDefault(), "%.1f km", remainingKm)
+        routeMetricsText.text = "ARRIVO $arrivalTime  •  $distanceText"
     }
 
     private fun updateTurnGuidance(location: Location?) {
