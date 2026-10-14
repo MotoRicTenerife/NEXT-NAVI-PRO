@@ -498,9 +498,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        // Slightly larger upper spacer lowers the speedometer in both orientations.
+        // Keep the arrival distance/time immediately below the speedometer in portrait,
+        // where vertical space is limited and the metrics must remain visible.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
+        val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        if (isPortrait) {
+            speedColumn.addView(routeMetricsText, params(-1, dp(32)))
+        }
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -522,9 +527,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
             topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 4 else 2)
         })
-        // Keep remaining distance and ETA directly below the speedometer in both
-        // orientations, freeing the navigation pane for turn guidance.
-        speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+        // In landscape keep trip metrics below the clock; in portrait they are
+        // deliberately placed directly under the speedometer above.
+        if (!isPortrait) speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
         routeButton = makeButton("AVVIA PERCORSO") {
@@ -577,7 +582,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             // Portrait: compact and lift turn guidance so it stays visible on shorter screens.
             maneuverIcon.textSize = 92f
-            maneuverIcon.translationY = -dp(6).toFloat()
+            maneuverIcon.translationY = -dp(24).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(98)))
             routeText.textSize = 15f
             routeText.translationY = -dp(8).toFloat()
