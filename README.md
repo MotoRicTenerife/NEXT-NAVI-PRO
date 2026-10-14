@@ -2,7 +2,7 @@
 
 Android navigation prototype for cars and motorcycles, with a high-contrast dashboard and open map data.
 
-## Current online implementation (0.3.0-alpha05)
+## Current online implementation (0.3.0-alpha06)
 
 - Native vector map rendered with MapLibre Android and OpenFreeMap styles. The map is hidden on the main dashboard and opened with the **NAVIGATORE** button.
 - Live Android location fixes are checked for age, accuracy and implausible jumps. Position smoothing adapts to reported accuracy, and the map marker is interpolated between accepted fixes.
@@ -20,7 +20,7 @@ Android navigation prototype for cars and motorcycles, with a high-contrast dash
 ## Known limitations and safety notes
 
 - Routing uses Valhalla `auto` for car and the beta `motorcycle` costing profile for motorcycle mode, with trails penalized. The public service remains best-effort and the motorcycle profile still needs field validation.
-- Route progress is still based on proximity to the route geometry, not a full probabilistic map-matching engine. Junctions, parallel carriageways and dense road networks need real-device field testing.
+- Live route progress now scores multiple route-segment candidates using GPS-accuracy-weighted distance, heading and a transition penalty against observed movement. This is a local probabilistic candidate scorer, not yet a full-window HMM over the complete road graph; junctions, parallel carriageways and dense road networks still need real-device field testing.
 - Road names, references and speed limits currently come from nearby OpenStreetMap ways via the public Overpass API. Coverage and tagging can be incomplete. The official Cabildo de Tenerife road-network dataset has been identified as a valuable independent geometry/reference source, but has **not yet been integrated**.
 - Numeric legal limits are shown only when an explicit OSM `maxspeed` value can be associated with the matched road. Missing/conditional values remain unknown; the app does not infer a legal limit from road class.
 - Speed-camera pins are visual only; there are no audio radar alerts yet because road/direction matching must be validated first.
