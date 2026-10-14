@@ -55,6 +55,12 @@ import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback as FusedLocationCallback
+import com.google.android.gms.location.LocationRequest as FusedLocationRequest
+import com.google.android.gms.location.LocationResult as FusedLocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
@@ -81,6 +87,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private lateinit var locationManager: LocationManager
+    private var fusedLocationClient: FusedLocationProviderClient? = null
+    private var fusedLocationCallback: FusedLocationCallback? = null
+    private var usingLocationManagerFallback = false
     private lateinit var root: LinearLayout
     private lateinit var speedText: SpeedometerTextView
     private lateinit var clockText: TextView
@@ -1410,6 +1419,44 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         try {
+            val client = fusedLocationClient ?: LocationServices.getFusedLocationProviderClient(this).also {
+                fusedLocationClient = it
+            }
+            val callback = fusedLocationCallback ?: object : FusedLocationCallback() {
+                override fun onLocationResult(result: FusedLocationResult) {
+                    result.lastLocation?.let { onLocationChanged(it) }
+                }
+            }.also { fusedLocationCallback = it }
+            // Fused GNSS/network/sensor positioning; OsmAnd uses the same provider family
+            // with a very short high-accuracy interval. The marker is interpolated separately.
+            val request = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 250L)
+                .setMinUpdateIntervalMillis(250L)
+                .setWaitForAccurateLocation(true)
+                .build()
+            gpsUpdatesRequested = true
+            usingLocationManagerFallback = false
+            client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+                .addOnFailureListener {
+                    runOnUiThread {
+                        gpsUpdatesRequested = false
+                        requestLocationManagerFallback()
+                    }
+                }
+            client.lastLocation.addOnSuccessListener { last ->
+                if (last != null && currentLocation == null) onLocationChanged(last)
+            }
+        } catch (_: SecurityException) {
+            gpsUpdatesRequested = false
+            gpsText.text = "PERMESSO GPS NEGATO"
+        } catch (_: Exception) {
+            gpsUpdatesRequested = false
+            requestLocationManagerFallback()
+        }
+    }
+
+    private fun requestLocationManagerFallback() {
+        if (!dashboardStarted || gpsUpdatesRequested) return
+        try {
             val providers = locationManager.getProviders(true)
             val provider = when {
                 providers.contains(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
@@ -1426,10 +1473,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 @Suppress("DEPRECATION")
                 locationManager.requestLocationUpdates(provider, 500L, 0f, this)
             }
+            usingLocationManagerFallback = true
             gpsUpdatesRequested = true
-            val last = locationManager.getLastKnownLocation(provider)
-            if (last != null) onLocationChanged(last)
-            else gpsText.text = "RICERCA GPS REALE…"
+            locationManager.getLastKnownLocation(provider)?.let { onLocationChanged(it) }
+                ?: run { gpsText.text = "RICERCA GPS REALE…" }
         } catch (_: SecurityException) {
             gpsText.text = "PERMESSO GPS NEGATO"
         } catch (_: Exception) {
@@ -2301,10 +2348,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
         activityResumed = false
-        if (gpsUpdatesRequested) {
-            locationManager.removeUpdates(this)
-            gpsUpdatesRequested = false
+        fusedLocationCallback?.let { callback ->
+            try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
         }
+        if (usingLocationManagerFallback) {
+            try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+            usingLocationManagerFallback = false
+        }
+        gpsUpdatesRequested = false
         mapView?.onPause()
         sensorManager?.unregisterListener(this)
         super.onPause()
