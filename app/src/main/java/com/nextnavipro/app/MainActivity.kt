@@ -79,6 +79,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var locationManager: LocationManager
     private lateinit var root: LinearLayout
     private lateinit var speedText: SpeedometerTextView
+    private lateinit var clockText: TextView
+    private lateinit var routeMetricsText: TextView
     private lateinit var gpsText: TextView
     private lateinit var routeText: TextView
     private lateinit var maneuverIcon: TextView
@@ -175,6 +177,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var isSearching = false
     private var isCalculatingRoute = false
     private val splashHandler = Handler(Looper.getMainLooper())
+    private val clockHandler = Handler(Looper.getMainLooper())
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            if (::clockText.isInitialized) {
+                clockText.text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
+                clockHandler.postDelayed(this, 1000L)
+            }
+        }
+    }
     private val yellow = Color.rgb(255, 212, 0)
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
@@ -348,6 +359,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
         }
         infoColumn.addView(brand, params(-1, dp(34)))
+        routeMetricsText = TextView(this).apply {
+            text = "ARRIVO —  •  — km"
+            textSize = 12f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            includeFontPadding = false
+            setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+        }
         val limitTitle = TextView(this).apply {
             text = "LIMITE"
             textSize = 12f
@@ -416,6 +437,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        clockText = TextView(this).apply {
+            text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
+            textSize = 25f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
+        }
+        speedColumn.addView(clockText, params(-1, dp(34)))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
@@ -480,6 +510,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, params(-1, dp(112)))
             routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            navHalf.addView(routeMetricsText, params(-1, dp(42)))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -509,6 +540,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, params(-1, dp(132)))
             routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            navHalf.addView(routeMetricsText, params(-1, dp(42)))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -524,6 +556,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        clockHandler.removeCallbacks(clockRunnable)
+        clockRunnable.run()
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -979,6 +1013,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (view is TextView && view !== destinationInput) {
                 view.setTextColor(when {
                     view === speedText -> textColor
+                    view === clockText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
+                    view === routeMetricsText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
                     view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 85, 105)
                     view === radarText -> Color.rgb(255, 70, 55)
@@ -1115,6 +1151,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setItems(labels) { _, which ->
                             destination = sortedResults[which]
                             routeResult = null
+                            routeMetricsText.text = "ARRIVO —  •  — km"
                             val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
                             routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
                             destinationInput.setText(sortedResults[which].name)
@@ -1207,6 +1244,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun clearRoute() {
         routeResult = null
+        if (::routeMetricsText.isInitialized) routeMetricsText.text = "ARRIVO —  •  — km"
         announcedManeuverIndex = -1
         announcedStage = 0
         if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
@@ -1597,7 +1635,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateTurnGuidance(location: Location?) {
         val route = routeResult ?: return
         val here = location ?: return
-        if (route.points.size < 2 || route.maneuvers.isEmpty()) return
+        if (route.points.size < 2) return
         var nearestIndex = 0
         var nearestMeters = Float.MAX_VALUE
         for (i in route.points.indices) {
@@ -1609,6 +1647,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 nearestIndex = i
             }
         }
+        updateRouteMetrics(route, nearestIndex)
+        if (route.maneuvers.isEmpty()) return
         val nextPair = route.maneuvers.withIndex().firstOrNull { (_, maneuver) ->
             maneuver.pointIndex > nearestIndex + 2
         } ?: route.maneuvers.withIndex().lastOrNull()
@@ -1674,6 +1714,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
             }
         }
+    }
+
+    private fun updateRouteMetrics(route: RouteResult, nearestIndex: Int) {
+        if (!::routeMetricsText.isInitialized) return
+        if (route.distanceKm <= 0.0 || route.points.size < 2) {
+            routeMetricsText.text = "ARRIVO —  •  — km"
+            return
+        }
+        var remainingMeters = 0.0
+        val start = nearestIndex.coerceIn(0, route.points.lastIndex)
+        for (i in start until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val segment = FloatArray(1)
+            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
+            remainingMeters += segment[0]
+        }
+        val remainingKm = (remainingMeters / 1000.0).coerceAtMost(route.distanceKm)
+        val remainingSeconds = (route.durationSeconds * (remainingKm / route.distanceKm)).toLong().coerceAtLeast(0L)
+        val arrival = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+            .format(java.util.Date(System.currentTimeMillis() + remainingSeconds * 1000L))
+        routeMetricsText.text = String.format(Locale.ITALY, "ARRIVO %s  •  %.1f km", arrival, remainingKm)
     }
 
     private fun refreshRadarsIfNeeded(location: Location) {
@@ -1954,6 +2016,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onDestroy() {
+        clockHandler.removeCallbacksAndMessages(null)
         setNavigationBrightnessEnabled(false)
         splashHandler.removeCallbacksAndMessages(null)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
