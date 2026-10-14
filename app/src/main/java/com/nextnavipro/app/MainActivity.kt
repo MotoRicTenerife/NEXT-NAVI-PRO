@@ -1729,6 +1729,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage(detail).setPositiveButton("Chiudi", null).show()
                 }
             }.setPositiveButton("Aggiorna") { _, _ ->
+                forecastRequested = true
                 currentLocation?.let { refreshWeatherIfNeeded(it, true) }
             }.setNegativeButton("Chiudi", null).show()
     }
