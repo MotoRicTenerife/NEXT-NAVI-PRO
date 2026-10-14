@@ -241,6 +241,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         mapOriginalParams = null
         lastCameraLocation = null
         buildDashboard(null)
+        // Recreated TextViews start empty/default: restore the last real weather snapshot immediately
+        // instead of waiting for the next 15-minute/location refresh interval.
+        latestWeather?.let { updateWeatherDisplay(it) }
+            ?: currentLocation?.let { refreshWeatherIfNeeded(it, true) }
         currentLocation?.let { updateMapForLocation(it, true) }
         routeResult?.let { drawRoute(it, false); updateTurnGuidance(currentLocation ?: return) }
         if (activityResumed) requestGps()
@@ -400,7 +404,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setLineSpacing(dp(2).toFloat(), 1.0f)
             setPadding(dp(8), dp(3), dp(8), dp(3))
-            setBackgroundColor(if (negativeTheme) Color.rgb(35, 41, 47) else Color.rgb(205, 216, 222))
+            // Match the dashboard surface exactly; the weather strip is not a separate card.
+            setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         }
         infoColumn.addView(weatherText, params(-1, dp(52)))
         limitValue = TextView(this).apply {
@@ -1044,6 +1049,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         applySpeedLimitSignStyle(limitValue)
         routeText.setBackgroundColor(panelBackground)
         speedText.setBackgroundColor(panelBackground)
+        if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
         root.walkViews().forEach { view ->
