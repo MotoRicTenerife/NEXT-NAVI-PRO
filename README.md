@@ -6,6 +6,8 @@ Android navigation prototype for cars and motorcycles, with a high-contrast dash
 
 - Native vector map rendered with MapLibre Android and OpenFreeMap styles. The map is hidden on the main dashboard and opened with the **NAVIGATORE** button.
 - Live Android location fixes are checked for age, accuracy and implausible jumps. Position smoothing adapts to reported accuracy, and the map marker is interpolated between accepted fixes.
+- If no usable device location arrives after a short wait, approximate public-IP geolocation can provide a rough area for weather and search bias. It is explicitly marked approximate and is never used for navigation, road matching, speed limits or radar alerts.
+- GPX library in the app menu: import tracks/routes, save the active route inside the app, reopen saved GPX files and export a route through Android's document picker. Imported GPX tracks are displayed as tracks; turn-by-turn voice instructions are not fabricated when the file contains no route maneuver data.
 - Photon destination search and Valhalla route calculation/geometry.
 - Typed Valhalla maneuver icons for left/right/fork/roundabout guidance. Text alone is not allowed to turn a typed fork into a roundabout.
 - Road matching against nearby drivable OpenStreetMap ways, returning the matched road name (`name`), route reference (`ref`) and explicit numeric speed limit (`maxspeed`) when available.
@@ -23,6 +25,8 @@ Android navigation prototype for cars and motorcycles, with a high-contrast dash
 - Numeric legal limits are shown only when an explicit OSM `maxspeed` value can be associated with the matched road. Missing/conditional values remain unknown; the app does not infer a legal limit from road class.
 - Speed-camera pins are visual only; there are no audio radar alerts yet because road/direction matching must be validated first.
 - Online services require connectivity. This is not yet a complete offline navigator.
+- IP geolocation is city/area-level at best and can point to a carrier gateway or VPN exit; it is not a substitute for GNSS and must never drive turn-by-turn guidance.
+- Imported GPX is currently track-following by geometry only. Reliable turn-by-turn guidance for GPX requires a separate road-route recalculation and validation; the app states this limitation instead of inventing turns.
 - Public demo endpoints (Photon, Valhalla and Overpass) are best-effort services and may impose rate limits. A successful CI build does not replace GPS, route and alert validation on the actual phone and on-road network.
 
 ## Open data and services
