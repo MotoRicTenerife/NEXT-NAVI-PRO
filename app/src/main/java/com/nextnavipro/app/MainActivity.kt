@@ -1051,7 +1051,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 view.setTextColor(when {
                     view === speedText -> textColor
                     view === limitValue -> Color.BLACK
-                    view === clockText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
+                    view === clockText -> Color.WHITE
                     view === routeMetricsText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
                     view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 85, 105)
@@ -1650,7 +1650,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateWeatherDisplay(snapshot: WeatherSnapshot) {
         if (!::weatherText.isInitialized) return
-        val currentHour = snapshot.currentTime.take(13)
         val currentRainChance = snapshot.hourly
             .minByOrNull { hour ->
                 kotlin.math.abs(
