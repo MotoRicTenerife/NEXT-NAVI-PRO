@@ -575,9 +575,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            maneuverIcon.textSize = 104f
-            navHalf.addView(maneuverIcon, params(-1, dp(112)))
-            routeText.translationY = -dp(4).toFloat()
+            // Portrait: compact and lift turn guidance so it stays visible on shorter screens.
+            maneuverIcon.textSize = 92f
+            maneuverIcon.translationY = -dp(6).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dp(98)))
+            routeText.textSize = 15f
+            routeText.translationY = -dp(8).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -603,10 +606,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            maneuverIcon.textSize = 132f
-            maneuverIcon.translationY = -dp(4).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(132)))
-            routeText.translationY = -dp(4).toFloat()
+            // Landscape: lift the dashboard by about 1 cm (38 dp) and compact turn guidance.
+            content.translationY = -dp(38).toFloat()
+            maneuverIcon.textSize = 116f
+            maneuverIcon.translationY = -dp(6).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dp(116)))
+            routeText.textSize = 15f
+            routeText.translationY = -dp(6).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
