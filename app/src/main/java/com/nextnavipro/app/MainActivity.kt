@@ -495,7 +495,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Keep the map in the dashboard in both orientations. The speedometer stays
         // in the central column/band; the map is the right-hand (landscape) or lower
         // (portrait) pane rather than being used to position the speedometer.
-        listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText).forEach { infoColumn.removeView(it) }
+        listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText, routeMetricsText).forEach { infoColumn.removeView(it) }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply {
