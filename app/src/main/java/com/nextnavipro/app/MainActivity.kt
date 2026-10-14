@@ -393,14 +393,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         weatherText = TextView(this).apply {
-            text = "METEO\nin attesa GPS"
-            textSize = 10f
+            text = "🌤️ METEO in attesa GPS"
+            textSize = 12f
             gravity = Gravity.CENTER
             maxLines = 2
             includeFontPadding = false
-            setPadding(dp(2), dp(1), dp(2), dp(1))
+            setLineSpacing(dp(2).toFloat(), 1.0f)
+            setPadding(dp(8), dp(3), dp(8), dp(3))
+            setBackgroundColor(if (negativeTheme) Color.rgb(35, 41, 47) else Color.rgb(205, 216, 222))
         }
-        infoColumn.addView(weatherText, params(-1, dp(42)))
+        infoColumn.addView(weatherText, params(-1, dp(52)))
         limitValue = TextView(this).apply {
             text = "—"
             textSize = 26f
@@ -464,16 +466,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.72f))
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.0f))
         clockText = TextView(this).apply {
             text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
             textSize = 25f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
-            setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
+            setTextColor(Color.WHITE)
         }
-        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(5) })
+        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(8) })
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
@@ -488,7 +490,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // orientations, freeing the navigation pane for turn guidance.
         speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         val centerSpacer = View(this)
-        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1.28f))
+        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1.0f))
         routeButton = makeButton("AVVIA PERCORSO") {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
@@ -548,7 +550,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(58), dp(58)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(weatherText, params(-1, dp(42)))
+            content.addView(weatherText, params(-1, dp(52)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.85f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
@@ -581,7 +583,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             navAndLimit.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             navAndLimit.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            left.addView(weatherText, params(-1, dp(42)))
+            left.addView(weatherText, params(-1, dp(52)))
             left.addView(navAndLimit, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
             speedText.textSize = 158f
@@ -1648,14 +1650,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateWeatherDisplay(snapshot: WeatherSnapshot) {
         if (!::weatherText.isInitialized) return
+        val currentHour = snapshot.currentTime.take(13)
+        val currentRainChance = snapshot.hourly
+            .minByOrNull { hour ->
+                kotlin.math.abs(
+                    (hour.time.take(13).substringAfter("T").take(2).toIntOrNull() ?: 0) -
+                        (snapshot.currentTime.substringAfter("T").take(2).toIntOrNull() ?: 0)
+                )
+            }?.precipitationProbability
+        val rainIcon = if ((currentRainChance ?: 0) >= 50) "🌧️" else "☔"
+        val rainText = currentRainChance?.let { "$rainIcon $it%" } ?: "☔ —"
         weatherText.text = WeatherService.icon(snapshot.weatherCode) + " " +
-            WeatherService.format(snapshot.temperatureC) + "°C\nV " +
-            WeatherService.format(snapshot.windKmh) + " " + WeatherService.windDirection(snapshot.windDirectionDegrees) +
-            " • raff. " + WeatherService.format(snapshot.gustKmh)
+            WeatherService.description(snapshot.weatherCode) + "  •  " +
+            WeatherService.format(snapshot.temperatureC) + "°C\n" +
+            "💨 " + WeatherService.format(snapshot.windKmh) + " km/h " +
+            WeatherService.windDirection(snapshot.windDirectionDegrees) +
+            "  •  raff. " + WeatherService.format(snapshot.gustKmh) + " km/h  •  " + rainText
         weatherText.contentDescription = WeatherService.description(snapshot.weatherCode) +
             ", " + WeatherService.format(snapshot.temperatureC) + " gradi, vento " +
-            WeatherService.format(snapshot.windKmh) + " chilometri orari, raffiche " +
-            WeatherService.format(snapshot.gustKmh) + " chilometri orari"
+            WeatherService.format(snapshot.windKmh) + " chilometri orari, direzione " +
+            WeatherService.windDirection(snapshot.windDirectionDegrees) + ", raffiche " +
+            WeatherService.format(snapshot.gustKmh) + " chilometri orari, probabilità di pioggia " +
+            (currentRainChance?.let { "$it per cento" } ?: "non disponibile")
     }
 
     private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
