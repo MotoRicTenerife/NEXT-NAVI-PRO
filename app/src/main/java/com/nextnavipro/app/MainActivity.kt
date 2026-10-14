@@ -26,6 +26,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -105,6 +106,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var dashboardStarted = false
     private var activityStarted = false
     private var activityResumed = false
+    private var originalWindowBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    private var originalWindowBrightnessCaptured = false
     private var gpsUpdatesRequested = false
     private var negativeTheme = true
     private var currentLocation: Location? = null
@@ -215,6 +218,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Preserve the window-level setting. The system brightness slider and adaptive-brightness
+        // preference are never changed; -1 delegates brightness back to Android/Samsung.
+        if (!originalWindowBrightnessCaptured) {
+            originalWindowBrightness = window.attributes.screenBrightness
+            originalWindowBrightnessCaptured = true
+        }
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -273,6 +282,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun launchDashboard() {
         if (dashboardStarted) return
         dashboardStarted = true
+        if (activityResumed) setNavigationBrightnessEnabled(true)
         splashHandler.removeCallbacksAndMessages(null)
         buildDashboard(null)
         requestGps()
@@ -1906,12 +1916,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        if (dashboardStarted) setNavigationBrightnessEnabled(true)
         mapView?.onResume()
         if (themeMode == "auto") lightSensor?.let { sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         if (dashboardStarted) requestGps()
     }
 
     override fun onPause() {
+        // Restore immediately when another app/system surface takes over.
+        setNavigationBrightnessEnabled(false)
         activityResumed = false
         if (gpsUpdatesRequested) {
             locationManager.removeUpdates(this)
@@ -1923,6 +1936,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onStop() {
+        setNavigationBrightnessEnabled(false)
         activityStarted = false
         mapView?.onStop()
         super.onStop()
@@ -1940,6 +1954,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onDestroy() {
+        setNavigationBrightnessEnabled(false)
         splashHandler.removeCallbacksAndMessages(null)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
         speedAlertHandler.removeCallbacksAndMessages(null)
@@ -1953,6 +1968,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         voiceGuide?.shutdown()
         voiceGuide = null
         super.onDestroy()
+    }
+
+    /** Forces maximum brightness only for this Activity window, then delegates back to Android. */
+    private fun setNavigationBrightnessEnabled(enabled: Boolean) {
+        if (!originalWindowBrightnessCaptured) return
+        val attributes = window.attributes
+        val desired = if (enabled) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL else originalWindowBrightness
+        if (attributes.screenBrightness != desired) {
+            attributes.screenBrightness = desired
+            window.attributes = attributes
+        }
     }
 
     private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
