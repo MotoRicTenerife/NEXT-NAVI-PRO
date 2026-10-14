@@ -2371,14 +2371,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         val bestIndex = match?.segmentIndex ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
         val bestDistance = match.distanceMeters.toFloat()
-        val confidenceLimit = maxOf(45f, if (location.hasAccuracy()) location.accuracy * 1.8f else 45f)
+        val reportedAccuracy = if (location.hasAccuracy()) location.accuracy else 20f
+        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
         if (bestDistance <= confidenceLimit) {
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, bestIndex) else bestIndex
             routeProgressInitialized = true
             return lastRouteProgressIndex to bestDistance
         }
-        // A weak match must not advance progress or produce a new turn instruction.
-        return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to bestDistance
+        // Never let a weak match masquerade as a nearby fix to callers of this method.
+        return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
     }
 
     private fun updateRouteMetrics(location: Location?) {
@@ -2393,8 +2394,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val match = findRouteProgressIndex(route, here)
         val nearestIndex = match.first
         val nearestMeters = match.second
-        val confidenceLimit = maxOf(65f, if (here.hasAccuracy()) here.accuracy * 2.5f else 65f)
-        var remainingMeters = if (nearestMeters <= confidenceLimit) nearestMeters.toDouble() else 0.0
+        val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
+        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
+        if (nearestMeters > confidenceLimit) {
+            routeMetricsText.text = "GPS INSUFFICIENTE • percorso non agganciato"
+            return
+        }
+        var remainingMeters = nearestMeters.toDouble()
         for (i in nearestIndex until route.points.lastIndex) {
             val a = route.points[i]
             val b = route.points[i + 1]
@@ -2430,7 +2436,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val match = findRouteProgressIndex(route, here)
         val nearestIndex = match.first
         val nearestMeters = match.second
-        val confidenceLimit = maxOf(65f, if (here.hasAccuracy()) here.accuracy * 2.5f else 65f)
+        val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
+        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
         updateRouteMetrics(route, nearestIndex)
         if (nearestMeters > confidenceLimit) {
             if (::routeText.isInitialized && route.maneuvers.isNotEmpty()) {
