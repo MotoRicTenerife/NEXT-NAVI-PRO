@@ -475,21 +475,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.0f))
+        // Slightly larger upper spacer lowers the speedometer in both orientations.
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
-        clockText = TextView(this).apply {
-            text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
-            textSize = 25f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            setTextColor(Color.WHITE)
-        }
-        // Put the clock BELOW the large speed digits, in the free strip before
-        // the km/h label. This avoids the navigation header covering it in portrait.
-        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 8 else 4)
-        })
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -499,11 +487,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setPadding(0, 0, 0, dp(8))
         }
         speedColumn.addView(unit, params(-1, dp(34)))
+        clockText = TextView(this).apply {
+            text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
+            textSize = 25f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(Color.WHITE)
+        }
+        // Keep the clock directly below the km/h label, in the free strip above trip metrics.
+        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
+            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 4 else 2)
+        })
         // Keep remaining distance and ETA directly below the speedometer in both
         // orientations, freeing the navigation pane for turn guidance.
         speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         val centerSpacer = View(this)
-        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1.0f))
+        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
         routeButton = makeButton("AVVIA PERCORSO") {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
