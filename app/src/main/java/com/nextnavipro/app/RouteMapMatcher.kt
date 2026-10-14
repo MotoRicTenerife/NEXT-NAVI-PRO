@@ -9,26 +9,27 @@ import kotlin.math.sqrt
  * RouteProgressTracker so a single noisy fix cannot jump to a distant part of a loop.
  */
 internal object RouteMapMatcher {
-    data class Match(val segmentIndex: Int, val distanceMeters: Double, val bearingDegrees: Double, val fraction: Double)
+    data class Match(val segmentIndex: Int, val distanceMeters: Double, val bearingDegrees: Double, val fraction: Double, val score: Double)
 
     fun match(
-        points: List<NavPoint>,
-        latitude: Double,
-        longitude: Double,
-        startIndex: Int = 0,
-        endIndex: Int = points.lastIndex - 1,
-        bearingDegrees: Float? = null
-    ): Match? {
+        points: List<NavPoint>, latitude: Double, longitude: Double,
+        startIndex: Int = 0, endIndex: Int = points.lastIndex - 1, bearingDegrees: Float? = null
+    ): Match? = candidates(points, latitude, longitude, startIndex, endIndex, bearingDegrees).minByOrNull { it.score }
+
+    /** Returns every valid segment candidate so temporal evidence can disambiguate nearby roads. */
+    fun candidates(
+        points: List<NavPoint>, latitude: Double, longitude: Double,
+        startIndex: Int = 0, endIndex: Int = points.lastIndex - 1, bearingDegrees: Float? = null
+    ): List<Match> {
         if (points.size < 2 || !latitude.isFinite() || !longitude.isFinite() ||
-            latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
+            latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return emptyList()
         val lastSegment = points.lastIndex - 1
         val start = startIndex.coerceIn(0, lastSegment)
         val end = endIndex.coerceIn(start, lastSegment)
         val metersPerDegreeLat = 111_132.0
-        val metersPerDegreeLon = 111_320.0 * cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
-        var best: Match? = null
-        var bestScore = Double.POSITIVE_INFINITY
+        val metersPerDegreeLon = 111_320.0 * kotlin.math.cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
         val useBearing = bearingDegrees != null && bearingDegrees.isFinite()
+        val result = ArrayList<Match>()
         for (i in start..end) {
             val a = points[i]
             val b = points[i + 1]
@@ -44,20 +45,15 @@ internal object RouteMapMatcher {
             val fraction = (-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)
             val projectedX = ax + fraction * dx
             val projectedY = ay + fraction * dy
-            val distance = sqrt(projectedX * projectedX + projectedY * projectedY)
-            val segmentBearing = (Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0
+            val distance = kotlin.math.sqrt(projectedX * projectedX + projectedY * projectedY)
+            val segmentBearing = (Math.toDegrees(kotlin.math.atan2(dx, dy)) + 360.0) % 360.0
             val headingPenalty = if (useBearing) {
                 val delta = kotlin.math.abs(((segmentBearing - bearingDegrees!! + 540.0) % 360.0) - 180.0)
-                // Direction helps distinguish carriageways, but must not overpower position.
                 delta * 0.25
             } else 0.0
-            val score = distance + headingPenalty
-            if (score < bestScore) {
-                bestScore = score
-                best = Match(i, distance, segmentBearing, fraction)
-            }
+            result.add(Match(i, distance, segmentBearing, fraction, distance + headingPenalty))
         }
-        return best
+        return result
     }
 }
 
@@ -138,14 +134,37 @@ internal class RouteProgressTracker {
             if (end < start) end = start
         }
         val heading = bearingDegrees?.takeIf { it.isFinite() && (speedMetersPerSecond ?: 0.0) >= 3.0 }
-        val geometric = RouteMapMatcher.match(points, latitude, longitude, start, end, heading) ?: return null
+        val candidates = RouteMapMatcher.candidates(points, latitude, longitude, start, end, heading)
+        if (candidates.isEmpty()) return null
         val maximumSnapDistance = minOf(65.0, maxOf(25.0, accuracyMeters * 1.8))
-        // Do not advance internal progress on a geometrically implausible/off-route fix.
-        if (geometric.distanceMeters > maximumSnapDistance) return null
-        val along = cumulativeMeters[geometric.segmentIndex] +
-            (cumulativeMeters[geometric.segmentIndex + 1] - cumulativeMeters[geometric.segmentIndex]) * geometric.fraction
-        if (previousAlong != null && along > previousAlong + maxForward + 1.0) return null
-        val result = Match(geometric.segmentIndex, geometric.distanceMeters, along)
+        val observedDistance = if (previousAlong != null && lastLatitude.isFinite() && lastLongitude.isFinite())
+            GpxRouteService.distanceMeters(NavPoint(lastLatitude, lastLongitude), NavPoint(latitude, longitude)) else 0.0
+        val emissionSigma = maxOf(5.0, accuracyMeters)
+        val transitionSigma = maxOf(12.0, accuracyMeters * 1.5)
+        var selected: Match? = null
+        var selectedScore = Double.POSITIVE_INFINITY
+        for (candidate in candidates) {
+            if (candidate.distanceMeters > maximumSnapDistance) continue
+            val along = cumulativeMeters[candidate.segmentIndex] +
+                (cumulativeMeters[candidate.segmentIndex + 1] - cumulativeMeters[candidate.segmentIndex]) * candidate.fraction
+            val progressDelta = if (previousAlong == null) 0.0 else along - previousAlong
+            if (previousAlong != null && progressDelta < -20.0) continue
+            if (previousAlong != null && progressDelta > maxForward + 1.0) continue
+            // Gaussian emission likelihood plus a transition penalty comparing route progress
+            // with observed displacement. This is an online probabilistic score, not a claim
+            // of full-window HMM inference; recorded traces are still required for calibration.
+            val normalizedDistance = candidate.distanceMeters / emissionSigma
+            val emissionCost = 0.5 * normalizedDistance * normalizedDistance
+            val headingCost = (candidate.score - candidate.distanceMeters) * 0.5
+            val transitionCost = if (previousAlong == null) 0.0
+                else kotlin.math.abs(progressDelta - observedDistance) / transitionSigma
+            val score = emissionCost + headingCost + transitionCost
+            if (score < selectedScore) {
+                selectedScore = score
+                selected = Match(candidate.segmentIndex, candidate.distanceMeters, along)
+            }
+        }
+        val result = selected ?: return null
         lastAlongMeters = maxOf(previousAlong ?: along, along)
         lastElapsedMs = elapsedRealtimeMs
         lastLatitude = latitude
