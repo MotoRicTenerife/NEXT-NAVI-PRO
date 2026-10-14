@@ -601,6 +601,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, params(-1, dp(98)))
             routeText.textSize = 15f
             routeText.translationY = 0f
+            // Keep maneuver instructions above the speedometer panel if their bounds overlap.
+            routeText.elevation = dp(12).toFloat()
+            routeText.translationZ = dp(12).toFloat()
+            navHalf.elevation = dp(10).toFloat()
+            navHalf.translationZ = dp(10).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -616,6 +621,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f))
             content.addView(routeButton, params(-1, dp(44)))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.65f))
+            // The navigation pane must draw in front of the speedometer pane on compact screens.
+            upper.elevation = dp(10).toFloat()
+            upper.translationZ = dp(10).toFloat()
+            upper.bringToFront()
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
