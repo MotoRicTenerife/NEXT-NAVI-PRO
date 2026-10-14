@@ -19,14 +19,14 @@ Android navigation prototype for cars and motorcycles, with a high-contrast dash
 
 ## Known limitations and safety notes
 
-- Routing currently uses Valhalla's public `auto` costing profile for both display modes; a dedicated motorcycle profile is not configured.
+- Routing uses Valhalla `auto` for car and the beta `motorcycle` costing profile for motorcycle mode, with trails penalized. The public service remains best-effort and the motorcycle profile still needs field validation.
 - Route progress is still based on proximity to the route geometry, not a full probabilistic map-matching engine. Junctions, parallel carriageways and dense road networks need real-device field testing.
 - Road names, references and speed limits currently come from nearby OpenStreetMap ways via the public Overpass API. Coverage and tagging can be incomplete. The official Cabildo de Tenerife road-network dataset has been identified as a valuable independent geometry/reference source, but has **not yet been integrated**.
 - Numeric legal limits are shown only when an explicit OSM `maxspeed` value can be associated with the matched road. Missing/conditional values remain unknown; the app does not infer a legal limit from road class.
 - Speed-camera pins are visual only; there are no audio radar alerts yet because road/direction matching must be validated first.
 - Online services require connectivity. This is not yet a complete offline navigator.
 - IP geolocation is city/area-level at best and can point to a carrier gateway or VPN exit; it is not a substitute for GNSS and must never drive turn-by-turn guidance.
-- Imported GPX is currently track-following by geometry only. Reliable turn-by-turn guidance for GPX requires a separate road-route recalculation and validation; the app states this limitation instead of inventing turns.
+- Imported GPX tracks can still be followed as geometry. The app now offers optional online Valhalla `trace_route` map matching to derive road geometry and maneuvers; if matching fails, it retains the original track without fabricating instructions. This feature still needs field validation.
 - Public demo endpoints (Photon, Valhalla and Overpass) are best-effort services and may impose rate limits. A successful CI build does not replace GPS, route and alert validation on the actual phone and on-road network.
 
 ## Open data and services
