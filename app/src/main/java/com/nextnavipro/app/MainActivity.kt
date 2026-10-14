@@ -1065,7 +1065,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton("Chiudi", null).show()
     }
 
-    private fun appendGpsDiagnosticSample(location: Location) {
+    private fun appendGpsDiagnosticSample(location: Location, rejectionStatus: String? = null) {
         if (!gpsDiagnosticRecording || gpsDiagnosticSamples.size >= 50_000) {
             if (gpsDiagnosticRecording && gpsDiagnosticSamples.size >= 50_000) {
                 gpsDiagnosticRecording = false
@@ -1074,7 +1074,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val route = routeResult
-        val match = if (route != null && route.points.size >= 2) findRouteProgressIndex(route, location) else null
+        val match = if (rejectionStatus == null && route != null && route.points.size >= 2)
+            findRouteProgressIndex(route, location) else null
         val validMatch = match?.takeIf { it.second.isFinite() && it.second < Float.MAX_VALUE }
         gpsDiagnosticSamples.add(
             GpsTraceSample(
@@ -1100,7 +1101,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }.distinct().joinToString("/"),
                 routeSegmentIndex = validMatch?.first,
                 routeDistanceMeters = validMatch?.second,
-                matchStatus = when {
+                matchStatus = rejectionStatus ?: when {
                     route == null -> "NO_ACTIVE_ROUTE"
                     validMatch == null -> "NO_CONFIDENT_MATCH"
                     else -> "MATCHED"
@@ -2013,11 +2014,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
         }
         if (ageMs > 10000 || !location.hasAccuracy() || location.accuracy > 50f) {
+            appendGpsDiagnosticSample(location, "REJECTED_STALE_OR_ACCURACY")
             gpsText.text = "GPS INSUFFICIENTE"
             return
         }
         val previousRaw = lastRawGpsLocation
         if (previousRaw != null && isImplausibleGpsJump(previousRaw, location)) {
+            // Keep rejected fixes in opt-in diagnostics so real traces reveal the failures too.
+            appendGpsDiagnosticSample(location, "REJECTED_IMPLAUSIBLE_JUMP")
             // Do not promote a rejected fix to the reference point; the next fix is
             // compared with the last accepted raw fix instead of the bad jump.
             gpsText.text = "GPS SALTO SCARTATO"
