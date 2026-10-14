@@ -37,4 +37,19 @@ class NavigationServicesTest {
         assertTrue(motorcycle.getJSONObject("costing_options")
             .getJSONObject("motorcycle").getDouble("use_trails") == 0.0)
     }
+    @Test
+    fun gpxTraceRequestUsesRoadSnapAndVehicleProfile() {
+        val points = listOf(NavPoint(28.0, -16.0), NavPoint(28.0005, -16.0005), NavPoint(28.001, -16.001))
+        val car = NavigationServices.buildTraceRequest(points, motorcycle = false)
+        val moto = NavigationServices.buildTraceRequest(points, motorcycle = true)
+        assertEquals("map_snap", car.getString("shape_match"))
+        assertEquals("auto", car.getString("costing"))
+        assertEquals("motorcycle", moto.getString("costing"))
+        assertEquals(3, car.getJSONArray("shape").length())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun gpxTraceRequestRejectsInvalidCoordinates() {
+        NavigationServices.buildTraceRequest(listOf(NavPoint(28.0, -16.0), NavPoint(Double.NaN, -16.0)), motorcycle = false)
+    }
 }
