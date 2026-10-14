@@ -176,6 +176,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRerouteAttemptMs = 0L
     private var offRouteFixes = 0
     private var lastRawGpsLocation: Location? = null
+    private var lastAcceptedFixElapsedMs = 0L
     private var smoothedGpsLocation: Location? = null
     private var lastWeatherUpdateMs = 0L
     private var lastWeatherLocation: Location? = null
@@ -1502,13 +1503,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS SALTO SCARTATO"
             return
         }
+        val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
+        val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
+        lastAcceptedFixElapsedMs = fixElapsedMs
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
-        animateGpsMarkerTo(smoothed)
+        animateGpsMarkerTo(smoothed, movingTimeMs)
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
@@ -2227,8 +2231,86 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun animateGpsMarkerTo(target: Location) {
-        val markerTarget = snapMarkerToActiveRoute(target)
+    /**
+     * OsmAnd predicts a short distance ahead along the active route using the time
+     * between fixes and average speed, then animates the marker to that prediction.
+     * We use a conservative 30% interpolation lead, only for the visual marker and
+     * only when a route is active; raw/smoothed GPS still drives guidance and alerts.
+     * Prediction is disabled close to a maneuver to avoid visually cutting a turn.
+     */
+    private fun predictMarkerAlongRoute(location: Location, movingTimeMs: Long): Location {
+        val route = routeResult ?: return Location(location)
+        if (route.points.size < 2 || movingTimeMs !in 101L..2000L ||
+            !location.hasSpeed() || location.speed < 2.0f) return Location(location)
+
+        var nearestIndex = 0
+        var nearestDistance = Float.MAX_VALUE
+        for (i in route.points.indices) {
+            val point = route.points[i]
+            val d = FloatArray(1)
+            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
+            if (d[0] < nearestDistance) {
+                nearestDistance = d[0]
+                nearestIndex = i
+            }
+        }
+        // Do not predict across an imminent junction/turn.
+        val nextManeuver = route.maneuvers.firstOrNull { it.pointIndex > nearestIndex }
+        if (nextManeuver != null) {
+            var metersToManeuver = 0.0
+            for (i in nearestIndex until nextManeuver.pointIndex.coerceAtMost(route.points.lastIndex)) {
+                val a = route.points[i]
+                val b = route.points[i + 1]
+                val d = FloatArray(1)
+                Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
+                metersToManeuver += d[0]
+            }
+            if (metersToManeuver < 25.0) return Location(location)
+        }
+
+        val speedNow = if (location.hasSpeed()) location.speed else 0f
+        val previousSpeed = lastRawGpsLocation?.takeIf { it.hasSpeed() }?.speed ?: speedNow
+        var remainingMeters = ((previousSpeed + speedNow) / 2.0) *
+            (movingTimeMs / 1000.0) * 0.30
+        if (!remainingMeters.isFinite() || remainingMeters <= 0.0) return Location(location)
+        // Bound the visual lead; this is marker interpolation, not a claimed GPS fix.
+        remainingMeters = remainingMeters.coerceAtMost(8.0)
+
+        var start = NavPoint(location.latitude, location.longitude)
+        for (i in (nearestIndex + 1)..route.points.lastIndex) {
+            val end = route.points[i]
+            val endLocation = Location("route").apply {
+                latitude = end.latitude
+                longitude = end.longitude
+            }
+            val startLocation = Location("route").apply {
+                latitude = start.latitude
+                longitude = start.longitude
+            }
+            val segmentMeters = startLocation.distanceTo(endLocation).toDouble()
+            if (segmentMeters < 0.1) {
+                start = end
+                continue
+            }
+            if (remainingMeters <= segmentMeters) {
+                val fraction = (remainingMeters / segmentMeters).coerceIn(0.0, 1.0)
+                val predicted = Location(location).apply {
+                    latitude = start.latitude + (end.latitude - start.latitude) * fraction
+                    longitude = start.longitude + (end.longitude - start.longitude) * fraction
+                    bearing = startLocation.bearingTo(endLocation)
+                    setBearing(bearing)
+                }
+                return predicted
+            }
+            remainingMeters -= segmentMeters
+            start = end
+        }
+        return Location(location)
+    }
+
+    private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long) {
+        val snapped = snapMarkerToActiveRoute(target)
+        val markerTarget = predictMarkerAlongRoute(snapped, movingTimeMs)
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerTarget)
             return
