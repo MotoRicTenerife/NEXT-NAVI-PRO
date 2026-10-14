@@ -1033,6 +1033,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (view is TextView && view !== destinationInput) {
                 view.setTextColor(when {
                     view === speedText -> textColor
+                    view === limitValue -> Color.BLACK
                     view === clockText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
                     view === routeMetricsText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
@@ -1703,11 +1704,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         if (!::limitValue.isInitialized) return
         limitValue.text = limit?.toString() ?: "—"
-        if (limit != null && speedKmh != null && speedKmh > limit + 3) {
-            limitValue.setTextColor(Color.rgb(255, 55, 45))
-        } else {
-            limitValue.setTextColor(if (negativeTheme) white else positiveText)
-        }
+        // The speed-limit digits stay black inside the white/red regulatory sign.
+        limitValue.setTextColor(Color.BLACK)
     }
 
     private fun checkRadarProximityAlert(location: Location) {
