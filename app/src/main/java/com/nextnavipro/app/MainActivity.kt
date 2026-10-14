@@ -1471,23 +1471,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun smoothLocation(previous: Location?, incoming: Location): Location {
-        // Accuracy-adaptive low-pass filtering: follow good fixes quickly, damp noisy fixes
-        // more strongly, and avoid smoothing across large movements or tight turns.
+        // Adaptive low-pass filter: suppress stationary GPS wander, but rapidly accept
+        // genuine movement and course changes so the marker does not cut across a turn.
         val result = Location(incoming)
         if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
             val jump = previous.distanceTo(incoming)
             if (jump < 35f) {
                 val accuracyAlpha = when {
-                    incoming.accuracy <= 10f -> 0.72f
-                    incoming.accuracy <= 20f -> 0.62f
-                    incoming.accuracy <= 35f -> 0.48f
-                    else -> 0.35f
+                    incoming.accuracy <= 5f -> 0.58f
+                    incoming.accuracy <= 10f -> 0.52f
+                    incoming.accuracy <= 20f -> 0.43f
+                    incoming.accuracy <= 35f -> 0.32f
+                    else -> 0.25f
                 }
                 val speed = if (incoming.hasSpeed()) incoming.speed else 0f
-                val alpha = when {
-                    speed >= 15f -> (accuracyAlpha + 0.15f).coerceAtMost(0.88f)
-                    speed < 2.5f -> (accuracyAlpha - 0.15f).coerceAtLeast(0.20f)
+                var alpha = when {
+                    speed >= 15f -> (accuracyAlpha + 0.20f).coerceAtMost(0.88f)
+                    speed < 2.5f -> 0.14f
                     else -> accuracyAlpha
+                }
+                if (jump > 12f) alpha = maxOf(alpha, 0.82f)
+                if (previous.hasBearing() && incoming.hasBearing() && speed >= 2.5f) {
+                    val courseDelta = abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
+                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.82f)
                 }
                 result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
                 result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
