@@ -1037,9 +1037,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (result != null) {
                     latestWeather = result
                     updateWeatherDisplay(result)
-                    if (::weatherText.isInitialized) {
-                        weatherText.text = weatherText.text.toString() + "\\n≈ METEO ZONA IP"
-                    }
                     if (forecastRequested) {
                         forecastRequested = false
                         showWeatherForecast()
@@ -1137,7 +1134,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.text = "TRACCIA GPX\\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
             routeText.textSize = 14f
         }
-        if (::routeButton.isInitialized) routeButton.text = "TRACCIA GPX"
+        if (::routeButton.isInitialized) routeButton.text = "ANNULLA TRACCIA GPX"
         announcedManeuverIndex = -1
         announcedStage = 0
         drawRoute(routeResult!!, true)
@@ -1901,7 +1898,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             WeatherService.format(snapshot.windKmh) + " chilometri orari, direzione " +
             WeatherService.windDirection(snapshot.windDirectionDegrees) + ", raffiche " +
             WeatherService.format(snapshot.gustKmh) + " chilometri orari, probabilità di pioggia " +
-            (currentRainChance?.let { "$it per cento" } ?: "non disponibile")
+            (currentRainChance?.let { "$it per cento" } ?: "non disponibile") +
+            if (weatherUsesApproximateLocation) ", meteo basato su posizione IP approssimativa: " + (approximateLocation?.areaLabel ?: "zona incerta") else ""
     }
 
     private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
