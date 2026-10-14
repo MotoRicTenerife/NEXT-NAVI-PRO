@@ -121,6 +121,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
     private var themeMode: String = "negative"
+    private var motorcycleProfile = false
     private lateinit var limitValue: TextView
     private var mapView: MapView? = null
     private var mapOriginalParent: android.view.ViewGroup? = null
@@ -301,6 +302,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 (voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
+        motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
         // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
         themeMode = "auto"
         preferences.edit().putString(PREF_THEME_MODE, "auto").apply()
@@ -1692,7 +1694,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         thread(name = "valhalla-route") {
             try {
                 val result = NavigationServices.calculateRoute(
-                    origin, target.point, motorcycle = false
+                    origin, target.point, motorcycle = motorcycleProfile
                 )
                 runOnUiThread {
                     isCalculatingRoute = false
