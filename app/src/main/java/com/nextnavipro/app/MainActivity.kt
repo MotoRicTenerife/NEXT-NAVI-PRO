@@ -139,6 +139,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var weatherUsesApproximateLocation = false
     private val ipFallbackHandler = Handler(Looper.getMainLooper())
     private var pendingGpxExportName = "Percorso NEXT NAVI PRO"
+    private var pendingGpxExportPoints: List<NavPoint>? = null
+    private var recordingGpx = false
+    private val gpxRecordingPoints = ArrayList<NavPoint>()
+    private var lastRecordedGpxPoint: NavPoint? = null
+    private var lastGpxPointTimeMs = 0L
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
     private var routeProgressInitialized = false
@@ -1051,7 +1056,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showGpxMenu() {
-        val choices = arrayOf("Importa GPX dal telefono", "Salva percorso attivo", "Apri percorso salvato", "Esporta GPX…")
+        val choices = arrayOf("Importa GPX dal telefono", "Salva percorso attivo", "Gestisci percorsi e memoria", "Esporta GPX attivo…")
         AlertDialog.Builder(this).setTitle("Percorsi GPX")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1061,6 +1066,69 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     3 -> exportActiveGpx()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun askToRecordGpx() {
+        if (recordingGpx) return
+        AlertDialog.Builder(this)
+            .setTitle("Memorizzare il viaggio?")
+            .setMessage("Vuoi registrare il percorso realmente seguito in un file GPX? La registrazione usa solo posizioni GPS valide.")
+            .setPositiveButton("Sì, registra") { _, _ -> startGpxRecording() }
+            .setNegativeButton("No", null)
+            .show()
+    }
+
+    private fun startGpxRecording() {
+        gpxRecordingPoints.clear()
+        lastRecordedGpxPoint = null
+        lastGpxPointTimeMs = 0L
+        recordingGpx = true
+        currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
+        Toast.makeText(this, "Registrazione GPX avviata.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
+        if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 25f) return
+        val point = NavPoint(location.latitude, location.longitude)
+        val previous = lastRecordedGpxPoint
+        val now = System.currentTimeMillis()
+        if (!force && previous != null) {
+            val distance = GpxRouteService.distanceMeters(previous, point)
+            if (distance < 5.0 && now - lastGpxPointTimeMs < 5000L) return
+        }
+        if (gpxRecordingPoints.size >= 100_000) {
+            finishGpxRecording(save = true)
+            Toast.makeText(this, "Registrazione fermata: raggiunto il limite di sicurezza dei punti GPX.", Toast.LENGTH_LONG).show()
+            return
+        }
+        gpxRecordingPoints.add(point)
+        lastRecordedGpxPoint = point
+        lastGpxPointTimeMs = now
+    }
+
+    private fun finishGpxRecording(save: Boolean) {
+        if (!recordingGpx) return
+        recordingGpx = false
+        val points = gpxRecordingPoints.toList()
+        gpxRecordingPoints.clear()
+        lastRecordedGpxPoint = null
+        if (!save || points.size < 2) {
+            Toast.makeText(this, "Registrazione GPX terminata: non ci sono abbastanza punti per salvare una traccia.", Toast.LENGTH_LONG).show()
+            return
+        }
+        thread(name = "save-recorded-gpx") {
+            try {
+                val label = (destination?.name ?: "Viaggio registrato")
+                    .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
+                val file = File(gpxDirectory(), "${System.currentTimeMillis()}_$label.gpx")
+                FileOutputStream(file).use { GpxRouteService.write(it, label, points) }
+                runOnUiThread {
+                    Toast.makeText(this, "Viaggio GPX salvato: $label (${points.size} punti).", Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread { Toast.makeText(this, "Salvataggio registrazione fallito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+            }
+        }
     }
 
     private fun gpxDirectory(): File = File(filesDir, "gpx_routes").apply { if (!exists()) mkdirs() }
@@ -1109,13 +1177,39 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     Toast.makeText(this, "Nessun file GPX valido nella libreria.", Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
-                AlertDialog.Builder(this).setTitle("Percorsi GPX salvati")
+                val totalBytes = tracks.sumOf { it.first.length() }
+                val totalMb = totalBytes / (1024.0 * 1024.0)
+                AlertDialog.Builder(this).setTitle("Libreria GPX • " + tracks.size + " percorsi")
+                    .setMessage(String.format(Locale.getDefault(), "Memoria occupata: %.2f MB\\nScegli un percorso per visualizzarlo, seguirlo, esportarlo o eliminarlo.", totalMb))
                     .setItems(tracks.map { (_, track) ->
                         track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
-                    }.toTypedArray()) { _, which -> loadSavedGpx(tracks[which].first) }
+                    }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
                     .setNegativeButton("Chiudi", null).show()
             }
         }
+    }
+
+    private fun showSavedGpxActions(file: File, track: GpxTrack) {
+        val actions = arrayOf("Segui questa traccia GPX", "Visualizza sulla mappa", "Esporta / condividi file…", "Elimina percorso")
+        AlertDialog.Builder(this).setTitle(track.name)
+            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\\nFile: %s", track.distanceKm, track.points.size, file.name))
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> loadSavedGpx(file)
+                    1 -> {
+                        activateGpxTrack(track)
+                        enterMapFullScreen()
+                    }
+                    2 -> exportGpxTrack(track)
+                    3 -> AlertDialog.Builder(this).setTitle("Eliminare il GPX?")
+                        .setMessage("Il file " + file.name + " verrà eliminato dal dispositivo.")
+                        .setNegativeButton("Annulla", null)
+                        .setPositiveButton("Elimina") { _, _ ->
+                            val deleted = file.delete()
+                            Toast.makeText(this, if (deleted) "Percorso GPX eliminato." else "Impossibile eliminare il file.", Toast.LENGTH_LONG).show()
+                        }.show()
+                }
+            }.setNegativeButton("Indietro") { _, _ -> showSavedGpxRoutes() }.show()
     }
 
     private fun loadSavedGpx(file: File) {
@@ -1153,6 +1247,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         pendingGpxExportName = (destination?.name ?: "Percorso NEXT NAVI PRO")
             .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Percorso NEXT NAVI PRO" }.take(60)
+        pendingGpxExportPoints = route.points.toList()
+        launchGpxExportPicker()
+    }
+
+    private fun exportGpxTrack(track: GpxTrack) {
+        pendingGpxExportName = track.name.replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "")
+            .trim().ifBlank { "Percorso NEXT NAVI PRO" }.take(60)
+        pendingGpxExportPoints = track.points.toList()
+        launchGpxExportPicker()
+    }
+
+    private fun launchGpxExportPicker() {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/gpx+xml"
@@ -1183,11 +1289,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             REQUEST_EXPORT_GPX -> thread(name = "export-gpx") {
                 try {
-                    val route = routeResult ?: throw IllegalStateException("Percorso non più disponibile.")
+                    val points = pendingGpxExportPoints ?: throw IllegalStateException("Percorso non più disponibile.")
                     contentResolver.openOutputStream(uri, "wt")?.use {
-                        GpxRouteService.write(it, pendingGpxExportName, route.points)
+                        GpxRouteService.write(it, pendingGpxExportName, points)
                     } ?: throw IllegalStateException("Impossibile scrivere il file selezionato.")
-                    runOnUiThread { Toast.makeText(this, "GPX esportato correttamente.", Toast.LENGTH_LONG).show() }
+                    runOnUiThread { Toast.makeText(this, "GPX esportato. Ora puoi condividerlo dal file manager.", Toast.LENGTH_LONG).show() }
                 } catch (error: Exception) {
                     runOnUiThread { Toast.makeText(this, "Esportazione GPX fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
                 }
@@ -1482,6 +1588,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     )
                     updateTurnGuidance(currentLocation)
                     routeButton.text = "ANNULLA PERCORSO"
+                    askToRecordGpx()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -1515,6 +1622,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun clearRoute() {
+        finishGpxRecording(save = true)
         routeResult = null
         resetRouteProgress()
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
@@ -1758,6 +1866,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
+        appendGpxRecordingPoint(smoothed)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
