@@ -1951,7 +1951,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     refreshWeatherForApproximateLocation(approximateLocation!!, true)
                     Toast.makeText(this, "Previsioni richieste per una zona approssimativa via IP.", Toast.LENGTH_LONG).show()
                 } else {
-                    Toast.makeText(this, "Nessuna posizione disponibile: attendo GPS o localizzazione IP.", Toast.LENGTH_LONG).show()
+                    forecastRequested = true
+                    ipFallbackRequested = false
+                    requestIpLocationFallback()
+                    Toast.makeText(this, "Nessuna posizione GPS: provo a ricavare una zona approssimativa dalla rete.", Toast.LENGTH_LONG).show()
                 }
                 return
             }
