@@ -70,3 +70,31 @@ Reference:
 4. Treat map matching and offline routing as separate projects. A local probabilistic matcher needs candidate road segments and a transition model; a remote `trace_route` call for a whole GPX is not a substitute for per-fix live matching.
 5. For true offline turn-by-turn navigation, choose and prototype one engine with its regional road graph/data pipeline. GraphHopper and Organic Maps remain candidates; the current app still has no offline routing graph. Decide only after an Android proof of concept measures APK size, RAM, route latency, data update size, licensing and car/motorcycle route quality.
 6. Do not declare production readiness until automated tests pass, the APK installs on target devices, and repeatable real-road traces validate position, turn timing, rerouting, limits and connectivity loss.
+
+
+## Additional findings from Android documentation and navigation-community reports
+
+### Position smoothness is not the same as position accuracy
+- Android's Fused Location Provider combines available device sources and treats requested intervals as best-effort hints. A 250 ms request does not guarantee a 4 Hz GNSS fix; many devices derive location around 1 Hz, and hardware, permissions, power policy and environment matter.
+- Keep raw fixes for diagnostics and use smoothed/interpolated positions only for presentation. Never feed a visually predicted marker into the speed-limit lookup or route-progress engine as if it were a measured fix.
+- Before changing request cadence or filtering constants, compare raw timestamp gaps, accuracy, speed/bearing and matched-road error in the CSV traces. Battery drain and false precision are both regressions.
+- Urban multipath can place the apparent location on the wrong side of a road. Smoothing alone cannot resolve this; candidate road geometry, heading, temporal transition cost, road access and a confidence threshold are needed. Google has publicly described using 3D building models and raw GNSS measurements at scale for difficult urban cases; this is not reproducible merely by copying a filter formula.
+
+References:
+- https://developers.google.com/android/reference/com/google/android/gms/location/LocationRequest
+- https://developers.google.com/android/reference/com/google/android/gms/location/FusedLocationProviderClient
+- https://android-developers.googleblog.com/2020/12/improving-urban-gps-accuracy-for-your.html
+- https://github.com/osmandapp/OsmAnd/issues/5681
+
+### Practical lessons from OsmAnd user reports
+- GPX files can represent a recorded track, a planned route, or a list of waypoints; treating them as interchangeable can create tiny, misleading instructions. OsmAnd community discussions describe attaching a GPX to roads as a way to obtain cleaner road-following guidance, while warning that it is not perfect.
+- NEXT NAVI PRO should preserve the original GPX, label road matching as a derived route, and never silently replace the user's intended geometry. If the match fails or diverges materially, show a clear fallback instead of inventing turns.
+
+Reference:
+- https://groups.google.com/g/osmand/c/Cw_J3l9JYnw
+
+### Changes made during this review
+- Portrait dashboard layout is reordered to show the tachometer, current clock, km/h label, then arrival time / remaining distance. The portrait vertical weights are adjusted to give the complete stack room before the route button.
+- Off-route recalculation now preserves the selected car/motorcycle costing profile instead of silently forcing car costing.
+- GPX trace matching no longer sends a made-up fixed `gps_accuracy=10` value when the imported file does not provide accuracy metadata. A regression test checks this.
+- These code changes require CI verification and then a visual check on the target Samsung. They do not constitute road validation.
