@@ -403,14 +403,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.addView(weatherText, params(-1, dp(42)))
         limitValue = TextView(this).apply {
             text = "—"
-            textSize = 30f
+            textSize = 26f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
             setTextColor(Color.BLACK)
             applySpeedLimitSignStyle(this)
         }
-        infoColumn.addView(limitValue, params(-1, dp(54)))
+        infoColumn.addView(limitValue, params(dp(58), dp(58)))
         gpsText = TextView(this).apply {
             text = "RICERCA GPS…"
             textSize = 10f
@@ -545,10 +545,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(weatherText, params(-1, dp(42)))
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(58), dp(58)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(weatherText, params(-1, dp(42)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.85f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
@@ -558,7 +558,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
             val navHalf = LinearLayout(this).apply {
@@ -574,10 +574,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(weatherText, params(-1, dp(42)))
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
-            left.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            left.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(58), dp(58)).apply { gravity = Gravity.CENTER })
+            val navAndLimit = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            navAndLimit.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            navAndLimit.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            left.addView(weatherText, params(-1, dp(42)))
+            left.addView(navAndLimit, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
@@ -1638,7 +1643,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         view.setTextColor(Color.BLACK)
         view.gravity = Gravity.CENTER
-        view.setPadding(dp(3), dp(2), dp(3), dp(2))
+        view.setPadding(dp(2), dp(1), dp(2), dp(1))
     }
 
     private fun updateWeatherDisplay(snapshot: WeatherSnapshot) {
