@@ -25,4 +25,16 @@ class NavigationServicesTest {
     fun polylineDecoderRejectsTruncatedInput() {
         assertTrue(NavigationServices.decodePolyline6("_").isEmpty())
     }
+    @Test
+    fun carAndMotorcycleUseDistinctValhallaCostingProfiles() {
+        val origin = NavPoint(28.0, -16.0)
+        val destination = NavPoint(28.1, -16.1)
+        val car = NavigationServices.buildRouteRequest(origin, destination, motorcycle = false)
+        val motorcycle = NavigationServices.buildRouteRequest(origin, destination, motorcycle = true)
+
+        assertEquals("auto", car.getString("costing"))
+        assertEquals("motorcycle", motorcycle.getString("costing"))
+        assertTrue(motorcycle.getJSONObject("costing_options")
+            .getJSONObject("motorcycle").getDouble("use_trails") == 0.0)
+    }
 }
