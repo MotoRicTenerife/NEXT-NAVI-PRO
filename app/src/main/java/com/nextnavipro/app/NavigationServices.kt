@@ -117,18 +117,29 @@ object NavigationServices {
         }
     }
 
-    fun calculateRoute(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): RouteResult {
-        // Valhalla's public demo supports the auto profile; motorcycle is currently routed
-        // through the compatible road-car profile until a dedicated hosted profile is available.
+    /**
+     * Builds a Valhalla request for the selected vehicle. The motorcycle profile is
+     * explicitly configured for paved-road touring (not adventure trails).
+     */
+    internal fun buildRouteRequest(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): JSONObject {
         val request = JSONObject()
             .put("locations", JSONArray()
                 .put(JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
                 .put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
-            .put("costing", "auto")
+            .put("costing", if (motorcycle) "motorcycle" else "auto")
             .put("units", "kilometers")
             .put("language", "it-IT")
             .put("shape_format", "polyline6")
             .put("directions_options", JSONObject().put("units", "kilometers"))
+        if (motorcycle) {
+            request.put("costing_options", JSONObject().put("motorcycle",
+                JSONObject().put("use_trails", 0.0)))
+        }
+        return request
+    }
+
+    fun calculateRoute(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): RouteResult {
+        val request = buildRouteRequest(origin, destination, motorcycle)
         val connection = URL("https://valhalla1.openstreetmap.de/route").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
