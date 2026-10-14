@@ -510,14 +510,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        // Keep the arrival distance/time immediately below the speedometer in portrait,
-        // where vertical space is limited and the metrics must remain visible.
+        // Keep the tachometer at the top of the portrait stack. The live clock
+        // follows it; km/h and route ETA/distance sit below, away from the route button.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-        if (isPortrait) {
-            speedColumn.addView(routeMetricsText, params(-1, dp(32)))
-        }
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -535,13 +532,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(Color.WHITE)
         }
-        // Keep the clock directly below the km/h label, in the free strip above trip metrics.
-        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 4 else 2)
-        })
-        // In landscape keep trip metrics below the clock; in portrait they are
-        // deliberately placed directly under the speedometer above.
-        if (!isPortrait) speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+        // Clock is directly below the tachometer in portrait. Keep ETA and remaining
+        // distance as the final information row below km/h, so the route button cannot cover them.
+        if (isPortrait) {
+            speedColumn.addView(clockText, params(-1, dp(32)))
+            speedColumn.addView(unit, params(-1, dp(30)))
+            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+        } else {
+            speedColumn.addView(unit, params(-1, dp(34)))
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
+                topMargin = dp(2)
+            })
+            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+        }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
         routeButton = makeButton("AVVIA PERCORSO") {
