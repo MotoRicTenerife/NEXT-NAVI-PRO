@@ -18,6 +18,7 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.TextPaint
 import android.location.Location
+import android.location.GnssStatus
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
@@ -97,6 +98,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var fusedLocationClient: FusedLocationProviderClient? = null
     private var fusedLocationCallback: FusedLocationCallback? = null
     private var usingLocationManagerFallback = false
+    private var gnssStatusCallback: GnssStatus.Callback? = null
+    private var gnssStatusRegistered = false
+    private var satellitesInView = 0
+    private var satellitesUsedInFix = 0
+    private var usedConstellations: Set<Int> = emptySet()
     private lateinit var root: LinearLayout
     private lateinit var speedText: SpeedometerTextView
     private lateinit var clockText: TextView
@@ -1769,6 +1775,48 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton("Annulla", null).show()
     }
 
+    private fun registerGnssDiagnostics() {
+        if (gnssStatusRegistered || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val callback = gnssStatusCallback ?: object : GnssStatus.Callback() {
+            override fun onSatelliteStatusChanged(status: GnssStatus) {
+                var visible = 0
+                var used = 0
+                val constellations = linkedSetOf<Int>()
+                for (i in 0 until status.satelliteCount) {
+                    visible++
+                    if (status.usedInFix(i)) {
+                        used++
+                        constellations.add(status.getConstellationType(i))
+                    }
+                }
+                satellitesInView = visible
+                satellitesUsedInFix = used
+                usedConstellations = constellations
+                currentLocation?.let { updateGpsStatus(it) }
+            }
+        }.also { gnssStatusCallback = it }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                locationManager.registerGnssStatusCallback(mainExecutor, callback)
+            } else {
+                @Suppress("DEPRECATION")
+                locationManager.registerGnssStatusCallback(callback)
+            }
+            gnssStatusRegistered = true
+        } catch (_: Exception) {
+            // Some devices or system builds may not expose satellite diagnostics.
+            // Fused location continues to work; absence of diagnostics is not a GPS failure.
+            gnssStatusRegistered = false
+        }
+    }
+
+    private fun unregisterGnssDiagnostics() {
+        val callback = gnssStatusCallback ?: return
+        if (!gnssStatusRegistered) return
+        try { locationManager.unregisterGnssStatusCallback(callback) } catch (_: Exception) { }
+        gnssStatusRegistered = false
+    }
+
     private fun requestGps() {
         if (!dashboardStarted || gpsUpdatesRequested) return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
@@ -1780,6 +1828,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         try {
+            registerGnssDiagnostics()
             val client = fusedLocationClient ?: LocationServices.getFusedLocationProviderClient(this).also {
                 fusedLocationClient = it
             }
@@ -1983,12 +2032,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateGpsStatus(location: Location) {
         if (!::gpsText.isInitialized) return
         val roadName = currentRoadMatch?.displayName
-        gpsText.text = if (!roadName.isNullOrBlank()) {
-            roadName
-        } else {
-            "GPS OK  •  ±" + location.accuracy.toInt() + " m"
-        }
-        gpsText.setTextColor(Color.rgb(0, 190, 70))
+        val accuracy = if (location.hasAccuracy()) "±" + location.accuracy.toInt() + " m" else "accuratezza n/d"
+        val satelliteInfo = if (gnssStatusRegistered && satellitesInView > 0) {
+            " • SAT $satellitesUsedInFix/$satellitesInView" + constellationSummary()
+        } else ""
+        gpsText.text = (roadName?.takeIf { it.isNotBlank() } ?: "GPS") +
+            " • " + accuracy + satelliteInfo
+        gpsText.setTextColor(
+            if (location.hasAccuracy() && location.accuracy <= 15f) Color.rgb(0, 190, 70)
+            else Color.rgb(235, 165, 0)
+        )
+    }
+
+    private fun constellationSummary(): String {
+        val names = usedConstellations.mapNotNull {
+            when (it) {
+                GnssStatus.CONSTELLATION_GPS -> "GPS"
+                GnssStatus.CONSTELLATION_GALILEO -> "GAL"
+                GnssStatus.CONSTELLATION_GLONASS -> "GLO"
+                GnssStatus.CONSTELLATION_BEIDOU -> "BDS"
+                GnssStatus.CONSTELLATION_QZSS -> "QZSS"
+                GnssStatus.CONSTELLATION_SBAS -> "SBAS"
+                GnssStatus.CONSTELLATION_IRNSS -> "IRNSS"
+                else -> null
+            }
+        }.distinct()
+        return if (names.isEmpty()) "" else " • " + names.joinToString("/")
     }
 
     private fun applySpeedLimitSignStyle(view: TextView) {
@@ -2859,6 +2928,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
         activityResumed = false
+        unregisterGnssDiagnostics()
         fusedLocationCallback?.let { callback ->
             try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
         }
