@@ -1656,7 +1656,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val previous = lastWeatherLocation
-        if (!force && latestWeather != null && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
+        if (!force && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
             previous != null && previous.distanceTo(location) < 15_000f) return
         lastWeatherUpdateMs = now
         lastWeatherLocation = Location(location)
