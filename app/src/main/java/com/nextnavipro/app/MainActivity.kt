@@ -1045,7 +1045,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         if (!gpsDiagnosticRecording) {
                             gpsDiagnosticSamples.clear()
                             gpsDiagnosticRecording = true
-                            currentLocation?.let { appendGpsDiagnosticSample(it) }
+                            lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
                             Toast.makeText(this, "Diagnostica GPS avviata. Registra il tragitto e fermati in sicurezza prima di esportare.", Toast.LENGTH_LONG).show()
                         } else {
                             gpsDiagnosticRecording = false
