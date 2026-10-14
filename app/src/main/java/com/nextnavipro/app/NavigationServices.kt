@@ -249,7 +249,7 @@ object NavigationServices {
         if (sampled.lastOrNull() != points.last() && sampled.size < 1000) sampled.add(points.last())
         require(sampled.size >= 2) { "Non è possibile campionare la traccia GPX." }
         val shape = JSONArray()
-        sampled.forEach { shape.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        sampled.forEachIndexed { index, point -> shape.put(JSONObject().put("lat", point.latitude).put("lon", point.longitude).put("type", if (index == 0 || index == sampled.lastIndex) "break" else "via")) }
         val request = JSONObject()
             .put("shape", shape)
             .put("shape_match", "map_snap")
