@@ -1503,6 +1503,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS SALTO SCARTATO"
             return
         }
+        val previousSpeedForPrediction = previousRaw?.takeIf { it.hasSpeed() }?.speed ?: location.speed
         val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
         val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
         lastAcceptedFixElapsedMs = fixElapsedMs
@@ -1512,7 +1513,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
-        animateGpsMarkerTo(smoothed, movingTimeMs)
+        animateGpsMarkerTo(smoothed, movingTimeMs, previousSpeedForPrediction)
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
@@ -2238,7 +2239,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * only when a route is active; raw/smoothed GPS still drives guidance and alerts.
      * Prediction is disabled close to a maneuver to avoid visually cutting a turn.
      */
-    private fun predictMarkerAlongRoute(location: Location, movingTimeMs: Long): Location {
+    private fun predictMarkerAlongRoute(location: Location, movingTimeMs: Long, previousSpeedMps: Float): Location {
         val route = routeResult ?: return Location(location)
         if (route.points.size < 2 || movingTimeMs !in 101L..2000L ||
             !location.hasSpeed() || location.speed < 2.0f) return Location(location)
@@ -2269,7 +2270,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
 
         val speedNow = if (location.hasSpeed()) location.speed else 0f
-        val previousSpeed = lastRawGpsLocation?.takeIf { it.hasSpeed() }?.speed ?: speedNow
+        val previousSpeed = previousSpeedMps.takeIf { it.isFinite() && it >= 0f } ?: speedNow
         var remainingMeters = ((previousSpeed + speedNow) / 2.0) *
             (movingTimeMs / 1000.0) * 0.30
         if (!remainingMeters.isFinite() || remainingMeters <= 0.0) return Location(location)
@@ -2308,9 +2309,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return Location(location)
     }
 
-    private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long) {
+    private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
         val snapped = snapMarkerToActiveRoute(target)
-        val markerTarget = predictMarkerAlongRoute(snapped, movingTimeMs)
+        val markerTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerTarget)
             return
