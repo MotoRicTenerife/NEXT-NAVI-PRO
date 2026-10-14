@@ -185,6 +185,85 @@ object NavigationServices {
         }
     }
 
+    /**
+     * Converts an imported GPX track into a road-snapped route with server-derived maneuvers.
+     * This is an online operation: if the trace cannot be matched, callers must keep the GPX
+     * as a plain track and must not invent turn instructions.
+     */
+    fun calculateRouteFromTrace(points: List<NavPoint>, motorcycle: Boolean): RouteResult {
+        val request = buildTraceRequest(points, motorcycle)
+        val connection = URL("https://valhalla1.openstreetmap.de/trace_route").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("X-Client-Id", "NEXT-NAVI-PRO (github.com/MotoRicTenerife/NEXT-NAVI-PRO)")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
+            val root = JSONObject(readResponse(connection))
+            val trip = root.optJSONObject("trip") ?: throw IllegalStateException(
+                root.optJSONObject("error")?.optString("message") ?: "La traccia GPX non è stata agganciata alla rete stradale.")
+            val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("Il percorso GPX non contiene tappe.")
+            if (legs.length() == 0) throw IllegalStateException("Il percorso GPX è vuoto.")
+            val leg = legs.getJSONObject(0)
+            val decoded = decodePolyline6(leg.optString("shape"))
+            if (decoded.size < 2) throw IllegalStateException("La geometria stradale del GPX non è valida.")
+            val summary = trip.optJSONObject("summary") ?: JSONObject()
+            val legSummary = leg.optJSONObject("summary") ?: summary
+            val maneuvers = ArrayList<RouteManeuver>()
+            val rawManeuvers = leg.optJSONArray("maneuvers")
+            if (rawManeuvers != null) for (i in 0 until rawManeuvers.length()) {
+                val item = rawManeuvers.optJSONObject(i) ?: continue
+                val names = item.optJSONArray("street_names")
+                maneuvers.add(RouteManeuver(
+                    item.optInt("begin_shape_index", 0).coerceIn(0, decoded.lastIndex),
+                    item.optString("instruction").ifBlank { "Prosegui" },
+                    item.optInt("type", 0),
+                    if (names != null && names.length() > 0) names.optString(0) else ""
+                ))
+            }
+            return RouteResult(decoded, legSummary.optDouble("length", summary.optDouble("length", 0.0)),
+                legSummary.optDouble("time", summary.optDouble("time", 0.0)).roundToInt(),
+                maneuvers.firstOrNull()?.instruction ?: "Segui il percorso stradale evidenziato.", maneuvers)
+        } finally { connection.disconnect() }
+    }
+
+    internal fun buildTraceRequest(points: List<NavPoint>, motorcycle: Boolean): JSONObject {
+        require(points.size >= 2) { "Il GPX deve contenere almeno due punti." }
+        require(points.all { it.latitude.isFinite() && it.latitude in -90.0..90.0 && it.longitude.isFinite() && it.longitude in -180.0..180.0 }) {
+            "Il GPX contiene coordinate non valide."
+        }
+        // Keep the request bounded while preserving the shape of longer tracks.
+        val sampled = ArrayList<NavPoint>()
+        var previous: NavPoint? = null
+        for ((index, point) in points.withIndex()) {
+            val last = previous
+            if (last == null || GpxRouteService.distanceMeters(last, point) >= 20.0 || index == points.lastIndex) {
+                if (sampled.size < 999) sampled.add(point)
+                previous = point
+            }
+        }
+        if (sampled.lastOrNull() != points.last() && sampled.size < 1000) sampled.add(points.last())
+        require(sampled.size >= 2) { "Non è possibile campionare la traccia GPX." }
+        val shape = JSONArray()
+        sampled.forEach { shape.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        val request = JSONObject()
+            .put("shape", shape)
+            .put("shape_match", "map_snap")
+            .put("costing", if (motorcycle) "motorcycle" else "auto")
+            .put("gps_accuracy", 10)
+            .put("search_radius", 50)
+            .put("units", "kilometers")
+            .put("language", "it-IT")
+            .put("shape_format", "polyline6")
+            .put("directions_options", JSONObject().put("units", "kilometers"))
+        if (motorcycle) request.put("costing_options", JSONObject().put("motorcycle", JSONObject().put("use_trails", 0.0)))
+        return request
+    }
+
     private fun readResponse(connection: HttpURLConnection): String {
         val status = connection.responseCode
         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
