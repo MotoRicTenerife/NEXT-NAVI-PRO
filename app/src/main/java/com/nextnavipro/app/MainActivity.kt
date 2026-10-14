@@ -1256,12 +1256,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
-                    updateTurnGuidance(currentLocation)
                     val durationMinutes = (result.durationSeconds / 60.0).toInt()
+                    val firstManeuver = result.maneuvers.firstOrNull()
+                    val firstInstruction = firstManeuver?.let {
+                        ManeuverIconResolver.correctedInstruction(it.type, it.instruction)
+                    } ?: result.firstInstruction
+                    // Set the initial route summary first; GPS guidance must run last so
+                    // it cannot be overwritten by the route's first (possibly passed) maneuver.
                     routeText.text = String.format(
                         Locale.ITALY, "%.1f km  •  circa %d min\n%s",
-                        result.distanceKm, durationMinutes, result.firstInstruction
+                        result.distanceKm, durationMinutes, firstInstruction
                     )
+                    updateTurnGuidance(currentLocation)
                     routeButton.text = "ANNULLA PERCORSO"
                 }
             } catch (error: Exception) {
@@ -1897,8 +1903,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(recalculated, false)
+                    val firstManeuver = recalculated.maneuvers.firstOrNull()
+                    val firstInstruction = firstManeuver?.let {
+                        ManeuverIconResolver.correctedInstruction(it.type, it.instruction)
+                    } ?: recalculated.firstInstruction
+                    if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + recalculated.firstInstruction
                     if (voiceGuideReady) voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute")
                 }
             } catch (_: Exception) {
@@ -1995,9 +2005,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
             distanceToTurn += segment[0]
         }
-        val instruction = maneuver.instruction
-        // Trust the routing engine's typed maneuver. Instruction text alone can
-        // mention a roundabout/exit while the actual maneuver is a fork or turn.
+        // Use the typed maneuver to catch a contradictory left/right word in the
+        // server narration. The same corrected text drives both the display and voice.
+        val instruction = ManeuverIconResolver.correctedInstruction(maneuver.type, maneuver.instruction)
         val roundabout = ManeuverIconResolver.isRoundabout(maneuver.type)
         val icon = ManeuverIconResolver.icon(maneuver.type, instruction)
         if (::maneuverIcon.isInitialized) {
