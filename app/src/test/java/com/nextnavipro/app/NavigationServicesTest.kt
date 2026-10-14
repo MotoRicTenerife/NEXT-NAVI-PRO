@@ -46,6 +46,7 @@ class NavigationServicesTest {
         assertEquals("auto", car.getString("costing"))
         assertEquals("motorcycle", moto.getString("costing"))
         assertEquals(3, car.getJSONArray("shape").length())
+        assertTrue("GPX accuracy must not be fabricated", !car.has("gps_accuracy"))
     }
 
     @Test(expected = IllegalArgumentException::class)
