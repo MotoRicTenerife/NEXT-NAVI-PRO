@@ -1046,7 +1046,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("motorcycle_profile", newValue).apply()
                 dialog.dismiss()
                 Toast.makeText(this, "Profilo salvato: " + if (newValue) "MOTO" else "AUTO", Toast.LENGTH_SHORT).show()
-                if (changed && routeResult != null && destination != null && currentLocation != null) calculateSelectedRoute()
+                if (changed && routeResult != null) Toast.makeText(this, "Il profilo scelto verrà usato al prossimo calcolo del percorso; il percorso attuale non è stato modificato.", Toast.LENGTH_LONG).show()
             }
             .setNegativeButton("Annulla", null)
             .show()
