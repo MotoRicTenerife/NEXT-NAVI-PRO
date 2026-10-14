@@ -139,6 +139,9 @@ internal class RouteProgressTracker {
         }
         val heading = bearingDegrees?.takeIf { it.isFinite() && (speedMetersPerSecond ?: 0.0) >= 3.0 }
         val geometric = RouteMapMatcher.match(points, latitude, longitude, start, end, heading) ?: return null
+        val maximumSnapDistance = minOf(65.0, maxOf(25.0, accuracyMeters * 1.8))
+        // Do not advance internal progress on a geometrically implausible/off-route fix.
+        if (geometric.distanceMeters > maximumSnapDistance) return null
         val along = cumulativeMeters[geometric.segmentIndex] +
             (cumulativeMeters[geometric.segmentIndex + 1] - cumulativeMeters[geometric.segmentIndex]) * geometric.fraction
         if (previousAlong != null && along > previousAlong + maxForward + 1.0) return null
