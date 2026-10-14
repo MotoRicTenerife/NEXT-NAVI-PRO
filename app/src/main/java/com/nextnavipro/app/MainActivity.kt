@@ -1688,8 +1688,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val today = snapshot.currentTime.substringBefore("T")
-        val now = snapshot.currentTime.substringAfter("T").take(5)
-        val hours = snapshot.hourly.filter { it.time.substringBefore("T") == today && it.time.substringAfter("T").take(5) >= now }
+        val hours = snapshot.hourly.filter { it.time.substringBefore("T") == today }
         val periods = listOf("Mattina", "Pomeriggio", "Sera")
         val grouped = periods.map { name ->
             name to hours.filter { hour ->
