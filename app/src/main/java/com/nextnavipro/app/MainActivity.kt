@@ -245,6 +245,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // instead of waiting for the next 15-minute/location refresh interval.
         latestWeather?.let { updateWeatherDisplay(it) }
             ?: currentLocation?.let { refreshWeatherIfNeeded(it, true) }
+        // The speed-limit view is also recreated by buildDashboard(); restore the last
+        // resolved value immediately instead of leaving the new sign at its placeholder.
+        updateSpeedLimitDisplay()
+        currentLocation?.let { updateGpsStatus(it) }
         currentLocation?.let { updateMapForLocation(it, true) }
         routeResult?.let { drawRoute(it, false); updateTurnGuidance(currentLocation ?: return) }
         if (activityResumed) requestGps()
