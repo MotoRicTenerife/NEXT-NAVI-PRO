@@ -254,7 +254,6 @@ object NavigationServices {
             .put("shape", shape)
             .put("shape_match", "map_snap")
             .put("costing", if (motorcycle) "motorcycle" else "auto")
-            .put("gps_accuracy", 10)
             .put("search_radius", 50)
             .put("units", "kilometers")
             .put("language", "it-IT")
