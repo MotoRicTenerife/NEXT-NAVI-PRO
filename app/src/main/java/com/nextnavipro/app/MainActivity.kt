@@ -1015,7 +1015,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Diagnostica GPS / esporta traccia")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Diagnostica GPS / esporta traccia", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1029,8 +1029,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     7 -> showWeatherForecast()
                     8 -> showGpxMenu()
                     9 -> showGpsDiagnosticsMenu()
+                    10 -> showVehicleProfileMenu()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showVehicleProfileMenu() {
+        val current = if (motorcycleProfile) "MOTO" else "AUTO"
+        AlertDialog.Builder(this)
+            .setTitle("Profilo di navigazione")
+            .setMessage("Profilo attuale: $current\\nIl profilo moto usa il costing motorcycle di Valhalla e penalizza i sentieri non asfaltati. I dati di accesso stradale possono comunque essere incompleti.")
+            .setSingleChoiceItems(arrayOf("Auto", "Moto / scooter stradale"), if (motorcycleProfile) 1 else 0) { dialog, which ->
+                val newValue = which == 1
+                val changed = motorcycleProfile != newValue
+                motorcycleProfile = newValue
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("motorcycle_profile", newValue).apply()
+                dialog.dismiss()
+                Toast.makeText(this, "Profilo salvato: " + if (newValue) "MOTO" else "AUTO", Toast.LENGTH_SHORT).show()
+                if (changed && routeResult != null && destination != null && currentLocation != null) calculateSelectedRoute()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun showGpsDiagnosticsMenu() {
