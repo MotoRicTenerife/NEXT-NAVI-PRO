@@ -364,12 +364,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         infoColumn.addView(brand, params(-1, dp(34)))
         routeMetricsText = TextView(this).apply {
-            text = "ARRIVO —  •  — km"
+            text = "— km  •  ARRIVO —"
             textSize = 12f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             maxLines = 1
             includeFontPadding = false
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(2), 0, dp(2), 0)
             setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
@@ -459,7 +461,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, dp(8))
         }
-        speedColumn.addView(unit, params(-1, dp(46)))
+        speedColumn.addView(unit, params(-1, dp(34)))
+        // Keep remaining distance and ETA directly below the speedometer in both
+        // orientations, freeing the navigation pane for turn guidance.
+        speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1f))
         routeButton = makeButton("AVVIA PERCORSO") {
@@ -514,7 +519,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, params(-1, dp(112)))
             routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            navHalf.addView(routeMetricsText, params(-1, dp(42)))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -544,7 +548,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             navHalf.addView(maneuverIcon, params(-1, dp(132)))
             routeText.translationY = -dp(4).toFloat()
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
-            navHalf.addView(routeMetricsText, params(-1, dp(42)))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -1155,7 +1158,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setItems(labels) { _, which ->
                             destination = sortedResults[which]
                             routeResult = null
-                            routeMetricsText.text = "ARRIVO —  •  — km"
+                            routeMetricsText.text = "— km  •  ARRIVO —"
                             val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
                             routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
                             destinationInput.setText(sortedResults[which].name)
@@ -1249,14 +1252,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun clearRoute() {
         routeResult = null
-        if (::routeMetricsText.isInitialized) routeMetricsText.text = "ARRIVO —  •  — km"
+        if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
         announcedManeuverIndex = -1
         announcedStage = 0
         if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
         destination = null
         refreshDestinationMarker()
         if (::routeText.isInitialized) routeText.text = "Nessun percorso attivo"
-        if (::routeMetricsText.isInitialized) routeMetricsText.text = "ARRIVO —  •  — km"
+        if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
         if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
         if (::destinationInput.isInitialized) destinationInput.text.clear()
         val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
@@ -1590,18 +1593,77 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun checkRadarProximityAlert(location: Location) {
-        if (!location.hasAccuracy() || location.accuracy > 25f || !location.hasSpeed() || location.speed < 4f) return
-        val camera = radarCameras.mapNotNull { item ->
-            val distance = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, item.point.latitude, item.point.longitude, distance)
-            if (distance[0] <= 650f) item to distance[0] else null
-        }.minByOrNull { it.second } ?: return
+        // A wide straight-line radius creates false alarms from parallel roads,
+        // opposite carriageways and cameras on nearby junctions. When a route is
+        // active, accept only cameras close to the active route and ahead along it.
+        if (!location.hasAccuracy() || location.accuracy > 18f ||
+            !location.hasSpeed() || location.speed < 4f) return
+
+        val route = routeResult
+        val candidates = if (route != null && route.points.size >= 2) {
+            var currentIndex = 0
+            var currentDistance = Float.MAX_VALUE
+            for (i in route.points.indices) {
+                val p = route.points[i]
+                val d = FloatArray(1)
+                Location.distanceBetween(location.latitude, location.longitude, p.latitude, p.longitude, d)
+                if (d[0] < currentDistance) {
+                    currentDistance = d[0]
+                    currentIndex = i
+                }
+            }
+            val cumulative = DoubleArray(route.points.size)
+            for (i in 1 until route.points.size) {
+                val a = route.points[i - 1]
+                val b = route.points[i]
+                val d = FloatArray(1)
+                Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
+                cumulative[i] = cumulative[i - 1] + d[0]
+            }
+            radarCameras.mapNotNull { camera ->
+                var cameraIndex = -1
+                var crossTrackMeters = Float.MAX_VALUE
+                for (i in route.points.indices) {
+                    val p = route.points[i]
+                    val d = FloatArray(1)
+                    Location.distanceBetween(camera.point.latitude, camera.point.longitude, p.latitude, p.longitude, d)
+                    if (d[0] < crossTrackMeters) {
+                        crossTrackMeters = d[0]
+                        cameraIndex = i
+                    }
+                }
+                if (cameraIndex < currentIndex || crossTrackMeters > 22f) return@mapNotNull null
+                val alongRouteMeters = cumulative[cameraIndex] - cumulative[currentIndex]
+                if (alongRouteMeters !in 0.0..650.0) return@mapNotNull null
+                camera to alongRouteMeters.toFloat()
+            }.minByOrNull { it.second }
+        } else {
+            // Without a route, require a close camera in the direction of travel
+            // instead of announcing every camera inside a 650 m circle.
+            if (!location.hasBearing() || location.speed < 6f) return
+            radarCameras.mapNotNull { camera ->
+                val target = Location("radar").apply {
+                    latitude = camera.point.latitude
+                    longitude = camera.point.longitude
+                }
+                val directMeters = location.distanceTo(target)
+                if (directMeters > 250f) return@mapNotNull null
+                val bearingToCamera = location.bearingTo(target)
+                val delta = abs(((bearingToCamera - location.bearing + 540f) % 360f) - 180f)
+                if (delta > 40f) return@mapNotNull null
+                camera to directMeters
+            }.minByOrNull { it.second }
+        } ?: return
+
         val now = System.currentTimeMillis()
-        if (camera.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
-        lastRadarAlertId = camera.first.osmId
+        if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
+        lastRadarAlertId = candidates.first.osmId
         lastRadarAlertMs = now
-        if (voiceGuideReady) voiceGuide?.speak("Attenzione, possibile autovelox tra circa " + camera.second.toInt() + " metri", TextToSpeech.QUEUE_ADD, null, "radar-" + camera.first.osmId)
-        radarText.text = "⚠ AUTOVELOX • " + camera.second.toInt() + " m"
+        if (voiceGuideReady) voiceGuide?.speak(
+            "Attenzione, possibile autovelox tra circa " + candidates.second.toInt() + " metri",
+            TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
+        )
+        radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
     }
 
     private fun checkOffRouteAndReroute(location: Location) {
@@ -1655,7 +1717,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val route = routeResult
         val here = location
         if (route == null || here == null || route.points.size < 2) {
-            routeMetricsText.text = "ARRIVO —  •  — km"
+            routeMetricsText.text = "— km  •  ARRIVO —"
             return
         }
 
@@ -1696,7 +1758,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val arrivalTime = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
             .format(java.util.Date(System.currentTimeMillis() + remainingSeconds * 1000L))
         val distanceText = String.format(Locale.getDefault(), "%.1f km", remainingKm)
-        routeMetricsText.text = "ARRIVO $arrivalTime  •  $distanceText"
+        routeMetricsText.text = "$distanceText  •  ARRIVO $arrivalTime"
     }
 
     private fun updateTurnGuidance(location: Location?) {
@@ -1786,7 +1848,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateRouteMetrics(route: RouteResult, nearestIndex: Int) {
         if (!::routeMetricsText.isInitialized) return
         if (route.distanceKm <= 0.0 || route.points.size < 2) {
-            routeMetricsText.text = "ARRIVO —  •  — km"
+            routeMetricsText.text = "— km  •  ARRIVO —"
             return
         }
         var remainingMeters = 0.0
