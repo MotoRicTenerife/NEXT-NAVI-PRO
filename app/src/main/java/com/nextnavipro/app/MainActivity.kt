@@ -87,6 +87,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val PERMISSION_LOCATION = 100
         private const val REQUEST_IMPORT_GPX = 2001
         private const val REQUEST_EXPORT_GPX = 2002
+        private const val REQUEST_EXPORT_GPS_TRACE = 2003
         private const val SOURCE_USER = "next-user-position"
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
@@ -145,6 +146,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var weatherUsesApproximateLocation = false
     private val ipFallbackHandler = Handler(Looper.getMainLooper())
     private var pendingGpxExportName = "Percorso NEXT NAVI PRO"
+    private var gpsDiagnosticRecording = false
+    private val gpsDiagnosticSamples = ArrayList<GpsTraceSample>()
+    private var pendingGpsDiagnosticCsv: String? = null
     private var pendingGpxExportPoints: List<NavPoint>? = null
     private var recordingGpx = false
     private val gpxRecordingPoints = ArrayList<NavPoint>()
@@ -1009,7 +1013,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Diagnostica GPS / esporta traccia")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1022,8 +1026,105 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     6 -> showSpeedSettings()
                     7 -> showWeatherForecast()
                     8 -> showGpxMenu()
+                    9 -> showGpsDiagnosticsMenu()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showGpsDiagnosticsMenu() {
+        val status = if (gpsDiagnosticRecording) "Registrazione attiva • ${gpsDiagnosticSamples.size} campioni" else "Registrazione ferma • ${gpsDiagnosticSamples.size} campioni"
+        val choices = arrayOf(
+            if (gpsDiagnosticRecording) "Ferma registrazione GPS" else "Avvia registrazione diagnostica GPS",
+            "Esporta CSV per analisi",
+            "Azzera campioni"
+        )
+        AlertDialog.Builder(this).setTitle("Diagnostica GPS").setMessage(status)
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> {
+                        if (!gpsDiagnosticRecording) {
+                            gpsDiagnosticSamples.clear()
+                            gpsDiagnosticRecording = true
+                            currentLocation?.let { appendGpsDiagnosticSample(it) }
+                            Toast.makeText(this, "Diagnostica GPS avviata. Registra il tragitto e fermati in sicurezza prima di esportare.", Toast.LENGTH_LONG).show()
+                        } else {
+                            gpsDiagnosticRecording = false
+                            Toast.makeText(this, "Registrazione GPS terminata: ${gpsDiagnosticSamples.size} campioni.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    1 -> exportGpsDiagnostics()
+                    2 -> {
+                        if (gpsDiagnosticRecording) {
+                            Toast.makeText(this, "Ferma prima la registrazione.", Toast.LENGTH_LONG).show()
+                        } else {
+                            gpsDiagnosticSamples.clear()
+                            Toast.makeText(this, "Campioni diagnostici cancellati.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun appendGpsDiagnosticSample(location: Location) {
+        if (!gpsDiagnosticRecording || gpsDiagnosticSamples.size >= 50_000) {
+            if (gpsDiagnosticRecording && gpsDiagnosticSamples.size >= 50_000) {
+                gpsDiagnosticRecording = false
+                Toast.makeText(this, "Diagnostica fermata: raggiunto il limite di 50.000 campioni.", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        val route = routeResult
+        val match = if (route != null && route.points.size >= 2) findRouteProgressIndex(route, location) else null
+        val validMatch = match?.takeIf { it.second.isFinite() && it.second < Float.MAX_VALUE }
+        gpsDiagnosticSamples.add(
+            GpsTraceSample(
+                timestampEpochMs = location.time,
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
+                speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
+                bearingDegrees = location.bearing.takeIf { location.hasBearing() },
+                satellitesUsed = satellitesUsedInFix,
+                satellitesVisible = satellitesInView,
+                constellations = usedConstellations.mapNotNull {
+                    when (it) {
+                        GnssStatus.CONSTELLATION_GPS -> "GPS"
+                        GnssStatus.CONSTELLATION_GALILEO -> "GAL"
+                        GnssStatus.CONSTELLATION_GLONASS -> "GLO"
+                        GnssStatus.CONSTELLATION_BEIDOU -> "BDS"
+                        GnssStatus.CONSTELLATION_QZSS -> "QZSS"
+                        GnssStatus.CONSTELLATION_SBAS -> "SBAS"
+                        GnssStatus.CONSTELLATION_IRNSS -> "IRNSS"
+                        else -> null
+                    }
+                }.distinct().joinToString("/"),
+                routeSegmentIndex = validMatch?.first,
+                routeDistanceMeters = validMatch?.second,
+                matchStatus = when {
+                    route == null -> "NO_ACTIVE_ROUTE"
+                    validMatch == null -> "NO_CONFIDENT_MATCH"
+                    else -> "MATCHED"
+                }
+            )
+        )
+    }
+
+    private fun exportGpsDiagnostics() {
+        if (gpsDiagnosticRecording) {
+            Toast.makeText(this, "Ferma la registrazione prima di esportare.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (gpsDiagnosticSamples.isEmpty()) {
+            Toast.makeText(this, "Nessun campione GPS. Avvia prima la registrazione diagnostica.", Toast.LENGTH_LONG).show()
+            return
+        }
+        pendingGpsDiagnosticCsv = GpsTraceDiagnostics.toCsv(gpsDiagnosticSamples)
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, "next_navi_gps_trace_${System.currentTimeMillis()}.csv")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_GPS_TRACE)
     }
 
     private fun requestIpLocationFallback() {
@@ -1313,6 +1414,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     runOnUiThread { Toast.makeText(this, "GPX esportato. Ora puoi condividerlo dal file manager.", Toast.LENGTH_LONG).show() }
                 } catch (error: Exception) {
                     runOnUiThread { Toast.makeText(this, "Esportazione GPX fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+            REQUEST_EXPORT_GPS_TRACE -> thread(name = "export-gps-trace") {
+                try {
+                    val csv = pendingGpsDiagnosticCsv ?: throw IllegalStateException("Traccia diagnostica non più disponibile.")
+                    contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(csv) }
+                        ?: throw IllegalStateException("Impossibile scrivere il file selezionato.")
+                    runOnUiThread { Toast.makeText(this, "CSV GPS esportato. Puoi allegarlo per l'analisi della traccia reale.", Toast.LENGTH_LONG).show() }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Esportazione diagnostica fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
                 }
             }
         }
@@ -1926,6 +2037,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
+        appendGpsDiagnosticSample(location)
         appendGpxRecordingPoint(smoothed)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
