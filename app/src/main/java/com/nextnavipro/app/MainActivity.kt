@@ -476,6 +476,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.0f))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         clockText = TextView(this).apply {
             text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
             textSize = 25f
@@ -484,12 +485,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(Color.WHITE)
         }
+        // Put the clock BELOW the large speed digits, in the free strip before
+        // the km/h label. This avoids the navigation header covering it in portrait.
         speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-            // In portrait the route header above can overlap the clock; add more
-            // separation only in portrait while keeping the clock clear of the speedometer.
-            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 8)
+            topMargin = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 8 else 4)
         })
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
