@@ -3,6 +3,7 @@ package com.nextnavipro.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -65,6 +66,10 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import java.util.Locale
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 import kotlin.math.abs
@@ -79,6 +84,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val PREF_THEME_MODE = "theme_mode"
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
+        private const val REQUEST_IMPORT_GPX = 2001
+        private const val REQUEST_EXPORT_GPX = 2002
         private const val SOURCE_USER = "next-user-position"
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
@@ -127,6 +134,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var gpsUpdatesRequested = false
     private var negativeTheme = true
     private var currentLocation: Location? = null
+    private var approximateLocation: ApproximateLocation? = null
+    private var ipFallbackRequested = false
+    private var weatherUsesApproximateLocation = false
+    private val ipFallbackHandler = Handler(Looper.getMainLooper())
+    private var pendingGpxExportName = "Percorso NEXT NAVI PRO"
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
     private var voiceGuide: TextToSpeech? = null
@@ -326,6 +338,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         splashHandler.removeCallbacksAndMessages(null)
         buildDashboard(null)
         requestGps()
+        // IP geolocation is deliberately delayed: GNSS/network location always wins.
+        ipFallbackHandler.postDelayed({
+            if (dashboardStarted && currentLocation == null) requestIpLocationFallback()
+        }, 8000L)
     }
 
     private fun buildDashboard(savedState: Bundle?) {
@@ -969,7 +985,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -981,8 +997,202 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     5 -> showSearchHistory()
                     6 -> showSpeedSettings()
                     7 -> showWeatherForecast()
+                    8 -> showGpxMenu()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun requestIpLocationFallback() {
+        if (ipFallbackRequested || currentLocation != null) return
+        ipFallbackRequested = true
+        thread(name = "ip-geolocation") {
+            val result = try { IpLocationService.fetch() } catch (_: Exception) { null }
+            runOnUiThread {
+                if (currentLocation != null) return@runOnUiThread
+                if (result == null) {
+                    if (::gpsText.isInitialized) gpsText.text = "GPS ASSENTE • POSIZIONE IP NON DISPONIBILE"
+                    return@runOnUiThread
+                }
+                approximateLocation = result
+                if (::gpsText.isInitialized) {
+                    gpsText.text = "POSIZIONE IP ≈ " + result.areaLabel
+                    gpsText.setTextColor(Color.rgb(235, 165, 0))
+                }
+                refreshWeatherForApproximateLocation(result, true)
+            }
+        }
+    }
+
+    private fun refreshWeatherForApproximateLocation(location: ApproximateLocation, force: Boolean = false) {
+        if (currentLocation != null) return
+        val now = System.currentTimeMillis()
+        if (!force && weatherUsesApproximateLocation && now - lastWeatherUpdateMs < 15L * 60L * 1000L) return
+        lastWeatherUpdateMs = now
+        weatherUsesApproximateLocation = true
+        thread(name = "open-meteo-ip-fallback") {
+            val result = try { WeatherService.fetch(location.latitude, location.longitude) } catch (_: Exception) { null }
+            runOnUiThread {
+                // Do not let a slow IP/weather response overwrite a newer real GPS fix.
+                if (currentLocation != null || approximateLocation != location) return@runOnUiThread
+                if (result != null) {
+                    latestWeather = result
+                    updateWeatherDisplay(result)
+                    if (::weatherText.isInitialized) {
+                        weatherText.text = weatherText.text.toString() + "\\n≈ METEO ZONA IP"
+                    }
+                    if (forecastRequested) {
+                        forecastRequested = false
+                        showWeatherForecast()
+                    }
+                } else if (latestWeather == null && ::weatherText.isInitialized) {
+                    weatherText.text = "METEO IP\\nnon disponibile"
+                }
+            }
+        }
+    }
+
+    private fun showGpxMenu() {
+        val choices = arrayOf("Importa GPX dal telefono", "Salva percorso attivo", "Apri percorso salvato", "Esporta GPX…")
+        AlertDialog.Builder(this).setTitle("Percorsi GPX")
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> importGpx()
+                    1 -> saveActiveGpx()
+                    2 -> showSavedGpxRoutes()
+                    3 -> exportActiveGpx()
+                }
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun gpxDirectory(): File = File(filesDir, "gpx_routes").apply { if (!exists()) mkdirs() }
+
+    private fun importGpx() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gpx+xml", "application/gpx", "application/xml", "text/xml", "application/octet-stream"))
+        }
+        startActivityForResult(intent, REQUEST_IMPORT_GPX)
+    }
+
+    private fun saveActiveGpx() {
+        val route = routeResult
+        if (route == null || route.points.size < 2) {
+            Toast.makeText(this, "Non c'è un percorso da salvare.", Toast.LENGTH_LONG).show()
+            return
+        }
+        thread(name = "save-gpx") {
+            try {
+                val label = (destination?.name ?: "Percorso").replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim()
+                    .ifBlank { "Percorso" }.take(60)
+                val file = File(gpxDirectory(), "${System.currentTimeMillis()}_$label.gpx")
+                FileOutputStream(file).use { GpxRouteService.write(it, label, route.points) }
+                runOnUiThread { Toast.makeText(this, "Percorso salvato: $label", Toast.LENGTH_LONG).show() }
+            } catch (error: Exception) {
+                runOnUiThread { Toast.makeText(this, "Salvataggio GPX fallito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+
+    private fun showSavedGpxRoutes() {
+        val files = gpxDirectory().listFiles()?.filter { it.isFile && it.extension.equals("gpx", true) }
+            ?.sortedByDescending { it.lastModified() }.orEmpty()
+        if (files.isEmpty()) {
+            Toast.makeText(this, "Nessun GPX salvato. Importa o salva prima un percorso.", Toast.LENGTH_LONG).show()
+            return
+        }
+        thread(name = "list-gpx-routes") {
+            val tracks = files.mapNotNull { file ->
+                try { file to FileInputStream(file).use { GpxRouteService.read(it) } } catch (_: Exception) { null }
+            }
+            runOnUiThread {
+                if (tracks.isEmpty()) {
+                    Toast.makeText(this, "Nessun file GPX valido nella libreria.", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                AlertDialog.Builder(this).setTitle("Percorsi GPX salvati")
+                    .setItems(tracks.map { (_, track) ->
+                        track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
+                    }.toTypedArray()) { _, which -> loadSavedGpx(tracks[which].first) }
+                    .setNegativeButton("Chiudi", null).show()
+            }
+        }
+    }
+
+    private fun loadSavedGpx(file: File) {
+        thread(name = "load-gpx-route") {
+            val result = try { FileInputStream(file).use { GpxRouteService.read(it) } } catch (error: Exception) {
+                runOnUiThread { Toast.makeText(this, "GPX non valido: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                return@thread
+            }
+            runOnUiThread { activateGpxTrack(result) }
+        }
+    }
+
+    private fun activateGpxTrack(track: GpxTrack) {
+        routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
+        if (::destinationInput.isInitialized) destinationInput.setText(track.name)
+        if (::routeText.isInitialized) {
+            routeText.text = "TRACCIA GPX\\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
+            routeText.textSize = 14f
+        }
+        if (::routeButton.isInitialized) routeButton.text = "TRACCIA GPX"
+        announcedManeuverIndex = -1
+        announcedStage = 0
+        drawRoute(routeResult!!, true)
+        updateRouteMetrics(currentLocation)
+        Toast.makeText(this, "Traccia GPX caricata: ${track.points.size} punti. Per le svolte guidate serve un ricalcolo stradale.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun exportActiveGpx() {
+        val route = routeResult
+        if (route == null || route.points.size < 2) {
+            Toast.makeText(this, "Non c'è un percorso da esportare.", Toast.LENGTH_LONG).show()
+            return
+        }
+        pendingGpxExportName = (destination?.name ?: "Percorso NEXT NAVI PRO")
+            .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Percorso NEXT NAVI PRO" }.take(60)
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/gpx+xml"
+            putExtra(Intent.EXTRA_TITLE, pendingGpxExportName.replace(' ', '_') + ".gpx")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_GPX)
+    }
+
+    @Deprecated("Uses the document picker contract supported on all Android versions targeted by this prototype")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data?.data == null) return
+        val uri = data.data!!
+        when (requestCode) {
+            REQUEST_IMPORT_GPX -> thread(name = "import-gpx") {
+                try {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalArgumentException("Impossibile leggere il file selezionato.")
+                    if (bytes.size > 30 * 1024 * 1024) throw IllegalArgumentException("Il GPX supera il limite di 30 MB.")
+                    val track = ByteArrayInputStream(bytes).use { GpxRouteService.read(it) }
+                    val safeName = track.name.replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Percorso" }.take(60)
+                    val saved = File(gpxDirectory(), "${System.currentTimeMillis()}_$safeName.gpx")
+                    FileOutputStream(saved).use { it.write(bytes) }
+                    runOnUiThread { activateGpxTrack(track) }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Importazione GPX fallita: ${error.message ?: "file non valido"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+            REQUEST_EXPORT_GPX -> thread(name = "export-gpx") {
+                try {
+                    val route = routeResult ?: throw IllegalStateException("Percorso non più disponibile.")
+                    contentResolver.openOutputStream(uri, "wt")?.use {
+                        GpxRouteService.write(it, pendingGpxExportName, route.points)
+                    } ?: throw IllegalStateException("Impossibile scrivere il file selezionato.")
+                    runOnUiThread { Toast.makeText(this, "GPX esportato correttamente.", Toast.LENGTH_LONG).show() }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Esportazione GPX fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+        }
     }
 
     private fun saveFavoriteAddress() {
@@ -1172,6 +1382,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             try {
                 val origin = currentLocation
                 val near = origin?.let { NavPoint(it.latitude, it.longitude) }
+                    ?: approximateLocation?.let { NavPoint(it.latitude, it.longitude) }
                 val results = NavigationServices.searchPlaces(query, near)
                 val sortedResults = if (origin != null) results.sortedBy { result ->
                     val distance = FloatArray(1)
@@ -1696,7 +1907,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val previous = lastWeatherLocation
-        if (!force && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
+        if (!force && !weatherUsesApproximateLocation && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
             previous != null && previous.distanceTo(location) < 15_000f) return
         lastWeatherUpdateMs = now
         lastWeatherLocation = Location(location)
@@ -1706,6 +1917,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val result = try { WeatherService.fetch(latitude, longitude) } catch (_: Exception) { null }
             runOnUiThread {
                 if (result != null) {
+                    weatherUsesApproximateLocation = false
                     latestWeather = result
                     updateWeatherDisplay(result)
                     if (forecastRequested) {
@@ -1724,7 +1936,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (snapshot == null) {
             val location = currentLocation
             if (location == null) {
-                Toast.makeText(this, "Attendo una posizione GPS per caricare le previsioni.", Toast.LENGTH_LONG).show()
+                if (approximateLocation != null) {
+                    forecastRequested = true
+                    refreshWeatherForApproximateLocation(approximateLocation!!, true)
+                    Toast.makeText(this, "Previsioni richieste per una zona approssimativa via IP.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "Nessuna posizione disponibile: attendo GPS o localizzazione IP.", Toast.LENGTH_LONG).show()
+                }
                 return
             }
             forecastRequested = true
@@ -1970,7 +2188,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val arrivalTime = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
             .format(java.util.Date(System.currentTimeMillis() + remainingSeconds * 1000L))
         val distanceText = String.format(Locale.getDefault(), "%.1f km", remainingKm)
-        routeMetricsText.text = "$distanceText  •  ARRIVO $arrivalTime"
+        routeMetricsText.text = if (route.durationSeconds > 0) "$distanceText  •  ARRIVO $arrivalTime"
+            else "$distanceText  •  ETA — (traccia GPX)"
     }
 
     private fun updateTurnGuidance(location: Location?) {
@@ -2508,6 +2727,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onDestroy() {
         clockHandler.removeCallbacksAndMessages(null)
+        ipFallbackHandler.removeCallbacksAndMessages(null)
         setNavigationBrightnessEnabled(false)
         splashHandler.removeCallbacksAndMessages(null)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
