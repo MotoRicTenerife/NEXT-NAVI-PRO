@@ -1909,6 +1909,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             previous != null && previous.distanceTo(location) < 15_000f) return
         lastWeatherUpdateMs = now
         lastWeatherLocation = Location(location)
+        val previousWeatherWasApproximate = weatherUsesApproximateLocation
+        // Mark the new request as GPS-based immediately to prevent one HTTP request per fix.
+        weatherUsesApproximateLocation = false
         val latitude = location.latitude
         val longitude = location.longitude
         thread(name = "open-meteo-refresh") {
@@ -1924,6 +1927,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                 } else if (latestWeather == null && ::weatherText.isInitialized) {
                     weatherText.text = "METEO\nnon disponibile"
+                } else if (previousWeatherWasApproximate && ::weatherText.isInitialized) {
+                    weatherText.contentDescription = weatherText.contentDescription.toString() +
+                        ", aggiornamento GPS meteo fallito; ultima risposta basata su posizione IP approssimativa"
                 }
             }
         }
