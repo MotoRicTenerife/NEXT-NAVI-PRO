@@ -2341,6 +2341,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             remainingMeters += segment[0]
         }
         val remainingKm = (remainingMeters / 1000.0).coerceAtMost(route.distanceKm)
+        if (route.durationSeconds <= 0) {
+            routeMetricsText.text = String.format(Locale.ITALY, "TRACCIA GPX  •  %.1f km", remainingKm)
+            return
+        }
         val remainingSeconds = (route.durationSeconds * (remainingKm / route.distanceKm)).toLong().coerceAtLeast(0L)
         val arrival = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
             .format(java.util.Date(System.currentTimeMillis() + remainingSeconds * 1000L))
