@@ -1376,7 +1376,50 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         announcedStage = 0
         drawRoute(routeResult!!, true)
         updateRouteMetrics(currentLocation)
-        Toast.makeText(this, "Traccia GPX caricata: ${track.points.size} punti. Per le svolte guidate serve un ricalcolo stradale.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Traccia GPX caricata: ${track.points.size} punti.", Toast.LENGTH_LONG).show()
+        AlertDialog.Builder(this)
+            .setTitle("Navigazione GPX")
+            .setMessage("Vuoi provare ad agganciare la traccia alla rete stradale e ottenere le svolte dal motore di routing online? Se il matching fallisce, resterà disponibile la traccia originale senza istruzioni inventate.")
+            .setPositiveButton("Calcola svolte guidate") { _, _ -> calculateGpxGuidedRoute(track) }
+            .setNegativeButton("Segui solo la traccia", null)
+            .show()
+    }
+
+    private fun calculateGpxGuidedRoute(track: GpxTrack) {
+        if (isCalculatingRoute) return
+        isCalculatingRoute = true
+        if (::routeButton.isInitialized) routeButton.isEnabled = false
+        if (::routeText.isInitialized) routeText.text = "AGGANCIO GPX ALLA RETE STRADALE…"
+        thread(name = "gpx-trace-matching") {
+            try {
+                val result = NavigationServices.calculateRouteFromTrace(track.points, motorcycleProfile)
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    if (::routeButton.isInitialized) {
+                        routeButton.isEnabled = true
+                        routeButton.text = "ANNULLA PERCORSO GPX"
+                    }
+                    routeResult = result
+                    resetRouteProgress()
+                    announcedManeuverIndex = -1
+                    announcedStage = 0
+                    drawRoute(result, true)
+                    val durationMinutes = (result.durationSeconds / 60.0).toInt()
+                    val first = result.maneuvers.firstOrNull()
+                    val instruction = first?.let { ManeuverIconResolver.correctedInstruction(it.type, it.instruction) } ?: result.firstInstruction
+                    routeText.text = String.format(Locale.ITALY, "GPX • %.1f km • circa %d min\\n%s", result.distanceKm, durationMinutes, instruction)
+                    updateTurnGuidance(currentLocation)
+                    Toast.makeText(this, "Traccia agganciata: ${result.maneuvers.size} manovre restituite dal motore stradale.", Toast.LENGTH_LONG).show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    if (::routeButton.isInitialized) routeButton.isEnabled = true
+                    routeText.text = "GPX SENZA SVOLTE GUIDATE • traccia originale mantenuta"
+                    Toast.makeText(this, "Matching GPX non riuscito: ${error.message ?: "servizio non disponibile"}. Puoi seguire la traccia originale.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun exportActiveGpx() {
