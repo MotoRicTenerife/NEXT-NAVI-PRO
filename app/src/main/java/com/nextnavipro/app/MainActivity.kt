@@ -85,6 +85,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var speedText: SpeedometerTextView
     private lateinit var clockText: TextView
     private lateinit var routeMetricsText: TextView
+    private lateinit var weatherText: TextView
     private lateinit var gpsText: TextView
     private lateinit var routeText: TextView
     private lateinit var maneuverIcon: TextView
@@ -167,6 +168,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var offRouteFixes = 0
     private var lastRawGpsLocation: Location? = null
     private var smoothedGpsLocation: Location? = null
+    private var lastWeatherUpdateMs = 0L
+    private var lastWeatherLocation: Location? = null
+    private var latestWeather: WeatherSnapshot? = null
+    private var forecastRequested = false
     private val mapFollowHandler = Handler(Looper.getMainLooper())
     private val mapFollowRunnable = object : Runnable {
         override fun run() {
@@ -249,7 +254,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 (voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
-        themeMode = preferences.getString(PREF_THEME_MODE, if (preferences.getBoolean(PREF_NEGATIVE, true)) "negative" else "positive") ?: "negative"
+        // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
+        themeMode = "auto"
+        preferences.edit().putString(PREF_THEME_MODE, "auto").apply()
         negativeTheme = when (themeMode) { "positive" -> false; "negative" -> true; else -> preferences.getBoolean(PREF_NEGATIVE, true) }
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
@@ -375,18 +382,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
-        val limitTitle = TextView(this).apply {
-            text = "LIMITE"
-            textSize = 12f
+        weatherText = TextView(this).apply {
+            text = "METEO\nin attesa GPS"
+            textSize = 10f
             gravity = Gravity.CENTER
+            maxLines = 2
+            includeFontPadding = false
+            setPadding(dp(2), dp(1), dp(2), dp(1))
         }
-        infoColumn.addView(limitTitle, params(-1, dp(28)))
+        infoColumn.addView(weatherText, params(-1, dp(42)))
         limitValue = TextView(this).apply {
             text = "—"
             textSize = 30f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
-            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+            includeFontPadding = false
+            setTextColor(Color.BLACK)
+            applySpeedLimitSignStyle(this)
         }
         infoColumn.addView(limitValue, params(-1, dp(54)))
         gpsText = TextView(this).apply {
@@ -442,7 +454,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
         }
         speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
-        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 0.72f))
         clockText = TextView(this).apply {
             text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
             textSize = 25f
@@ -451,7 +463,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
         }
-        speedColumn.addView(clockText, params(-1, dp(34)))
+        speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(5) })
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
@@ -466,7 +478,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // orientations, freeing the navigation pane for turn guidance.
         speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         val centerSpacer = View(this)
-        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1f))
+        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 1.28f))
         routeButton = makeButton("AVVIA PERCORSO") {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
@@ -504,7 +516,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Keep the map in the dashboard in both orientations. The speedometer stays
         // in the central column/band; the map is the right-hand (landscape) or lower
         // (portrait) pane rather than being used to position the speedometer.
-        listOf(brand, limitTitle, limitValue, gpsText, routeText, radarText, routeMetricsText).forEach { infoColumn.removeView(it) }
+        listOf(brand, weatherText, limitValue, gpsText, routeText, radarText, routeMetricsText).forEach { infoColumn.removeView(it) }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply {
@@ -523,7 +535,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitTitle, params(-1, dp(24)))
+            limitHalf.addView(weatherText, params(-1, dp(42)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
@@ -552,7 +564,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitTitle, params(-1, dp(24)))
+            limitHalf.addView(weatherText, params(-1, dp(42)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(-1, 0, 1f))
             left.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             left.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
@@ -927,7 +939,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -938,6 +950,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     4 -> toggleTheme()
                     5 -> showSearchHistory()
                     6 -> showSpeedSettings()
+                    7 -> showWeatherForecast()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -1011,7 +1024,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!::root.isInitialized) return
         root.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         val panelBackground = if (negativeTheme) negativeBackground else positiveBackground
-        limitValue.setBackgroundColor(panelBackground)
+        applySpeedLimitSignStyle(limitValue)
         routeText.setBackgroundColor(panelBackground)
         speedText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
@@ -1407,10 +1420,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 return
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                locationManager.requestLocationUpdates(provider, 800L, 0f, this, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
             } else {
                 @Suppress("DEPRECATION")
-                locationManager.requestLocationUpdates(provider, 800L, 0f, this)
+                locationManager.requestLocationUpdates(provider, 500L, 0f, this)
             }
             gpsUpdatesRequested = true
             val last = locationManager.getLastKnownLocation(provider)
@@ -1452,6 +1465,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
         refreshRadarsIfNeeded(smoothed)
+        refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
         checkOffRouteAndReroute(smoothed)
         checkRadarProximityAlert(smoothed)
@@ -1481,15 +1495,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val jump = previous.distanceTo(incoming)
             if (jump < 35f) {
                 val accuracyAlpha = when {
-                    incoming.accuracy <= 5f -> 0.58f
-                    incoming.accuracy <= 10f -> 0.52f
-                    incoming.accuracy <= 20f -> 0.43f
-                    incoming.accuracy <= 35f -> 0.32f
-                    else -> 0.25f
+                    incoming.accuracy <= 5f -> 0.70f
+                    incoming.accuracy <= 10f -> 0.64f
+                    incoming.accuracy <= 20f -> 0.55f
+                    incoming.accuracy <= 35f -> 0.42f
+                    else -> 0.30f
                 }
                 val speed = if (incoming.hasSpeed()) incoming.speed else 0f
                 var alpha = when {
-                    speed >= 15f -> (accuracyAlpha + 0.20f).coerceAtMost(0.88f)
+                    speed >= 8f -> (accuracyAlpha + 0.18f).coerceAtMost(0.92f)
                     speed < 2.5f -> 0.14f
                     else -> accuracyAlpha
                 }
@@ -1561,6 +1575,110 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "GPS OK  •  ±" + location.accuracy.toInt() + " m"
         }
         gpsText.setTextColor(Color.rgb(0, 190, 70))
+    }
+
+    private fun applySpeedLimitSignStyle(view: TextView) {
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.WHITE)
+            setStroke(dp(4), Color.rgb(210, 25, 35))
+        }
+        view.setTextColor(Color.BLACK)
+        view.gravity = Gravity.CENTER
+        view.setPadding(dp(3), dp(2), dp(3), dp(2))
+    }
+
+    private fun updateWeatherDisplay(snapshot: WeatherSnapshot) {
+        if (!::weatherText.isInitialized) return
+        weatherText.text = WeatherService.icon(snapshot.weatherCode) + " " +
+            WeatherService.format(snapshot.temperatureC) + "°C\nV " +
+            WeatherService.format(snapshot.windKmh) + " " + WeatherService.windDirection(snapshot.windDirectionDegrees) +
+            " • raff. " + WeatherService.format(snapshot.gustKmh)
+        weatherText.contentDescription = WeatherService.description(snapshot.weatherCode) +
+            ", " + WeatherService.format(snapshot.temperatureC) + " gradi, vento " +
+            WeatherService.format(snapshot.windKmh) + " chilometri orari, raffiche " +
+            WeatherService.format(snapshot.gustKmh) + " chilometri orari"
+    }
+
+    private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val previous = lastWeatherLocation
+        if (!force && latestWeather != null && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
+            previous != null && previous.distanceTo(location) < 15_000f) return
+        lastWeatherUpdateMs = now
+        lastWeatherLocation = Location(location)
+        val latitude = location.latitude
+        val longitude = location.longitude
+        thread(name = "open-meteo-refresh") {
+            val result = try { WeatherService.fetch(latitude, longitude) } catch (_: Exception) { null }
+            runOnUiThread {
+                if (result != null) {
+                    latestWeather = result
+                    updateWeatherDisplay(result)
+                    if (forecastRequested) {
+                        forecastRequested = false
+                        showWeatherForecast()
+                    }
+                } else if (latestWeather == null && ::weatherText.isInitialized) {
+                    weatherText.text = "METEO\nnon disponibile"
+                }
+            }
+        }
+    }
+
+    private fun showWeatherForecast() {
+        val snapshot = latestWeather
+        if (snapshot == null) {
+            val location = currentLocation
+            if (location == null) {
+                Toast.makeText(this, "Attendo una posizione GPS per caricare le previsioni.", Toast.LENGTH_LONG).show()
+                return
+            }
+            forecastRequested = true
+            refreshWeatherIfNeeded(location, true)
+            Toast.makeText(this, "Caricamento previsioni meteo…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val today = snapshot.currentTime.substringBefore("T")
+        val now = snapshot.currentTime.substringAfter("T").take(5)
+        val hours = snapshot.hourly.filter { it.time.substringBefore("T") == today && it.time.substringAfter("T").take(5) >= now }
+        val periods = listOf("Mattina", "Pomeriggio", "Sera")
+        val grouped = periods.map { name ->
+            name to hours.filter { hour ->
+                val h = hour.time.substringAfter("T").take(2).toIntOrNull() ?: -1
+                when (name) {
+                    "Mattina" -> h in 6..11
+                    "Pomeriggio" -> h in 12..17
+                    else -> h in 18..23
+                }
+            }
+        }
+        val labels = grouped.map { (name, list) ->
+            if (list.isEmpty()) "$name • nessun dato orario"
+            else {
+                val t = list.map { it.temperatureC }.average()
+                val w = list.map { it.windKmh }.average()
+                val g = list.map { it.gustKmh }.average()
+                val rain = list.map { it.precipitationProbability.toDouble() }.average()
+                "$name • ${WeatherService.format(t)}°C • vento ${WeatherService.format(w)} km/h • raffiche ${WeatherService.format(g)} • pioggia ${WeatherService.format(rain)}%"
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Previsioni meteo • oggi")
+            .setItems(labels) { _, which ->
+                val (name, list) = grouped[which]
+                if (list.isEmpty()) {
+                    Toast.makeText(this, "Nessun dato disponibile per questa fascia oraria.", Toast.LENGTH_SHORT).show()
+                } else {
+                    val detail = list.joinToString("\n") { hour ->
+                        val h = hour.time.substringAfter("T").take(5)
+                        "$h  ${WeatherService.icon(hour.weatherCode)} ${WeatherService.format(hour.temperatureC)}°C  •  vento ${WeatherService.format(hour.windKmh)} km/h  •  raffiche ${WeatherService.format(hour.gustKmh)}  •  pioggia ${hour.precipitationProbability}%"
+                    }
+                    AlertDialog.Builder(this).setTitle("$name • dettaglio orario")
+                        .setMessage(detail).setPositiveButton("Chiudi", null).show()
+                }
+            }.setPositiveButton("Aggiorna") { _, _ ->
+                currentLocation?.let { refreshWeatherIfNeeded(it, true) }
+            }.setNegativeButton("Chiudi", null).show()
     }
 
     private fun updateSpeedLimitDisplay() {
@@ -1809,10 +1927,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (::routeText.isInitialized) {
             val distanceLabel = when {
                 distanceToTurn < 10.0 -> "ORA"
-                distanceToTurn < 100.0 -> distanceToTurn.toInt().toString() + " m"
-                else -> ((distanceToTurn / 10.0).toInt() * 10).toString() + " m"
+                distanceToTurn < 100.0 -> "FRA " + distanceToTurn.toInt() + " m"
+                else -> "FRA " + ((distanceToTurn / 10.0).toInt() * 10) + " m"
             }
-            routeText.text = shortInstruction + "\n" + distanceLabel
+            routeText.text = distanceLabel + "\n" + shortInstruction
             routeText.typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             routeText.textSize = 18f
         }
