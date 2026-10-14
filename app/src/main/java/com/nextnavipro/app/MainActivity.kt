@@ -1983,8 +1983,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         setContentView(root)
     }
 
-    private fun showSavedPois() {
-        val saved = getSharedPreferences(PREFS, MODE_PRIVATE).all
+    private fun readSavedPois(): List<Triple<String, Double, Double>> =
+        getSharedPreferences(PREFS, MODE_PRIVATE).all
             .filterKeys { it.startsWith("poi_") }
             .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
@@ -1994,23 +1994,54 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Triple(key.removePrefix("poi_"), lat, lon)
             }
             .sortedBy { it.first.lowercase(Locale.ROOT) }
+
+    private fun savedPoisStorageBytes(): Long =
+        getSharedPreferences(PREFS, MODE_PRIVATE).all
+            .filterKeys { it.startsWith("poi_") }
+            .entries.sumOf { (key, value) -> key.toByteArray(Charsets.UTF_8).size.toLong() + (value?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0) }
+
+    private fun showSavedPois() {
+        val saved = readSavedPois()
+        val bytes = savedPoisStorageBytes()
         if (saved.isEmpty()) {
-            Toast.makeText(this, "Non hai ancora salvato luoghi di interesse.", Toast.LENGTH_SHORT).show()
+            AlertDialog.Builder(this).setTitle("Luoghi salvati")
+                .setMessage("Non hai ancora salvato luoghi di interesse.\nMemoria usata dai luoghi: 0 KB")
+                .setPositiveButton("OK", null).show()
             return
         }
+        val labels = saved.map { it.first }.toTypedArray()
+        val kb = String.format(Locale.getDefault(), "%.2f", bytes / 1024.0)
         AlertDialog.Builder(this)
-            .setTitle("Luoghi salvati")
-            .setItems(saved.map { it.first }.toTypedArray()) { _, which ->
-                val poi = saved[which]
-                destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
-                refreshDestinationMarker()
-                destinationInput.setText(poi.first)
-                routeText.text = "DESTINAZIONE: " + poi.first + "\nPremi AVVIA PERCORSO"
-                exitMapFullScreen()
-                calculateSelectedRoute()
-            }
+            .setTitle("Luoghi salvati • ${saved.size}")
+            .setMessage("Memoria stimata dei dati dei luoghi: $kb KB.\nSeleziona un luogo per usarlo o eliminarlo.")
+            .setItems(labels) { _, which -> showSavedPoiActions(saved[which]) }
             .setNegativeButton("Chiudi", null)
             .show()
+    }
+
+    private fun showSavedPoiActions(poi: Triple<String, Double, Double>) {
+        AlertDialog.Builder(this).setTitle(poi.first)
+            .setMessage("Coordinate: ${String.format(Locale.US, "%.6f", poi.second)}, ${String.format(Locale.US, "%.6f", poi.third)}")
+            .setItems(arrayOf("Usa come destinazione", "Elimina luogo")) { _, which ->
+                if (which == 0) {
+                    destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
+                    refreshDestinationMarker()
+                    destinationInput.setText(poi.first)
+                    routeText.text = "DESTINAZIONE: " + poi.first + "\nPremi AVVIA PERCORSO"
+                    exitMapFullScreen()
+                    calculateSelectedRoute()
+                } else {
+                    AlertDialog.Builder(this).setTitle("Eliminare il luogo?")
+                        .setMessage("«${poi.first}» verrà rimosso dai luoghi salvati.")
+                        .setNegativeButton("Annulla", null)
+                        .setPositiveButton("Elimina") { _, _ ->
+                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("poi_" + poi.first).commit()
+                            refreshSavedPoiMarkers()
+                            Toast.makeText(this, if (removed) "Luogo eliminato." else "Impossibile eliminare il luogo.", Toast.LENGTH_LONG).show()
+                            showSavedPois()
+                        }.show()
+                }
+            }.setNegativeButton("Indietro") { _, _ -> showSavedPois() }.show()
     }
 
     private fun showPickedPointDialog(point: NavPoint) {
