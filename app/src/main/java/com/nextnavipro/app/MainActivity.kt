@@ -596,16 +596,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             // Portrait: compact and lift turn guidance so it stays visible on shorter screens.
             maneuverIcon.textSize = 92f
-            // Keep the maneuver glyph inside its allocated row; negative translation clipped its label.
-            maneuverIcon.translationY = 0f
+            // Preserve the original portrait positioning; only prevent the instruction text from clipping.
+            maneuverIcon.translationY = -dp(24).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(98)))
             routeText.textSize = 15f
-            routeText.translationY = 0f
-            // Keep maneuver instructions above the speedometer panel if their bounds overlap.
-            routeText.elevation = dp(12).toFloat()
-            routeText.translationZ = dp(12).toFloat()
-            navHalf.elevation = dp(10).toFloat()
-            navHalf.translationZ = dp(10).toFloat()
+            routeText.translationY = -dp(8).toFloat()
+            routeText.includeFontPadding = false
+            routeText.maxLines = 3
+            routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
             navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -621,10 +619,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f))
             content.addView(routeButton, params(-1, dp(44)))
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.65f))
-            // The navigation pane must draw in front of the speedometer pane on compact screens.
-            upper.elevation = dp(10).toFloat()
-            upper.translationZ = dp(10).toFloat()
-            upper.bringToFront()
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
