@@ -523,7 +523,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, dp(8))
         }
-        speedColumn.addView(unit, params(-1, dp(34)))
         clockText = TextView(this).apply {
             text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
             textSize = 25f
@@ -610,12 +609,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(weatherText, params(-1, dp(52)))
-            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.85f))
+            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.15f))
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f))
             content.addView(routeButton, params(-1, dp(44)))
-            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1f))
+            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.65f))
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
