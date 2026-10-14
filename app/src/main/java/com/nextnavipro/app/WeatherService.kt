@@ -22,6 +22,7 @@ data class WeatherSnapshot(
     val gustKmh: Double,
     val windDirectionDegrees: Int,
     val weatherCode: Int,
+    val currentTime: String,
     val hourly: List<WeatherHour>
 )
 
@@ -62,12 +63,12 @@ object WeatherService {
             val gusts = hourly.optJSONArray("wind_gusts_10m")
             val items = ArrayList<WeatherHour>()
             for (i in 0 until times.length()) {
-                val time = times.optString(i).takeLast(5)
+                val time = times.optString(i)
                 val temp = temperatures?.optDouble(i, Double.NaN) ?: Double.NaN
                 val wind = winds?.optDouble(i, Double.NaN) ?: Double.NaN
                 val gust = gusts?.optDouble(i, Double.NaN) ?: Double.NaN
                 val code = codes?.optInt(i, -1) ?: -1
-                if (time.length != 5 || !temp.isFinite() || !wind.isFinite() || !gust.isFinite() || code < 0) continue
+                if (!time.contains("T") || time.length < 16 || !temp.isFinite() || !wind.isFinite() || !gust.isFinite() || code < 0) continue
                 items.add(WeatherHour(time, temp, rain?.optInt(i, 0)?.coerceIn(0, 100) ?: 0, wind, gust, code))
             }
             return WeatherSnapshot(
@@ -76,6 +77,7 @@ object WeatherService {
                 gustKmh = current.optDouble("wind_gusts_10m", Double.NaN).also { require(it.isFinite()) },
                 windDirectionDegrees = current.optInt("wind_direction_10m", 0).mod(360),
                 weatherCode = current.optInt("weather_code", -1).also { require(it >= 0) },
+                currentTime = current.optString("time"),
                 hourly = items
             )
         } finally {
