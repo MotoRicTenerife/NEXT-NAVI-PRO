@@ -1067,17 +1067,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showGpsDiagnosticsMenu() {
         val saved = savedGpsDiagnosticFiles()
-        val bytes = saved.sumOf { it.length() } + File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").let { if (it.exists()) it.length() else 0L }
+        val checkpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
+        val bytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
         val active = if (gpsDiagnosticRecording) "Registrazione ATTIVA • ${gpsDiagnosticSamples.size} campioni" else "Registrazione ferma"
-        val status = "$active\nSessioni salvate: ${saved.size} • Memoria occupata: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB\nLe sessioni salvate restano sul dispositivo."
-        val choices = arrayOf(
-            if (gpsDiagnosticRecording) "Ferma e salva registrazione" else "Avvia nuova registrazione",
-            "Gestisci registrazioni salvate",
-            "Esporta CSV dei campioni in corso",
-            "Cancella campioni in corso"
-        )
+        val recovery = checkpoint.exists() && !gpsDiagnosticRecording
+        val status = "$active\nSessioni salvate: ${saved.size} • Memoria occupata: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB" +
+            if (recovery) "\nÈ presente una registrazione parziale recuperabile." else "\nLe sessioni salvate restano sul dispositivo."
+        val choices = buildList {
+            add(if (gpsDiagnosticRecording) "Ferma e salva registrazione" else "Avvia nuova registrazione")
+            add("Gestisci registrazioni salvate")
+            add("Esporta CSV dei campioni in corso")
+            add("Cancella campioni in corso")
+            if (recovery) add("Recupera registrazione interrotta")
+        }
         AlertDialog.Builder(this).setTitle("Diagnostica GPS").setMessage(status)
-            .setItems(choices) { _, which ->
+            .setItems(choices.toTypedArray()) { _, which ->
                 when (which) {
                     0 -> {
                         if (!gpsDiagnosticRecording) {
@@ -1088,7 +1092,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         } else {
                             gpsDiagnosticRecording = false
                             val file = saveGpsDiagnosticSession()
-                            File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
+                            checkpoint.delete()
                             Toast.makeText(this, if (file != null) "Registrazione salvata: ${gpsDiagnosticSamples.size} campioni." else "Registrazione fermata; nessun file salvato (campioni insufficienti o errore).", Toast.LENGTH_LONG).show()
                         }
                     }
@@ -1098,10 +1102,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         Toast.makeText(this, "Ferma e salva prima la registrazione.", Toast.LENGTH_LONG).show()
                     } else {
                         gpsDiagnosticSamples.clear()
+                        checkpoint.delete()
                         Toast.makeText(this, "Campioni in corso cancellati; le sessioni salvate restano intatte.", Toast.LENGTH_LONG).show()
                     }
+                    4 -> if (recovery) recoverGpsDiagnosticCheckpoint()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun recoverGpsDiagnosticCheckpoint() {
+        if (gpsDiagnosticRecording) {
+            Toast.makeText(this, "Ferma prima la registrazione attiva.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val checkpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
+        if (!checkpoint.isFile || checkpoint.length() <= 0L) {
+            Toast.makeText(this, "Nessuna registrazione parziale da recuperare.", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val recovered = File(gpsDiagnosticsDirectory(), "gps_trace_recovered_${System.currentTimeMillis()}.csv")
+            checkpoint.copyTo(recovered, overwrite = false)
+            checkpoint.delete()
+            Toast.makeText(this, "Registrazione parziale recuperata. Puoi esportarla da «Gestisci registrazioni salvate».", Toast.LENGTH_LONG).show()
+            showSavedGpsDiagnostics()
+        } catch (error: Exception) {
+            Toast.makeText(this, "Recupero non riuscito: ${error.message ?: "errore di file"}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun saveGpsDiagnosticSession(): File? {
@@ -1215,7 +1242,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             )
         )
-        if (gpsDiagnosticSamples.size % 25 == 0) saveGpsDiagnosticCheckpoint()
+        if (gpsDiagnosticSamples.size % 10 == 0) saveGpsDiagnosticCheckpoint()
     }
 
     private fun exportGpsDiagnostics() {
