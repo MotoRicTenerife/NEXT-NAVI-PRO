@@ -1069,18 +1069,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val saved = savedGpsDiagnosticFiles()
         val checkpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
         val bytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
-        val active = if (gpsDiagnosticRecording) "Registrazione ATTIVA • ${gpsDiagnosticSamples.size} campioni" else "Registrazione ferma"
+        val active = if (gpsDiagnosticRecording) "CSV ATTIVO • ${gpsDiagnosticSamples.size} campioni" else "CSV fermo"
         val recovery = checkpoint.exists() && !gpsDiagnosticRecording
-        val status = "$active\nSessioni salvate: ${saved.size} • Memoria occupata: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB" +
-            if (recovery) "\nÈ presente una registrazione parziale recuperabile." else "\nLe sessioni salvate restano sul dispositivo."
+        val latest = saved.firstOrNull()
+        val status = "$active\nSessioni salvate: ${saved.size} • Memoria: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB" +
+            if (recovery) "\nRegistrazione parziale recuperabile presente." else ""
         val choices = buildList {
-            add(if (gpsDiagnosticRecording) "Ferma e salva registrazione" else "Avvia nuova registrazione")
-            add("Gestisci registrazioni salvate")
-            add("Esporta CSV dei campioni in corso")
-            add("Cancella campioni in corso")
+            add(if (gpsDiagnosticRecording) "Ferma e salva CSV" else "Avvia registrazione CSV")
+            add("Esporta ultima sessione CSV")
+            add("Elimina ultima sessione CSV")
+            add("Gestisci tutte le sessioni CSV")
+            add(if (gpsDiagnosticSamples.isNotEmpty()) "Esporta CSV in corso" else "Esporta CSV in corso (nessun campione)")
+            add("Cancella campioni CSV in corso")
             if (recovery) add("Recupera registrazione interrotta")
         }
-        AlertDialog.Builder(this).setTitle("Diagnostica GPS").setMessage(status)
+        AlertDialog.Builder(this).setTitle("Debug • Diagnostica GPS").setMessage(status)
             .setItems(choices.toTypedArray()) { _, which ->
                 when (which) {
                     0 -> {
@@ -1088,24 +1091,43 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             gpsDiagnosticSamples.clear()
                             gpsDiagnosticRecording = true
                             lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-                            Toast.makeText(this, "Registrazione GPS avviata. Fermati in sicurezza prima di interromperla.", Toast.LENGTH_LONG).show()
+                            saveGpsDiagnosticCheckpoint()
+                            Toast.makeText(this, "Registrazione CSV avviata.", Toast.LENGTH_LONG).show()
                         } else {
                             gpsDiagnosticRecording = false
+                            val count = gpsDiagnosticSamples.size
                             val file = saveGpsDiagnosticSession()
                             checkpoint.delete()
-                            Toast.makeText(this, if (file != null) "Registrazione salvata: ${gpsDiagnosticSamples.size} campioni." else "Registrazione fermata; nessun file salvato (campioni insufficienti o errore).", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, if (file != null) "CSV salvato: $count campioni." else "CSV non salvato: campioni insufficienti o errore.", Toast.LENGTH_LONG).show()
                         }
+                        showGpsDiagnosticsMenu()
                     }
-                    1 -> showSavedGpsDiagnostics()
-                    2 -> exportGpsDiagnostics()
-                    3 -> if (gpsDiagnosticRecording) {
-                        Toast.makeText(this, "Ferma e salva prima la registrazione.", Toast.LENGTH_LONG).show()
+                    1 -> {
+                        if (latest == null) Toast.makeText(this, "Nessuna sessione CSV salvata.", Toast.LENGTH_LONG).show()
+                        else exportSavedGpsDiagnostic(latest)
+                    }
+                    2 -> {
+                        if (latest == null) Toast.makeText(this, "Nessuna sessione CSV da eliminare.", Toast.LENGTH_LONG).show()
+                        else AlertDialog.Builder(this).setTitle("Eliminare l'ultima sessione CSV?")
+                            .setMessage("File: ${latest.name}\nL'eliminazione è definitiva.")
+                            .setNegativeButton("Annulla", null)
+                            .setPositiveButton("Elimina") { _, _ ->
+                                val deleted = latest.delete()
+                                Toast.makeText(this, if (deleted) "CSV eliminato." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
+                                showGpsDiagnosticsMenu()
+                            }.show()
+                    }
+                    3 -> showSavedGpsDiagnostics()
+                    4 -> exportGpsDiagnostics()
+                    5 -> if (gpsDiagnosticRecording) {
+                        Toast.makeText(this, "Ferma e salva il CSV prima di cancellare i campioni.", Toast.LENGTH_LONG).show()
                     } else {
                         gpsDiagnosticSamples.clear()
                         checkpoint.delete()
-                        Toast.makeText(this, "Campioni in corso cancellati; le sessioni salvate restano intatte.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "Campioni CSV in corso cancellati; sessioni salvate intatte.", Toast.LENGTH_LONG).show()
+                        showGpsDiagnosticsMenu()
                     }
-                    4 -> if (recovery) recoverGpsDiagnosticCheckpoint()
+                    6 -> if (recovery) recoverGpsDiagnosticCheckpoint()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -1323,10 +1345,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun askToRecordGpx() {
+        // Start CSV GPS diagnostics automatically when a route is calculated. GPX recording
+        // remains separately opt-in, but both consume the same real location fixes.
+        if (!gpsDiagnosticRecording) {
+            gpsDiagnosticSamples.clear()
+            gpsDiagnosticRecording = true
+            lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
+            saveGpsDiagnosticCheckpoint()
+            Toast.makeText(this, "Diagnostica CSV GPS avviata per questa navigazione.", Toast.LENGTH_LONG).show()
+        }
         if (recordingGpx) return
         AlertDialog.Builder(this)
             .setTitle("Memorizzare il viaggio?")
-            .setMessage("Vuoi registrare il percorso realmente seguito in un file GPX? La registrazione usa solo posizioni GPS valide.")
+            .setMessage("Vuoi registrare anche il percorso realmente seguito in un file GPX? La diagnostica CSV GPS è già attiva.")
             .setPositiveButton("Sì, registra") { _, _ -> startGpxRecording() }
             .setNegativeButton("No", null)
             .show()
