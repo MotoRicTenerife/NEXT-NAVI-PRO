@@ -1934,7 +1934,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
-                    startGpsDiagnosticRecordingForNavigation()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
