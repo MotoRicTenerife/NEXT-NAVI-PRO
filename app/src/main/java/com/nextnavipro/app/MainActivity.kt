@@ -1345,16 +1345,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showGpxMenu() {
-        val choices = arrayOf("Importa GPX dal telefono", "Salva percorso attivo", "Gestisci percorsi e memoria", "Esporta GPX attivo…")
-        AlertDialog.Builder(this).setTitle("Percorsi GPX")
-            .setItems(choices) { _, which ->
-                when (which) {
-                    0 -> importGpx()
-                    1 -> saveActiveGpx()
-                    2 -> showSavedGpxRoutes()
-                    3 -> exportActiveGpx()
-                }
-            }.setNegativeButton("Chiudi", null).show()
+        val choices = arrayOf(
+            "Importa GPX dal telefono",
+            "Salva percorso attivo",
+            "Gestisci GPX + CSV GPS e memoria",
+            "Esporta GPX attivo…",
+            "Archivio CSV GPS • esporta / elimina"
+        )
+        AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
+            when (which) {
+                0 -> importGpx()
+                1 -> saveActiveGpx()
+                2 -> showSavedGpxRoutes()
+                3 -> exportActiveGpx()
+                4 -> showSavedGpsDiagnostics()
+            }
+        }.setNegativeButton("Chiudi", null).show()
     }
 
     private fun askToRecordGpx() {
@@ -1483,9 +1489,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@runOnUiThread
                 }
                 val totalBytes = tracks.sumOf { it.first.length() }
+                val pairedCsvFiles = tracks.map { (gpxFile, _) ->
+                    File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
+                }.filter { it.isFile }
+                val csvBytes = pairedCsvFiles.sumOf { it.length() }
                 val totalMb = totalBytes / (1024.0 * 1024.0)
+                val csvMb = csvBytes / (1024.0 * 1024.0)
                 AlertDialog.Builder(this).setTitle("Libreria GPX • " + tracks.size + " percorsi")
-                    .setMessage(String.format(Locale.getDefault(), "Memoria occupata: %.2f MB\nScegli un percorso per visualizzarlo, seguirlo, esportarlo o eliminarlo.", totalMb))
+                    .setMessage(String.format(Locale.getDefault(), "GPX: %.2f MB\nCSV GPS associati: %d file • %.2f MB\nIl CSV viene eliminato insieme al GPX. Seleziona un viaggio per esportare o eliminare entrambi.", totalMb, pairedCsvFiles.size, csvMb))
                     .setItems(tracks.map { (_, track) ->
                         track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
                     }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
@@ -1495,9 +1506,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showSavedGpxActions(file: File, track: GpxTrack) {
-        val actions = arrayOf("Segui questa traccia GPX", "Visualizza sulla mappa", "Esporta / condividi file…", "Elimina percorso")
+        val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
+        val csvInfo = if (pairedCsv.isFile) {
+            "CSV GPS associato: \${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
+        } else {
+            "CSV GPS associato: non presente"
+        }
+        val actions = arrayOf(
+            "Segui questa traccia GPX",
+            "Visualizza sulla mappa",
+            "Esporta / condividi GPX…",
+            if (pairedCsv.isFile) "Esporta CSV GPS associato…" else "CSV GPS associato non disponibile",
+            "Elimina GPX + CSV associato"
+        )
         AlertDialog.Builder(this).setTitle(track.name)
-            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\nFile: %s", track.distanceKm, track.points.size, file.name))
+            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\nFile: %s\n%s", track.distanceKm, track.points.size, file.name, csvInfo))
             .setItems(actions) { _, which ->
                 when (which) {
                     0 -> loadSavedGpx(file)
@@ -1506,19 +1529,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         enterMapFullScreen()
                     }
                     2 -> exportGpxTrack(track)
-                    3 -> AlertDialog.Builder(this).setTitle("Eliminare il GPX?")
-                        .setMessage("Il file " + file.name + " verrà eliminato dal dispositivo.")
+                    3 -> if (pairedCsv.isFile) exportSavedGpsDiagnostic(pairedCsv) else
+                        Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
+                    4 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
+                        .setMessage("Verranno eliminati definitivamente \${file.name} e il CSV GPS con lo stesso nome, se presente.")
                         .setNegativeButton("Annulla", null)
-                        .setPositiveButton("Elimina") { _, _ ->
+                        .setPositiveButton("Elimina entrambi") { _, _ ->
                             val deleted = file.delete()
-                            val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
                             val csvDeleted = !pairedCsv.exists() || pairedCsv.delete()
                             val message = when {
                                 !deleted -> "Impossibile eliminare il GPX."
                                 !csvDeleted -> "GPX eliminato, ma non è stato possibile eliminare il CSV associato."
-                                else -> "GPX e CSV associato eliminati (se presente)."
+                                else -> "GPX e CSV associato eliminati; memoria liberata."
                             }
                             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                            showSavedGpxRoutes()
                         }.show()
                 }
             }.setNegativeButton("Indietro") { _, _ -> showSavedGpxRoutes() }.show()
