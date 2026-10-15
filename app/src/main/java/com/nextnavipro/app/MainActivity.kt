@@ -1352,7 +1352,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showGpxMenu() {
+        val recordingLabel = if (recordingGpx || gpsDiagnosticRecording)
+            "FERMA E SALVA registrazione GPX + CSV"
+        else "AVVIA registrazione GPX + CSV"
         val choices = arrayOf(
+            recordingLabel,
             "Importa GPX dal telefono",
             "Salva percorso attivo",
             "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
@@ -1361,11 +1365,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
             when (which) {
-                0 -> importGpx()
-                1 -> saveActiveGpx()
-                2 -> showSavedGpxRoutes()
-                3 -> exportActiveGpx()
-                4 -> showGpsDiagnosticsMenu()
+                0 -> if (recordingGpx || gpsDiagnosticRecording) finishGpxRecording(save = true) else askToRecordGpx()
+                1 -> importGpx()
+                2 -> saveActiveGpx()
+                3 -> showSavedGpxRoutes()
+                4 -> exportActiveGpx()
+                5 -> showGpsDiagnosticsMenu()
             }
         }.setNegativeButton("Chiudi", null).show()
     }
@@ -1466,10 +1471,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     FileOutputStream(gpxTemp).use { GpxRouteService.write(it, label, points) }
                     finalGpx = File(gpxDir, "$baseName.gpx")
                 }
-                if (samples.isNotEmpty()) {
-                    FileOutputStream(csvTemp).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
-                    finalCsv = File(csvDir, "$baseName.csv")
-                }
+                // Always persist the CSV companion, including its header if Android delivered no GPS fixes.
+                FileOutputStream(csvTemp).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
+                finalCsv = File(csvDir, "$baseName.csv")
                 // Publish final names only after each temporary file has been completely written.
                 if (gpxTemp.exists() && !gpxTemp.renameTo(finalGpx!!)) gpxTemp.copyTo(finalGpx!!, overwrite = true)
                 if (csvTemp.exists() && !csvTemp.renameTo(finalCsv!!)) csvTemp.copyTo(finalCsv!!, overwrite = true)
