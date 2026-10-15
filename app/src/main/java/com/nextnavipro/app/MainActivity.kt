@@ -1986,6 +1986,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun clearRoute() {
         finishGpxRecording(save = true)
+        stopAndSaveGpsDiagnosticRecording("percorso terminato")
         routeResult = null
         resetRouteProgress()
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
