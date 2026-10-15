@@ -1508,7 +1508,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showSavedGpxActions(file: File, track: GpxTrack) {
         val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
         val csvInfo = if (pairedCsv.isFile) {
-            "CSV GPS associato: \${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
+            "CSV GPS associato: ${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
         } else {
             "CSV GPS associato: non presente"
         }
@@ -1532,7 +1532,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     3 -> if (pairedCsv.isFile) exportSavedGpsDiagnostic(pairedCsv) else
                         Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
                     4 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
-                        .setMessage("Verranno eliminati definitivamente \${file.name} e il CSV GPS con lo stesso nome, se presente.")
+                        .setMessage("Verranno eliminati definitivamente ${file.name} e il CSV GPS con lo stesso nome, se presente.")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina entrambi") { _, _ ->
                             val deleted = file.delete()
