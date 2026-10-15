@@ -2381,15 +2381,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     else -> 0.30f
                 }
                 val speed = if (incoming.hasSpeed()) incoming.speed else 0f
+                // Keep enough of the raw fix to avoid visible lag, but do not let
+                // one-second GNSS updates move the marker almost entirely in one jump.
                 var alpha = when {
-                    speed >= 8f -> (accuracyAlpha + 0.18f).coerceAtMost(0.92f)
+                    speed >= 8f -> (accuracyAlpha - 0.08f).coerceIn(0.48f, 0.68f)
                     speed < 2.5f -> 0.14f
-                    else -> accuracyAlpha
+                    else -> (accuracyAlpha - 0.06f).coerceIn(0.42f, 0.66f)
                 }
-                if (jump > 12f) alpha = maxOf(alpha, 0.82f)
+                // A larger displacement can be real motion; respond faster without
+                // reverting to the previous near-raw filter.
+                if (jump > 12f) alpha = maxOf(alpha, 0.76f)
                 if (previous.hasBearing() && incoming.hasBearing() && speed >= 2.5f) {
                     val courseDelta = abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
-                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.82f)
+                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.76f)
                 }
                 result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
                 result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
