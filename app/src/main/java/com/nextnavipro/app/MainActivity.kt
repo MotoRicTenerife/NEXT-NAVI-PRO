@@ -1558,7 +1558,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showSavedGpxRoutes() {
-        val files = gpxDirectory().listFiles()?.filter { it.isFile && it.extension.equals("gpx", true) }
+        val files = gpxDirectory().listFiles()?.filter { it.isFile && it.extension.equals("gpx", true) && it.name != "gpx_recording_in_progress.gpx" }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
         if (files.isEmpty()) {
             Toast.makeText(this, "Nessun GPX salvato. Importa o salva prima un percorso.", Toast.LENGTH_LONG).show()
