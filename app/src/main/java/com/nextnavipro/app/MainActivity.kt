@@ -1081,68 +1081,68 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showGpsDiagnosticsMenu() {
         val saved = savedGpsDiagnosticFiles()
         val checkpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
-        val bytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
-        val active = if (gpsDiagnosticRecording) "CSV ATTIVO • ${gpsDiagnosticSamples.size} campioni" else "CSV fermo"
-        val recovery = checkpoint.exists() && !gpsDiagnosticRecording
-        val latest = saved.firstOrNull()
-        val status = "$active\nSessioni salvate: ${saved.size} • Memoria: ${String.format(Locale.getDefault(), "%.2f", bytes / (1024.0 * 1024.0))} MB" +
-            if (recovery) "\nRegistrazione parziale recuperabile presente." else ""
-        val choices = buildList {
-            add(if (gpsDiagnosticRecording) "Ferma e salva CSV" else "Avvia registrazione CSV")
-            add("Esporta ultima sessione CSV")
-            add("Elimina ultima sessione CSV")
-            add("Gestisci tutte le sessioni CSV")
-            add(if (gpsDiagnosticSamples.isNotEmpty()) "Esporta CSV in corso" else "Esporta CSV in corso (nessun campione)")
-            add("Cancella campioni CSV in corso")
-            if (recovery) add("Recupera registrazione interrotta")
+        val orphaned = saved.filter { csv ->
+            val matchingGpx = File(gpxDirectory(), csv.nameWithoutExtension + ".gpx")
+            !matchingGpx.isFile && !csv.name.startsWith("gps_trace_recovered_")
         }
-        AlertDialog.Builder(this).setTitle("Debug • Diagnostica GPS").setMessage(status)
-            .setItems(choices.toTypedArray()) { _, which ->
-                when (which) {
-                    0 -> {
-                        if (!gpsDiagnosticRecording) {
-                            gpsDiagnosticSamples.clear()
-                            gpsDiagnosticRecording = true
-                            lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-                            saveGpsDiagnosticCheckpoint()
-                            Toast.makeText(this, "Registrazione CSV avviata.", Toast.LENGTH_LONG).show()
-                        } else {
-                            gpsDiagnosticRecording = false
-                            val count = gpsDiagnosticSamples.size
-                            val file = saveGpsDiagnosticSession()
-                            checkpoint.delete()
-                            Toast.makeText(this, if (file != null) "CSV salvato: $count campioni." else "CSV non salvato: campioni insufficienti o errore.", Toast.LENGTH_LONG).show()
-                        }
-                        showGpsDiagnosticsMenu()
-                    }
-                    1 -> {
-                        if (latest == null) Toast.makeText(this, "Nessuna sessione CSV salvata.", Toast.LENGTH_LONG).show()
-                        else exportSavedGpsDiagnostic(latest)
-                    }
-                    2 -> {
-                        if (latest == null) Toast.makeText(this, "Nessuna sessione CSV da eliminare.", Toast.LENGTH_LONG).show()
-                        else AlertDialog.Builder(this).setTitle("Eliminare l'ultima sessione CSV?")
-                            .setMessage("File: ${latest.name}\nL'eliminazione è definitiva.")
-                            .setNegativeButton("Annulla", null)
-                            .setPositiveButton("Elimina") { _, _ ->
-                                val deleted = latest.delete()
-                                Toast.makeText(this, if (deleted) "CSV eliminato." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
-                                showGpsDiagnosticsMenu()
-                            }.show()
-                    }
-                    3 -> showSavedGpsDiagnostics()
-                    4 -> exportGpsDiagnostics()
-                    5 -> if (gpsDiagnosticRecording) {
-                        Toast.makeText(this, "Ferma e salva il CSV prima di cancellare i campioni.", Toast.LENGTH_LONG).show()
-                    } else {
-                        gpsDiagnosticSamples.clear()
-                        checkpoint.delete()
-                        Toast.makeText(this, "Campioni CSV in corso cancellati; sessioni salvate intatte.", Toast.LENGTH_LONG).show()
-                        showGpsDiagnosticsMenu()
-                    }
-                    6 -> if (recovery) recoverGpsDiagnosticCheckpoint()
+        val allBytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
+        val pairedBytes = saved.filter { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }.sumOf { it.length() }
+        val active = if (recordingGpx && gpsDiagnosticRecording) "Registrazione GPX + CSV ATTIVA • ${gpsDiagnosticSamples.size} campioni"
+            else "Registrazione GPX + CSV ferma"
+        val status = "$active\nCSV associati: ${saved.count { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }} • ${String.format(Locale.getDefault(), "%.2f", pairedBytes / (1024.0 * 1024.0))} MB\nTutti i CSV: ${saved.size} • ${String.format(Locale.getDefault(), "%.2f", allBytes / (1024.0 * 1024.0))} MB" +
+            if (orphaned.isNotEmpty()) "\nCSV senza GPX associato: ${orphaned.size} (eliminabili)" else ""
+        val dialog = AlertDialog.Builder(this).setTitle("DEBUG • GPX / CSV GPS")
+            .setMessage(status)
+            .setNegativeButton("Chiudi", null)
+            .create()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 32, 8)
+        }
+        fun action(label: String, onClick: () -> Unit) {
+            panel.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                setOnClickListener {
+                    dialog.dismiss()
+                    onClick()
                 }
-            }.setNegativeButton("Chiudi", null).show()
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = 6
+            })
+        }
+        action("Apri archivio GPX + CSV (esporta / elimina)") { showSavedGpxRoutes() }
+        action("Esporta ultimo CSV GPS") {
+            val latest = savedGpsDiagnosticFiles().firstOrNull()
+            if (latest == null) Toast.makeText(this, "Nessun CSV GPS salvato.", Toast.LENGTH_LONG).show()
+            else exportSavedGpsDiagnostic(latest)
+        }
+        action("Elimina ultimo CSV GPS") {
+            val latest = savedGpsDiagnosticFiles().firstOrNull()
+            if (latest == null) Toast.makeText(this, "Nessun CSV GPS salvato.", Toast.LENGTH_LONG).show()
+            else AlertDialog.Builder(this).setTitle("Eliminare il CSV GPS?")
+                .setMessage("File: ${latest.name}\nSe è associato a un GPX, verrà eliminato solo il CSV; per eliminare entrambi usa l'archivio GPX.")
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Elimina") { _, _ ->
+                    Toast.makeText(this, if (latest.delete()) "CSV eliminato." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
+                    showGpsDiagnosticsMenu()
+                }.show()
+        }
+        action("Elimina CSV senza GPX associato (${orphaned.size})") {
+            if (orphaned.isEmpty()) {
+                Toast.makeText(this, "Non ci sono CSV orfani da eliminare.", Toast.LENGTH_LONG).show()
+            } else AlertDialog.Builder(this).setTitle("Pulire i CSV senza GPX?")
+                .setMessage("Saranno eliminati ${orphaned.size} file CSV non associati a un GPX. I GPX e i relativi CSV non verranno toccati.")
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Elimina") { _, _ ->
+                    val deleted = orphaned.count { it.delete() }
+                    Toast.makeText(this, "Eliminati $deleted CSV orfani.", Toast.LENGTH_LONG).show()
+                    showGpsDiagnosticsMenu()
+                }.show()
+        }
+        if (checkpoint.isFile) action("Recupera CSV interrotto") { recoverGpsDiagnosticCheckpoint() }
+        dialog.setView(panel)
+        dialog.show()
     }
 
     private fun recoverGpsDiagnosticCheckpoint() {
@@ -1348,9 +1348,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val choices = arrayOf(
             "Importa GPX dal telefono",
             "Salva percorso attivo",
-            "Gestisci GPX + CSV GPS e memoria",
+            "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
             "Esporta GPX attivo…",
-            "Archivio CSV GPS • esporta / elimina"
+            "DEBUG: CSV GPS e memoria"
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
             when (which) {
@@ -1358,7 +1358,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 1 -> saveActiveGpx()
                 2 -> showSavedGpxRoutes()
                 3 -> exportActiveGpx()
-                4 -> showSavedGpsDiagnostics()
+                4 -> showGpsDiagnosticsMenu()
             }
         }.setNegativeButton("Chiudi", null).show()
     }
