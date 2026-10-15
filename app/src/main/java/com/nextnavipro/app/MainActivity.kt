@@ -1515,19 +1515,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showSavedGpxActions(file: File, track: GpxTrack) {
         val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
         val csvInfo = if (pairedCsv.isFile) {
-            "CSV GPS associato: ${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
+            "CSV GPS: ${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
         } else {
-            "CSV GPS associato: non presente"
+            "CSV GPS: non presente"
         }
+        // Non combinare setMessage() e setItems(): su alcuni dispositivi Android
+        // il messaggio può sostituire l'elenco delle azioni. Tutte le azioni restano selezionabili.
+        val title = "${track.name}\n${String.format(Locale.getDefault(), "%.1f", track.distanceKm)} km • ${track.points.size} punti\n$csvInfo"
         val actions = arrayOf(
             "Segui questa traccia GPX",
             "Visualizza sulla mappa",
             "Esporta / condividi GPX…",
             if (pairedCsv.isFile) "Esporta CSV GPS associato…" else "CSV GPS associato non disponibile",
-            "Elimina GPX + CSV associato"
+            "Elimina solo GPX",
+            if (pairedCsv.isFile) "Elimina GPX + CSV associato" else "Elimina GPX"
         )
-        AlertDialog.Builder(this).setTitle(track.name)
-            .setMessage(String.format(Locale.getDefault(), "%.1f km • %d punti\nFile: %s\n%s", track.distanceKm, track.points.size, file.name, csvInfo))
+        AlertDialog.Builder(this).setTitle(title)
             .setItems(actions) { _, which ->
                 when (which) {
                     0 -> loadSavedGpx(file)
@@ -1538,7 +1541,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     2 -> exportGpxTrack(track)
                     3 -> if (pairedCsv.isFile) exportSavedGpsDiagnostic(pairedCsv) else
                         Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
-                    4 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
+                    4 -> AlertDialog.Builder(this).setTitle("Eliminare solo il GPX?")
+                        .setMessage("Verrà eliminato ${file.name}. Il CSV associato, se presente, resterà nella memoria.")
+                        .setNegativeButton("Annulla", null)
+                        .setPositiveButton("Elimina GPX") { _, _ ->
+                            val deleted = file.delete()
+                            Toast.makeText(this, if (deleted) "GPX eliminato." else "Impossibile eliminare il GPX.", Toast.LENGTH_LONG).show()
+                            showSavedGpxRoutes()
+                        }.show()
+                    5 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
                         .setMessage("Verranno eliminati definitivamente ${file.name} e il CSV GPS con lo stesso nome, se presente.")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina entrambi") { _, _ ->
