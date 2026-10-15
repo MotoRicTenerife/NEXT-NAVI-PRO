@@ -286,6 +286,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Any checkpoint present at process start belongs to a previous interrupted session.
+        recoverInterruptedPairedRecording()
         // Preserve the window-level setting. The system brightness slider and adaptive-brightness
         // preference are never changed; -1 delegates brightness back to Android/Samsung.
         if (!originalWindowBrightnessCaptured) {
@@ -1178,9 +1180,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun saveGpsDiagnosticCheckpoint() {
         if (gpsDiagnosticSamples.isEmpty()) return
         try {
-            val file = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
-            FileOutputStream(file).use { it.write(GpsTraceDiagnostics.toCsv(gpsDiagnosticSamples).toByteArray(Charsets.UTF_8)) }
-        } catch (_: Exception) { /* Keep recording; storage errors are surfaced when the session is stopped. */ }
+            val temp = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.tmp")
+            FileOutputStream(temp).use { it.write(GpsTraceDiagnostics.toCsv(gpsDiagnosticSamples).toByteArray(Charsets.UTF_8)) }
+            val checkpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
+            if (!temp.renameTo(checkpoint)) {
+                temp.copyTo(checkpoint, overwrite = true)
+                temp.delete()
+            }
+        } catch (_: Exception) { /* Preserve the last valid checkpoint; finalization retries. */ }
     }
 
     private fun showSavedGpsDiagnostics() {
@@ -1379,11 +1386,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastGpxPointTimeMs = 0L
         gpsDiagnosticSamples.clear()
         gpsDiagnosticRecording = true
-        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-        saveGpsDiagnosticCheckpoint()
         recordingGpx = true
+        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
         currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
-        Toast.makeText(this, "Registrazione GPX + CSV GPS avviata.", Toast.LENGTH_LONG).show()
+        saveGpsDiagnosticCheckpoint()
+        saveGpxRecordingCheckpoint()
+        Toast.makeText(this, "Registrazione GPX + CSV GPS avviata insieme.", Toast.LENGTH_LONG).show()
     }
 
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
@@ -1403,42 +1411,115 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpxRecordingPoints.add(point)
         lastRecordedGpxPoint = point
         lastGpxPointTimeMs = now
+        // Durable paired checkpoint: if Android kills the process, the last saved track remains recoverable.
+        if (gpxRecordingPoints.size % 10 == 0) saveGpxRecordingCheckpoint()
     }
 
-    private fun finishGpxRecording(save: Boolean) {
+    private fun gpxRecordingCheckpointFile(): File =
+        File(gpxDirectory(), "gpx_recording_in_progress.gpx")
+
+    private fun saveGpxRecordingCheckpoint() {
+        if (!recordingGpx || gpxRecordingPoints.isEmpty()) return
+        try {
+            val temp = File(gpxDirectory(), "gpx_recording_in_progress.tmp")
+            FileOutputStream(temp).use { GpxRouteService.write(it, destination?.name ?: "Viaggio in corso", gpxRecordingPoints.toList()) }
+            val checkpoint = gpxRecordingCheckpointFile()
+            if (!temp.renameTo(checkpoint)) {
+                temp.copyTo(checkpoint, overwrite = true)
+                temp.delete()
+            }
+        } catch (_: Exception) {
+            // Keep the in-memory recording active; finalization retries and reports storage errors.
+        }
+    }
+
+    private fun finishGpxRecording(save: Boolean, showResult: Boolean = true) {
         if (!recordingGpx) return
+        // Write both checkpoints before clearing memory or changing the active state.
+        saveGpxRecordingCheckpoint()
+        saveGpsDiagnosticCheckpoint()
         recordingGpx = false
         val points = gpxRecordingPoints.toList()
-        gpxRecordingPoints.clear()
-        lastRecordedGpxPoint = null
         val samples = gpsDiagnosticSamples.toList()
         gpsDiagnosticRecording = false
-        File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
-        gpsDiagnosticSamples.clear()
-        if (!save || points.size < 2) {
-            Toast.makeText(this, "Registrazione terminata: punti GPX insufficienti. Il CSV associato non è stato conservato.", Toast.LENGTH_LONG).show()
+        if (!save) {
+            // Never silently discard an interrupted/short session: leave checkpoints for recovery.
+            if (showResult) Toast.makeText(this, "Registrazione fermata. I dati parziali sono conservati per il recupero.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (points.isEmpty() && samples.isEmpty()) {
+            if (showResult) Toast.makeText(this, "Registrazione vuota: nessun dato da salvare.", Toast.LENGTH_LONG).show()
             return
         }
         thread(name = "save-recorded-gpx-csv") {
+            var finalGpx: File? = null
+            var finalCsv: File? = null
             try {
                 val label = (destination?.name ?: "Viaggio registrato")
                     .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
                 val baseName = "${System.currentTimeMillis()}_$label"
-                val gpxFile = File(gpxDirectory(), "$baseName.gpx")
-                FileOutputStream(gpxFile).use { GpxRouteService.write(it, label, points) }
-                var csvSaved = false
-                if (samples.isNotEmpty()) {
-                    val csvFile = File(gpsDiagnosticsDirectory(), "$baseName.csv")
-                    FileOutputStream(csvFile).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
-                    csvSaved = true
+                val gpxDir = gpxDirectory()
+                val csvDir = gpsDiagnosticsDirectory()
+                val gpxTemp = File(gpxDir, "$baseName.gpx.tmp")
+                val csvTemp = File(csvDir, "$baseName.csv.tmp")
+                if (points.isNotEmpty()) {
+                    FileOutputStream(gpxTemp).use { GpxRouteService.write(it, label, points) }
+                    finalGpx = File(gpxDir, "$baseName.gpx")
                 }
-                val savedCsv = csvSaved
+                if (samples.isNotEmpty()) {
+                    FileOutputStream(csvTemp).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
+                    finalCsv = File(csvDir, "$baseName.csv")
+                }
+                // Publish final names only after each temporary file has been completely written.
+                if (gpxTemp.exists() && !gpxTemp.renameTo(finalGpx!!)) gpxTemp.copyTo(finalGpx!!, overwrite = true)
+                if (csvTemp.exists() && !csvTemp.renameTo(finalCsv!!)) csvTemp.copyTo(finalCsv!!, overwrite = true)
+                val gpxReady = finalGpx?.isFile == true && finalGpx!!.length() > 0L
+                val csvReady = finalCsv?.isFile == true && finalCsv!!.length() > 0L
+                if (!gpxReady || !csvReady) {
+                    throw IllegalStateException("Una o entrambe le registrazioni non sono state scritte completamente")
+                }
+                // Only delete checkpoints after both paired files are safely present.
+                gpxRecordingCheckpointFile().delete()
+                File(gpxDirectory(), "gpx_recording_in_progress.tmp").delete()
+                File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
+                File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.tmp").delete()
                 runOnUiThread {
-                    Toast.makeText(this, "Viaggio salvato: GPX + ${if (savedCsv) "CSV GPS" else "GPX (nessun campione CSV)"} • ${points.size} punti.", Toast.LENGTH_LONG).show()
+                    gpxRecordingPoints.clear()
+                    gpsDiagnosticSamples.clear()
+                    lastRecordedGpxPoint = null
+                    if (showResult) Toast.makeText(this, "Viaggio salvato insieme: GPX + CSV GPS • ${points.size} punti • ${samples.size} campioni.", Toast.LENGTH_LONG).show()
                 }
             } catch (error: Exception) {
-                runOnUiThread { Toast.makeText(this, "Salvataggio GPX/CSV fallito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                // Do not remove checkpoints on failure; the user can recover them from the library.
+                runOnUiThread {
+                    if (showResult) Toast.makeText(this, "Salvataggio non completato: i dati parziali sono conservati. ${error.message ?: "Errore di scrittura"}", Toast.LENGTH_LONG).show()
+                }
             }
+        }
+    }
+
+    private fun recoverInterruptedPairedRecording() {
+        val gpxCheckpoint = gpxRecordingCheckpointFile()
+        val csvCheckpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
+        if (!gpxCheckpoint.isFile && !csvCheckpoint.isFile) return
+        val base = "Viaggio_interrotto_${System.currentTimeMillis()}"
+        var recoveredAny = false
+        try {
+            if (gpxCheckpoint.isFile && gpxCheckpoint.length() > 0L) {
+                val target = File(gpxDirectory(), "$base.gpx")
+                if (gpxCheckpoint.renameTo(target)) recoveredAny = true
+                else { gpxCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { gpxCheckpoint.delete(); recoveredAny = true } }
+            }
+        } catch (_: Exception) { /* Keep original checkpoint for another recovery attempt. */ }
+        try {
+            if (csvCheckpoint.isFile && csvCheckpoint.length() > 0L) {
+                val target = File(gpsDiagnosticsDirectory(), "$base.csv")
+                if (csvCheckpoint.renameTo(target)) recoveredAny = true
+                else { csvCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { csvCheckpoint.delete(); recoveredAny = true } }
+            }
+        } catch (_: Exception) { /* Keep original checkpoint for another recovery attempt. */ }
+        if (recoveredAny) {
+            android.util.Log.i("NEXT-NAVI-PRO", "Recovered interrupted GPX/CSV recording as $base")
         }
     }
 
@@ -3405,6 +3486,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onDestroy() {
+        // A normal Activity shutdown finalizes the paired session. If Android kills the process
+        // without this callback, the on-disk checkpoints are recovered on the next launch.
+        if (recordingGpx || gpsDiagnosticRecording) finishGpxRecording(save = true, showResult = false)
         clockHandler.removeCallbacksAndMessages(null)
         ipFallbackHandler.removeCallbacksAndMessages(null)
         setNavigationBrightnessEnabled(false)
