@@ -1495,8 +1495,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val csvBytes = pairedCsvFiles.sumOf { it.length() }
                 val totalMb = totalBytes / (1024.0 * 1024.0)
                 val csvMb = csvBytes / (1024.0 * 1024.0)
-                AlertDialog.Builder(this).setTitle("Libreria GPX • " + tracks.size + " percorsi")
-                    .setMessage(String.format(Locale.getDefault(), "GPX: %.2f MB\nCSV GPS associati: %d file • %.2f MB\nIl CSV viene eliminato insieme al GPX. Seleziona un viaggio per esportare o eliminare entrambi.", totalMb, pairedCsvFiles.size, csvMb))
+                // Android AlertDialog cannot reliably show both setMessage() and setItems()
+                // in the same dialog: on some devices the message replaces the selectable list.
+                // Put the storage summary in the title so every saved GPX remains selectable.
+                val libraryTitle = String.format(
+                    Locale.getDefault(),
+                    "Libreria GPX • %d • %.2f MB | CSV: %d • %.2f MB",
+                    tracks.size, totalMb, pairedCsvFiles.size, csvMb
+                )
+                AlertDialog.Builder(this).setTitle(libraryTitle)
                     .setItems(tracks.map { (_, track) ->
                         track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
                     }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
