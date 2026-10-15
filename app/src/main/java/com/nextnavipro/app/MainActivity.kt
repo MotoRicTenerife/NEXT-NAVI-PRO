@@ -1065,15 +1065,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticsDirectory().listFiles()?.filter { it.isFile && it.extension.equals("csv", true) && it.name != "gps_trace_in_progress.csv" }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
 
-    private fun startGpsDiagnosticRecordingForNavigation() {
-        if (gpsDiagnosticRecording) return
-        gpsDiagnosticSamples.clear()
-        gpsDiagnosticRecording = true
-        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-        saveGpsDiagnosticCheckpoint()
-        Toast.makeText(this, "Diagnostica CSV GPS avviata automaticamente per la navigazione.", Toast.LENGTH_LONG).show()
-    }
-
     private fun stopAndSaveGpsDiagnosticRecording(reason: String) {
         if (!gpsDiagnosticRecording) return
         gpsDiagnosticRecording = false
@@ -1367,19 +1358,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun askToRecordGpx() {
-        // Start CSV GPS diagnostics automatically when a route is calculated. GPX recording
-        // remains separately opt-in, but both consume the same real location fixes.
-        if (!gpsDiagnosticRecording) {
-            gpsDiagnosticSamples.clear()
-            gpsDiagnosticRecording = true
-            lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-            saveGpsDiagnosticCheckpoint()
-            Toast.makeText(this, "Diagnostica CSV GPS avviata per questa navigazione.", Toast.LENGTH_LONG).show()
-        }
         if (recordingGpx) return
         AlertDialog.Builder(this)
             .setTitle("Memorizzare il viaggio?")
-            .setMessage("Vuoi registrare anche il percorso realmente seguito in un file GPX? La diagnostica CSV GPS è già attiva.")
+            .setMessage("Vuoi registrare il viaggio in GPX? Se confermi, verrà registrato anche il CSV GPS associato. Eliminando il GPX, verrà eliminato anche il suo CSV.")
             .setPositiveButton("Sì, registra") { _, _ -> startGpxRecording() }
             .setNegativeButton("No", null)
             .show()
@@ -1389,9 +1371,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpxRecordingPoints.clear()
         lastRecordedGpxPoint = null
         lastGpxPointTimeMs = 0L
+        gpsDiagnosticSamples.clear()
+        gpsDiagnosticRecording = true
+        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
+        saveGpsDiagnosticCheckpoint()
         recordingGpx = true
         currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
-        Toast.makeText(this, "Registrazione GPX avviata.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Registrazione GPX + CSV GPS avviata.", Toast.LENGTH_LONG).show()
     }
 
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
@@ -1419,21 +1405,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val points = gpxRecordingPoints.toList()
         gpxRecordingPoints.clear()
         lastRecordedGpxPoint = null
+        val samples = gpsDiagnosticSamples.toList()
+        gpsDiagnosticRecording = false
+        File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
+        gpsDiagnosticSamples.clear()
         if (!save || points.size < 2) {
-            Toast.makeText(this, "Registrazione GPX terminata: non ci sono abbastanza punti per salvare una traccia.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Registrazione terminata: punti GPX insufficienti. Il CSV associato non è stato conservato.", Toast.LENGTH_LONG).show()
             return
         }
-        thread(name = "save-recorded-gpx") {
+        thread(name = "save-recorded-gpx-csv") {
             try {
                 val label = (destination?.name ?: "Viaggio registrato")
                     .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
-                val file = File(gpxDirectory(), "${System.currentTimeMillis()}_$label.gpx")
-                FileOutputStream(file).use { GpxRouteService.write(it, label, points) }
+                val baseName = "${System.currentTimeMillis()}_$label"
+                val gpxFile = File(gpxDirectory(), "$baseName.gpx")
+                FileOutputStream(gpxFile).use { GpxRouteService.write(it, label, points) }
+                var csvSaved = false
+                if (samples.isNotEmpty()) {
+                    val csvFile = File(gpsDiagnosticsDirectory(), "$baseName.csv")
+                    FileOutputStream(csvFile).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
+                    csvSaved = true
+                }
+                val savedCsv = csvSaved
                 runOnUiThread {
-                    Toast.makeText(this, "Viaggio GPX salvato: $label (${points.size} punti).", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Viaggio salvato: GPX + ${if (savedCsv) "CSV GPS" else "GPX (nessun campione CSV)"} • ${points.size} punti.", Toast.LENGTH_LONG).show()
                 }
             } catch (error: Exception) {
-                runOnUiThread { Toast.makeText(this, "Salvataggio registrazione fallito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                runOnUiThread { Toast.makeText(this, "Salvataggio GPX/CSV fallito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -1513,7 +1511,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Elimina") { _, _ ->
                             val deleted = file.delete()
-                            Toast.makeText(this, if (deleted) "Percorso GPX eliminato." else "Impossibile eliminare il file.", Toast.LENGTH_LONG).show()
+                            val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
+                            val csvDeleted = !pairedCsv.exists() || pairedCsv.delete()
+                            val message = when {
+                                !deleted -> "Impossibile eliminare il GPX."
+                                !csvDeleted -> "GPX eliminato, ma non è stato possibile eliminare il CSV associato."
+                                else -> "GPX e CSV associato eliminati (se presente)."
+                            }
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                         }.show()
                 }
             }.setNegativeButton("Indietro") { _, _ -> showSavedGpxRoutes() }.show()
@@ -1531,7 +1536,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
-        startGpsDiagnosticRecordingForNavigation()
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -1568,7 +1572,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.text = "ANNULLA PERCORSO GPX"
                     }
                     routeResult = result
-                    startGpsDiagnosticRecordingForNavigation()
                     resetRouteProgress()
                     announcedManeuverIndex = -1
                     announcedStage = 0
