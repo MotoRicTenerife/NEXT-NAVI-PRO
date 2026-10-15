@@ -1022,7 +1022,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Diagnostica GPS / esporta traccia", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Debug • CSV GPS: esporta / elimina", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1064,6 +1064,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun savedGpsDiagnosticFiles(): List<File> =
         gpsDiagnosticsDirectory().listFiles()?.filter { it.isFile && it.extension.equals("csv", true) && it.name != "gps_trace_in_progress.csv" }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
+
+    private fun startGpsDiagnosticRecordingForNavigation() {
+        if (gpsDiagnosticRecording) return
+        gpsDiagnosticSamples.clear()
+        gpsDiagnosticRecording = true
+        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
+        saveGpsDiagnosticCheckpoint()
+        Toast.makeText(this, "Diagnostica CSV GPS avviata automaticamente per la navigazione.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun stopAndSaveGpsDiagnosticRecording(reason: String) {
+        if (!gpsDiagnosticRecording) return
+        gpsDiagnosticRecording = false
+        val count = gpsDiagnosticSamples.size
+        val file = saveGpsDiagnosticSession()
+        File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
+        if (file != null) {
+            Toast.makeText(this, "CSV GPS salvato ($count campioni) • $reason", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "CSV GPS non salvato: nessun campione o errore di scrittura.", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun showGpsDiagnosticsMenu() {
         val saved = savedGpsDiagnosticFiles()
@@ -1509,6 +1531,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        startGpsDiagnosticRecordingForNavigation()
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -1545,6 +1568,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.text = "ANNULLA PERCORSO GPX"
                     }
                     routeResult = result
+                    startGpsDiagnosticRecordingForNavigation()
                     resetRouteProgress()
                     announcedManeuverIndex = -1
                     announcedStage = 0
@@ -1907,6 +1931,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    startGpsDiagnosticRecordingForNavigation()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
