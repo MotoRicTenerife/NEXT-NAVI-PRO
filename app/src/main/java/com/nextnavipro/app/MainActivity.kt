@@ -322,6 +322,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara", "kda", "standard-a").any { name.contains(it) }
                         }
                     if (feminineVoice != null) voiceGuide?.voice = feminineVoice
+                    // A calm, slightly slower delivery suits spoken directions better.
+                    voiceGuide?.setSpeechRate(0.96f)
+                    voiceGuide?.setPitch(1.03f)
                     pendingJarvisSpeech?.let { pending ->
                         pendingJarvisSpeech = null
                         speakJarvis(pending)
@@ -1930,7 +1933,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 in 12..17 -> "Buon pomeriggio"
                 else -> "Buonasera"
             }
-            speakJarvis("$greeting $savedName, sono Jarvis. Sono qui per aiutarti. Dimmi dove vuoi andare e ti accompagnerò.")
+            speakJarvis("$greeting $savedName, sono Jarvis. Sono qui per aiutarti. L'armatura è in manutenzione, ma le indicazioni sono pronte. Dimmi dove vuoi andare e ti accompagnerò.")
             return
         }
         val nameInput = EditText(this).apply {
@@ -2099,16 +2102,24 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             JarvisCommand.Help -> speakJarvis(
                 "Posso cercare una destinazione, andare a casa se l'hai salvata, dirti la precisione GPS, " +
-                    "ripetere la prossima manovra o leggere la distanza residua. Per scegliere un risultato, fermati prima."
+                    "ripetere la prossima manovra o leggere la distanza residua. Per scegliere un risultato, fermati prima. " +
+                    "Non serve trasformare ogni rotonda in una scena d'azione."
             )
             JarvisCommand.ShowResults -> showJarvisPendingResults()
             JarvisCommand.Unknown -> askJarvisOnline(transcript)
         }
     }
 
+    private fun isVehicleSafelyStopped(): Boolean {
+        val location = currentLocation ?: return false
+        if (!location.hasSpeed() || !location.hasAccuracy()) return false
+        val ageMs = System.currentTimeMillis() - location.time
+        return ageMs in 0L..5000L && location.accuracy <= 25f && location.speed <= 2.5f
+    }
+
     private fun askJarvisOnline(transcript: String) {
         // Free-form AI is intentionally unavailable while moving or when speed is unknown.
-        val safelyStopped = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
+        val safelyStopped = isVehicleSafelyStopped()
         if (!safelyStopped) {
             speakJarvis("Per le richieste libere, fermati in sicurezza prima. I comandi di navigazione restano disponibili.")
             return
@@ -2300,7 +2311,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                     if (voiceCommand) {
                         pendingJarvisPlaces = sortedResults
-                        val safeToConfirm = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
+                        val safeToConfirm = isVehicleSafelyStopped()
                         if (!safeToConfirm) {
                             routeText.text = "DESTINAZIONE TROVATA • Conferma quando sei fermo"
                             jarvisStatusText.text = "Risultati pronti: dì «mostra risultati» da fermo"
