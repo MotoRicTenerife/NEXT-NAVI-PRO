@@ -29,9 +29,30 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - name: Run offline GPS trace analysis tests
         run: python -m unittest discover -s roadtools -p 'test_*.py'
+      - name: Prepare persistent debug signing (optional)
+        if: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 != '' && secrets.NEXT_NAVI_KEYSTORE_PASSWORD != '' && secrets.NEXT_NAVI_KEY_ALIAS != '' && secrets.NEXT_NAVI_KEY_PASSWORD != '' }}
+        env:
+          NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
+        run: |
+          echo "$NEXT_NAVI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/next-navi-pro.keystore"
+          echo "NEXT_NAVI_KEYSTORE_PATH=$RUNNER_TEMP/next-navi-pro.keystore" >> "$GITHUB_ENV"
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        env:
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon assembleDebug
+          if [ -z "$NEXT_NAVI_KEYSTORE_PATH" ]; then
+            echo "::warning::Stable APK signing is not configured. CI will use a temporary Android debug key."
+          else
+            echo "Stable APK signing is enabled."
+          fi
       - name: Run unit tests
+        env:
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
         run: gradle --no-daemon testDebugUnitTest
       - name: Upload debug APK
         uses: actions/upload-artifact@v5
