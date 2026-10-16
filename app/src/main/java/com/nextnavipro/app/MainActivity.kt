@@ -2914,7 +2914,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
             elapsedRealtimeMs = elapsedMs
         ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
-        val confidenceLimit = minOf(65.0, maxOf(25.0, accuracy * 1.8))
+        val confidenceLimit = minOf(30.0, maxOf(12.0, accuracy * 1.5))
         if (match.distanceMeters <= confidenceLimit) {
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, match.segmentIndex) else match.segmentIndex
             routeProgressInitialized = true
@@ -2936,7 +2936,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val nearestIndex = match.first
         val nearestMeters = match.second
         val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
-        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
+        val confidenceLimit = minOf(30f, maxOf(12f, reportedAccuracy * 1.5f))
         if (nearestMeters > confidenceLimit) {
             routeMetricsText.text = "GPS INSUFFICIENTE • percorso non agganciato"
             return
@@ -2978,7 +2978,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val nearestIndex = match.first
         val nearestMeters = match.second
         val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
-        val confidenceLimit = minOf(65f, maxOf(25f, reportedAccuracy * 1.8f))
+        val confidenceLimit = minOf(30f, maxOf(12f, reportedAccuracy * 1.5f))
         updateRouteMetrics(route, nearestIndex)
         if (nearestMeters > confidenceLimit) {
             if (::routeText.isInitialized && route.maneuvers.isNotEmpty()) {
