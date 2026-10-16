@@ -30,12 +30,19 @@ jobs:
       - name: Run offline GPS trace analysis tests
         run: python -m unittest discover -s roadtools -p 'test_*.py'
       - name: Prepare persistent debug signing (optional)
-        if: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 != '' && secrets.NEXT_NAVI_KEYSTORE_PASSWORD != '' && secrets.NEXT_NAVI_KEY_ALIAS != '' && secrets.NEXT_NAVI_KEY_PASSWORD != '' }}
         env:
           NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
         run: |
-          echo "$NEXT_NAVI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/next-navi-pro.keystore"
-          echo "NEXT_NAVI_KEYSTORE_PATH=$RUNNER_TEMP/next-navi-pro.keystore" >> "$GITHUB_ENV"
+          if [ -n "$NEXT_NAVI_KEYSTORE_BASE64" ] && [ -n "$NEXT_NAVI_KEYSTORE_PASSWORD" ] && [ -n "$NEXT_NAVI_KEY_ALIAS" ] && [ -n "$NEXT_NAVI_KEY_PASSWORD" ]; then
+            echo "$NEXT_NAVI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/next-navi-pro.keystore"
+            echo "NEXT_NAVI_KEYSTORE_PATH=$RUNNER_TEMP/next-navi-pro.keystore" >> "$GITHUB_ENV"
+            echo "Persistent APK signing configured."
+          else
+            echo "::warning::Persistent APK signing secrets are not configured yet."
+          fi
       - name: Build debug APK
         env:
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
