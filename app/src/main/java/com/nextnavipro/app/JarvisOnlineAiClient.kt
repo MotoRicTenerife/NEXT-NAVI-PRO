@@ -1,0 +1,69 @@
+package com.nextnavipro.app
+
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+
+/**
+ * Optional online conversational layer. The app calls only a configured HTTPS backend;
+ * provider credentials must remain on that server, never in the APK.
+ *
+ * Backend contract:
+ * POST {"message":"...","language":"it-IT","app":"NEXT NAVI PRO"}
+ * 200 {"reply":"..."}
+ */
+object JarvisOnlineAiClient {
+    private const val CONNECT_TIMEOUT_MS = 4000
+    private const val READ_TIMEOUT_MS = 7000
+    private const val MAX_REPLY_CHARS = 800
+
+    private val endpoint: String
+        get() = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+
+    fun isConfigured(): Boolean =
+        endpoint.startsWith("https://", ignoreCase = true)
+
+    fun ask(message: String, callback: (Result<String>) -> Unit) {
+        val target = endpoint
+        if (!target.startsWith("https://", ignoreCase = true)) {
+            callback(Result.failure(IllegalStateException("AI online non configurata")))
+            return
+        }
+        val cleanMessage = message.trim().take(500)
+        if (cleanMessage.isBlank()) {
+            callback(Result.failure(IllegalArgumentException("Richiesta vuota")))
+            return
+        }
+
+        thread(name = "jarvis-online-ai") {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL(target).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = READ_TIMEOUT_MS
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                }
+                val payload = JSONObject()
+                    .put("message", cleanMessage)
+                    .put("language", "it-IT")
+                    .put("app", "NEXT NAVI PRO")
+                    .toString()
+                connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val status = connection.responseCode
+                if (status !in 200..299) throw IllegalStateException("Servizio AI HTTP $status")
+                val response = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText().take(16_384) }
+                val reply = JSONObject(response).optString("reply").trim().take(MAX_REPLY_CHARS)
+                if (reply.isBlank()) throw IllegalStateException("Risposta AI vuota")
+                callback(Result.success(reply))
+            } catch (error: Exception) {
+                callback(Result.failure(error))
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+}
