@@ -2110,6 +2110,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showJarvisPendingResults() {
+        // Never open a choice dialog while moving, or when the app cannot confirm a safe stop.
+        val safelyStopped = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
+        if (!safelyStopped) {
+            speakJarvis("Ti mostro i risultati quando il GPS conferma che sei fermo. Prima la sicurezza.")
+            return
+        }
         val results = pendingJarvisPlaces
         if (results.isEmpty()) {
             speakJarvis("Non ci sono risultati in attesa. Dimmi, per esempio, portami a Santa Cruz.")
