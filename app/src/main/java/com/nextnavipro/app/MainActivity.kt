@@ -1401,9 +1401,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
         if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 25f) return
-        val point = NavPoint(location.latitude, location.longitude)
-        val previous = lastRecordedGpxPoint
         val now = System.currentTimeMillis()
+        val point = NavPoint(
+            location.latitude,
+            location.longitude,
+            location.time.takeIf { it > 0L } ?: now
+        )
+        val previous = lastRecordedGpxPoint
         if (!force && previous != null) {
             val distance = GpxRouteService.distanceMeters(previous, point)
             if (distance < 5.0 && now - lastGpxPointTimeMs < 5000L) return
@@ -1686,6 +1690,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun calculateGpxGuidedRoute(track: GpxTrack) {
+        if (track.hasDiscontinuities) {
+            val message = "La traccia contiene segmenti separati o un salto GPS importante. Non creo un percorso unico per evitare collegamenti e svolte inventati. Puoi comunque esportare il GPX originale."
+            if (::routeText.isInitialized) routeText.text = "GPX DISCONTINUO • guida non avviata"
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            return
+        }
         if (isCalculatingRoute) return
         isCalculatingRoute = true
         if (::routeButton.isInitialized) routeButton.isEnabled = false
