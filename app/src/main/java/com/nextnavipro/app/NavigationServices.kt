@@ -10,7 +10,7 @@ import java.net.URL
 import java.net.URLEncoder
 import kotlin.math.roundToInt
 
-data class NavPoint(val latitude: Double, val longitude: Double)
+data class NavPoint(val latitude: Double, val longitude: Double, val timestampEpochMs: Long? = null)
 data class PlaceResult(val name: String, val point: NavPoint, val description: String)
 data class RouteManeuver(
     val pointIndex: Int,
