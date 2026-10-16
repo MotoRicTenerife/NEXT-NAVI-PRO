@@ -2102,10 +2102,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     "ripetere la prossima manovra o leggere la distanza residua. Per scegliere un risultato, fermati prima."
             )
             JarvisCommand.ShowResults -> showJarvisPendingResults()
-            JarvisCommand.Unknown -> speakJarvis(
-                "Per ora posso aiutarti con i comandi di navigazione offline. " +
-                    "L'assistente AI online verrà attivato quando sarà configurato un servizio sicuro; non invierò dati a servizi non configurati."
-            )
+            JarvisCommand.Unknown -> askJarvisOnline(transcript)
+        }
+    }
+
+    private fun askJarvisOnline(transcript: String) {
+        // Free-form AI is intentionally unavailable while moving or when speed is unknown.
+        val safelyStopped = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
+        if (!safelyStopped) {
+            speakJarvis("Per le richieste libere, fermati in sicurezza prima. I comandi di navigazione restano disponibili.")
+            return
+        }
+        if (!JarvisOnlineAiClient.isConfigured()) {
+            speakJarvis("L'assistente AI online non è ancora configurato. I comandi offline restano disponibili; non invio dati a servizi non impostati.")
+            return
+        }
+        jarvisStatusText.text = "Jarvis AI • elaborazione online…"
+        JarvisOnlineAiClient.ask(transcript) { result ->
+            runOnUiThread {
+                result.onSuccess { reply ->
+                    jarvisStatusText.text = "Jarvis AI • risposta ricevuta"
+                    // Online text is conversational only: it cannot change route, speed limit or GPS state.
+                    speakJarvis(reply)
+                }.onFailure {
+                    jarvisStatusText.text = "AI online non disponibile • modalità offline attiva"
+                    speakJarvis("Non riesco a raggiungere l'assistente online. I comandi offline sono ancora disponibili.")
+                }
+            }
         }
     }
 
