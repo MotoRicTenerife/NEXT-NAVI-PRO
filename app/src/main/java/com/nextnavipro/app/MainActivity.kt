@@ -1392,6 +1392,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticSamples.clear()
         gpsDiagnosticRecording = true
         recordingGpx = true
+        try {
+            startForegroundService(
+                Intent(this, GpsRecordingForegroundService::class.java)
+                    .setAction(GpsRecordingForegroundService.ACTION_START)
+            )
+        } catch (_: Exception) {
+            Toast.makeText(this, "Servizio in background non disponibile: tieni NEXT NAVI PRO in primo piano durante la registrazione.", Toast.LENGTH_LONG).show()
+        }
         lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
         currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
         saveGpsDiagnosticCheckpoint()
@@ -1451,6 +1459,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
         gpsDiagnosticRecording = false
+        stopService(Intent(this, GpsRecordingForegroundService::class.java))
         if (!save) {
             // Never silently discard an interrupted/short session: leave checkpoints for recovery.
             if (showResult) Toast.makeText(this, "Registrazione fermata. I dati parziali sono conservati per il recupero.", Toast.LENGTH_LONG).show()
@@ -3467,15 +3476,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
         activityResumed = false
-        unregisterGnssDiagnostics()
-        fusedLocationCallback?.let { callback ->
-            try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
+        // While the explicit GPX+CSV recording service is active, keep location callbacks
+        // registered even if the dashboard loses focus. Otherwise onPause creates long holes
+        // in the trip trace whenever another app or system surface briefly takes over.
+        if (!recordingGpx) {
+            unregisterGnssDiagnostics()
+            fusedLocationCallback?.let { callback ->
+                try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
+            }
+            if (usingLocationManagerFallback) {
+                try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+                usingLocationManagerFallback = false
+            }
+            gpsUpdatesRequested = false
         }
-        if (usingLocationManagerFallback) {
-            try { locationManager.removeUpdates(this) } catch (_: Exception) { }
-            usingLocationManagerFallback = false
-        }
-        gpsUpdatesRequested = false
         mapView?.onPause()
         sensorManager?.unregisterListener(this)
         super.onPause()
