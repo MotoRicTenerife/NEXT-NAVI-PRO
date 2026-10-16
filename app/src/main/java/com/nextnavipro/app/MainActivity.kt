@@ -319,7 +319,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         ?.filter { it.locale.language.equals("it", ignoreCase = true) }
                         ?.firstOrNull { voice ->
                             val name = voice.name.lowercase(Locale.ROOT)
-                            listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara").any(name::contains)
+                            listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara", "kda", "standard-a").any { name.contains(it) }
                         }
                     if (feminineVoice != null) voiceGuide?.voice = feminineVoice
                     pendingJarvisSpeech?.let { pending ->
