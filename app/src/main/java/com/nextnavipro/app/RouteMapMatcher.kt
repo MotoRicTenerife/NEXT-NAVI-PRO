@@ -132,7 +132,7 @@ internal class RouteProgressTracker {
         val heading = bearingDegrees?.takeIf { it.isFinite() && (speedMetersPerSecond ?: 0.0) >= 3.0 }
         val candidates = RouteMapMatcher.candidates(points, latitude, longitude, start, end, heading)
         if (candidates.isEmpty()) return null
-        val maximumSnapDistance = minOf(65.0, maxOf(25.0, accuracyMeters * 1.8))
+        val maximumSnapDistance = minOf(30.0, maxOf(12.0, accuracyMeters * 1.5))
         val observedDistance = if (previousAlong != null && lastLatitude.isFinite() && lastLongitude.isFinite())
             GpxRouteService.distanceMeters(NavPoint(lastLatitude, lastLongitude), NavPoint(latitude, longitude)) else 0.0
         val emissionSigma = maxOf(5.0, accuracyMeters)
