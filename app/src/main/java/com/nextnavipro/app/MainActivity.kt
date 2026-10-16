@@ -38,6 +38,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.speech.tts.TextToSpeech
+import android.speech.RecognizerIntent
+import android.speech.RecognitionListener
+import android.speech.SpeechRecognizer
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -85,6 +88,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val PREF_THEME_MODE = "theme_mode"
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
+        private const val PERMISSION_AUDIO = 101
         private const val REQUEST_IMPORT_GPX = 2001
         private const val REQUEST_EXPORT_GPX = 2002
         private const val REQUEST_EXPORT_GPS_TRACE = 2003
@@ -161,6 +165,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRouteProgressIndex = 0
     private var voiceGuide: TextToSpeech? = null
     private var voiceGuideReady = false
+    private var speechRecognizer: SpeechRecognizer? = null
+    private lateinit var jarvisButton: Button
+    private lateinit var jarvisStatusText: TextView
+    private var jarvisListening = false
+    private var pendingJarvisSpeech: String? = null
+    private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
@@ -300,8 +310,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         voiceGuide = TextToSpeech(this) { status ->
-            voiceGuideReady = status == TextToSpeech.SUCCESS &&
-                (voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
+            if (status == TextToSpeech.SUCCESS) {
+                val languageStatus = voiceGuide?.setLanguage(Locale("it", "IT")) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
+                if (voiceGuideReady) {
+                    // Android exposes no portable voice-gender flag. Prefer known feminine Italian voices when available.
+                    val feminineVoice = voiceGuide?.voices
+                        ?.filter { it.locale.language.equals("it", ignoreCase = true) }
+                        ?.firstOrNull { voice ->
+                            val name = voice.name.lowercase(Locale.ROOT)
+                            listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara").any(name::contains)
+                        }
+                    if (feminineVoice != null) voiceGuide?.voice = feminineVoice
+                    pendingJarvisSpeech?.let { pending ->
+                        pendingJarvisSpeech = null
+                        speakJarvis(pending)
+                    }
+                }
+            } else {
+                voiceGuideReady = false
+            }
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
         motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
@@ -359,6 +387,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         splashHandler.removeCallbacksAndMessages(null)
         buildDashboard(null)
         requestGps()
+        initializeJarvis()
         // IP geolocation is deliberately delayed: GNSS/network location always wins.
         ipFallbackHandler.postDelayed({
             if (dashboardStarted && currentLocation == null) requestIpLocationFallback()
@@ -407,6 +436,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setMargins(dp(4), 0, 0, 0)
         })
         root.addView(searchRow, params(-1, dp(50)))
+
+        // Explicit push-to-talk only: no wake word and no background microphone.
+        val jarvisRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        jarvisButton = makeButton("🎙 JARVIS") { onJarvisButtonPressed() }
+        jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp(116), dp(38)).apply {
+            setMargins(dp(2), 0, dp(8), 0)
+        })
+        jarvisStatusText = TextView(this).apply {
+            text = "Premi il microfono e parla"
+            textSize = 11f
+            gravity = Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(if (negativeTheme) cyan else Color.rgb(0, 85, 105))
+        }
+        jarvisRow.addView(jarvisStatusText, LinearLayout.LayoutParams(0, dp(38), 1f))
+        root.addView(jarvisRow, params(-1, dp(40)))
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1870,6 +1919,211 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton("Annulla", null).show()
     }
 
+    private fun initializeJarvis() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val savedName = prefs.getString("jarvis_user_name", "").orEmpty().trim()
+        if (savedName.isNotEmpty()) {
+            jarvisStatusText.text = "Jarvis pronto • premi per parlare"
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val greeting = when (hour) {
+                in 5..11 -> "Buongiorno"
+                in 12..17 -> "Buon pomeriggio"
+                else -> "Buonasera"
+            }
+            speakJarvis("$greeting $savedName, sono Jarvis. Sono qui per aiutarti. Dimmi dove vuoi andare e ti accompagnerò.")
+            return
+        }
+        val nameInput = EditText(this).apply {
+            hint = "Il tuo nome"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Configura Jarvis")
+            .setMessage("Come vuoi che ti chiami? Il nome viene salvato solo su questo dispositivo.")
+            .setView(nameInput)
+            .setPositiveButton("Salva") { _, _ ->
+                val name = nameInput.text.toString().trim().take(40)
+                if (name.isBlank()) {
+                    jarvisStatusText.text = "Nome non impostato • Jarvis pronto"
+                    speakJarvis("Va bene. Puoi impostare il tuo nome dal menu quando vuoi.")
+                } else {
+                    prefs.edit().putString("jarvis_user_name", name).apply()
+                    initializeJarvis()
+                }
+            }
+            .setNegativeButton("Più tardi") { _, _ ->
+                jarvisStatusText.text = "Jarvis pronto • premi per parlare"
+            }
+            .show()
+    }
+
+    private fun speakJarvis(message: String) {
+        if (!voiceGuideReady) {
+            pendingJarvisSpeech = message
+            return
+        }
+        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+    }
+
+    private fun onJarvisButtonPressed() {
+        if (jarvisListening) {
+            speechRecognizer?.cancel()
+            jarvisListening = false
+            jarvisButton.text = "🎙 JARVIS"
+            jarvisStatusText.text = "Ascolto annullato"
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), PERMISSION_AUDIO)
+            return
+        }
+        startJarvisListening()
+    }
+
+    private fun startJarvisListening() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            jarvisStatusText.text = "Riconoscimento vocale non disponibile"
+            speakJarvis("Il riconoscimento vocale non è disponibile su questo dispositivo.")
+            return
+        }
+        if (speechRecognizer == null) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Ti ascolto…" }
+                    }
+                    override fun onBeginningOfSpeech() {
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Sto ascoltando…" }
+                    }
+                    override fun onRmsChanged(rmsdB: Float) = Unit
+                    override fun onBufferReceived(buffer: ByteArray?) = Unit
+                    override fun onEndOfSpeech() {
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Elaboro…" }
+                    }
+                    override fun onError(error: Int) {
+                        runOnUiThread {
+                            jarvisListening = false
+                            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+                            if (::jarvisStatusText.isInitialized) {
+                                jarvisStatusText.text = when (error) {
+                                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Non ho capito • riprova"
+                                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Permesso microfono mancante"
+                                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Rete non disponibile • riprova"
+                                    else -> "Ascolto terminato • riprova"
+                                }
+                            }
+                        }
+                    }
+                    override fun onResults(results: Bundle?) {
+                        runOnUiThread {
+                            jarvisListening = false
+                            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+                            val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                ?.firstOrNull().orEmpty().trim()
+                            if (transcript.isBlank()) {
+                                jarvisStatusText.text = "Non ho ricevuto parole • riprova"
+                            } else {
+                                jarvisStatusText.text = "Hai detto: $transcript"
+                                handleJarvisCommand(transcript)
+                            }
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) = Unit
+                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+                })
+            }
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Parla con Jarvis")
+        }
+        try {
+            jarvisListening = true
+            jarvisButton.text = "■ STOP"
+            jarvisStatusText.text = "Avvio microfono…"
+            speechRecognizer?.startListening(intent)
+        } catch (_: Exception) {
+            jarvisListening = false
+            jarvisButton.text = "🎙 JARVIS"
+            jarvisStatusText.text = "Impossibile avviare il microfono"
+            speakJarvis("Non riesco ad avviare il microfono. Puoi riprovare.")
+        }
+    }
+
+    private fun handleJarvisCommand(transcript: String) {
+        when (val command = JarvisCommandParser.parse(transcript)) {
+            is JarvisCommand.Navigate -> {
+                if (command.destination.equals("casa", ignoreCase = true)) {
+                    if (getSharedPreferences(PREFS, MODE_PRIVATE).getString("home_name", null).isNullOrBlank()) {
+                        speakJarvis("Non hai ancora salvato un indirizzo di casa. Impostalo dal pulsante Casa quando sei fermo.")
+                    } else {
+                        speakJarvis("Calcolo il percorso verso casa. Controlla le indicazioni prima di partire.")
+                        navigateHome()
+                    }
+                } else {
+                    destinationInput.setText(command.destination)
+                    searchDestination(voiceCommand = true)
+                }
+            }
+            JarvisCommand.WhereAmI -> {
+                val location = currentLocation
+                if (location == null || !location.hasAccuracy()) {
+                    speakJarvis("Sto ancora cercando una posizione GPS affidabile. Non voglio inventare dove ti trovi.")
+                } else {
+                    val accuracy = location.accuracy.roundToInt().coerceAtLeast(0)
+                    speakJarvis("Il GPS è agganciato. Precisione dichiarata circa $accuracy metri.")
+                }
+            }
+            JarvisCommand.Remaining -> {
+                if (routeResult == null) {
+                    speakJarvis("Non c'è un percorso attivo. Dimmi una destinazione, oppure cercala sullo schermo.")
+                } else {
+                    speakJarvis("Dati del percorso: " + routeMetricsText.text.toString().replace("•", ",") +
+                        ". Prossima indicazione: " + routeText.text.toString().replace("\n", ", "))
+                }
+            }
+            JarvisCommand.Repeat -> {
+                if (routeResult == null) speakJarvis("Non c'è un'indicazione attiva da ripetere.")
+                else speakJarvis(routeText.text.toString().replace("\n", ", "))
+            }
+            JarvisCommand.Silence -> {
+                pendingJarvisSpeech = null
+                voiceGuide?.stop()
+                jarvisStatusText.text = "Va bene. Voce in pausa."
+            }
+            JarvisCommand.Help -> speakJarvis(
+                "Posso cercare una destinazione, andare a casa se l'hai salvata, dirti la precisione GPS, " +
+                    "ripetere la prossima manovra o leggere la distanza residua. Per scegliere un risultato, fermati prima."
+            )
+            JarvisCommand.ShowResults -> showJarvisPendingResults()
+            JarvisCommand.Unknown -> speakJarvis(
+                "Per ora posso aiutarti con i comandi di navigazione offline. " +
+                    "L'assistente AI online verrà attivato quando sarà configurato un servizio sicuro; non invierò dati a servizi non configurati."
+            )
+        }
+    }
+
+    private fun showJarvisPendingResults() {
+        val results = pendingJarvisPlaces
+        if (results.isEmpty()) {
+            speakJarvis("Non ci sono risultati in attesa. Dimmi, per esempio, portami a Santa Cruz.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Scegli destinazione • " + results.size + " risultati")
+            .setItems(results.map { it.name }.toTypedArray()) { _, which ->
+                results.getOrNull(which)?.let { selectJarvisOrSearchDestination(it) }
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
     private fun testNavigationVoice() {
         if (!voiceGuideReady) {
             Toast.makeText(this, "Voce non pronta o lingua TTS non disponibile.", Toast.LENGTH_LONG).show()
@@ -1984,7 +2238,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         calculateSelectedRoute()
     }
 
-    private fun searchDestination() {
+    private fun searchDestination(voiceCommand: Boolean = false) {
         val query = destinationInput.text.toString().trim()
         (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(destinationInput.windowToken, 0)
         destinationInput.clearFocus()
@@ -2012,7 +2266,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     searchButton.isEnabled = true
                     if (sortedResults.isEmpty()) {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
+                        if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con il nome della località o della strada.")
                         return@runOnUiThread
+                    }
+                    if (voiceCommand) {
+                        pendingJarvisPlaces = sortedResults
+                        val safeToConfirm = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
+                        if (!safeToConfirm) {
+                            routeText.text = "DESTINAZIONE TROVATA • Conferma quando sei fermo"
+                            jarvisStatusText.text = "Risultati pronti: dì «mostra risultati» da fermo"
+                            speakJarvis("Ho trovato " + sortedResults.size + " risultati. Per sicurezza, fermati e poi dimmi «mostra risultati» per scegliere la destinazione.")
+                            return@runOnUiThread
+                        }
                     }
                     rememberSearch(query)
                     val labels = sortedResults.map { place ->
@@ -2030,18 +2295,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     AlertDialog.Builder(this)
                         .setTitle("Scegli destinazione")
                         .setItems(labels) { _, which ->
-                            destination = sortedResults[which]
-                            routeResult = null
-                            resetRouteProgress()
-                            routeMetricsText.text = "— km  •  ARRIVO —"
-                            val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
-                            routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
-                            destinationInput.setText(sortedResults[which].name)
-                            routeText.text = "DESTINAZIONE: " + sortedResults[which].name + "\nPremi AVVIA PERCORSO"
-                            routeButton.text = "AVVIA PERCORSO"
-                            map?.animateCamera(CameraUpdateFactory.newLatLngZoom(
-                                LatLng(sortedResults[which].point.latitude, sortedResults[which].point.longitude), 14.0
-                            ), 700)
+                            selectJarvisOrSearchDestination(sortedResults[which])
                         }
                         .setNegativeButton("Annulla", null)
                         .show()
@@ -2051,9 +2305,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isSearching = false
                     searchButton.isEnabled = true
                     routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
+                    if (voiceCommand) speakJarvis("La ricerca online non è disponibile in questo momento.")
                 }
             }
         }
+    }
+
+    private fun selectJarvisOrSearchDestination(place: PlaceResult) {
+        destination = place
+        pendingJarvisPlaces = emptyList()
+        routeResult = null
+        resetRouteProgress()
+        routeMetricsText.text = "— km  •  ARRIVO —"
+        val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
+        routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
+        destinationInput.setText(place.name)
+        routeText.text = "DESTINAZIONE: " + place.name + "\nPremi AVVIA PERCORSO"
+        routeButton.text = "AVVIA PERCORSO"
+        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
+        speakJarvis("Destinazione selezionata: " + place.name + ". Controlla il percorso prima di partire.")
     }
 
     private fun calculateSelectedRoute() {
@@ -3454,6 +3724,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 gpsText.text = "PERMESSO GPS NEGATO"
                 Toast.makeText(this, "Concedi la localizzazione per usare GPS e navigazione.", Toast.LENGTH_LONG).show()
             }
+        } else if (requestCode == PERMISSION_AUDIO) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startJarvisListening()
+            else {
+                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Microfono non autorizzato"
+                Toast.makeText(this, "Consenti il microfono per usare Jarvis. Nessun ascolto in background.", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -3473,6 +3749,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onPause() {
+        // Stop user-started speech recognition when the app loses foreground focus.
+        if (jarvisListening) {
+            try { speechRecognizer?.cancel() } catch (_: Exception) { }
+            jarvisListening = false
+            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Premi il microfono e parla"
+        }
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
         activityResumed = false
@@ -3523,6 +3806,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         splashHandler.removeCallbacksAndMessages(null)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
         speedAlertHandler.removeCallbacksAndMessages(null)
+        speechRecognizer?.cancel()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        jarvisListening = false
         speedAlertActive = false
         speedAlertFlashRed = false
         gpsMarkerAnimator?.cancel()
