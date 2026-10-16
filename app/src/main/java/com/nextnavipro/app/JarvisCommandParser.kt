@@ -27,7 +27,7 @@ object JarvisCommandParser {
         if (matchesAny(normalized, "silenzio", "zitto", "basta parlare", "ferma la voce", "smetti di parlare", "stop voce")) {
             return JarvisCommand.Silence
         }
-        if (matchesAny(normalized, "ripeti", "ripeti istruzione", "ripeti indicazione", "cosa devo fare")) {
+        if (matchesAny(normalized, "ripeti", "ripeti istruzione", "ripeti indicazione", "ripeti l indicazione", "ripeti l istruzione", "cosa devo fare")) {
             return JarvisCommand.Repeat
         }
         if (matchesAny(normalized, "dove sono", "la mia posizione", "posizione attuale", "come mi trovo")) {
