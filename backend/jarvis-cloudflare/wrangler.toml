@@ -1,4 +1,4 @@
-name = "next-navi-pro-jarvis"
+name = "next-navi-pro"
 main = "src/index.js"
 compatibility_date = "2026-10-17"
 workers_dev = true
