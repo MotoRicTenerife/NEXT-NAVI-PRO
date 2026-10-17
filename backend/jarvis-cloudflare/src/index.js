@@ -1,3 +1,7 @@
+const ipWindows = new Map();
+const WINDOW_MS = 10 * 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 10;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -15,6 +19,23 @@ export default {
     if (url.pathname !== "/jarvis") return respond({ error: "Not found" }, 404);
     if (request.method !== "POST") return respond({ error: "Method not allowed" }, 405);
     if (!env.GEMINI_API_KEY) return respond({ error: "Provider not configured" }, 503);
+
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    const now = Date.now();
+    let window = ipWindows.get(ip);
+    if (!window || now - window.startedAt >= WINDOW_MS) {
+      window = { startedAt: now, count: 0 };
+      ipWindows.set(ip, window);
+    }
+    if (window.count >= MAX_REQUESTS_PER_WINDOW) {
+      return respond({ error: "Too many requests; try again later" }, 429);
+    }
+    window.count += 1;
+    if (ipWindows.size > 5000) {
+      for (const [key, value] of ipWindows) {
+        if (now - value.startedAt >= WINDOW_MS) ipWindows.delete(key);
+      }
+    }
 
     let input;
     try { input = await request.json(); }
