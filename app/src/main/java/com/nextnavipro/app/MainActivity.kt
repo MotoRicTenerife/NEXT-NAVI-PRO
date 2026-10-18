@@ -169,6 +169,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
     private var jarvisListening = false
+    // Temporary, explicit user confirmation is used only when GPS cannot prove a safe stop.
+    private var jarvisStationaryConfirmationUntilMs = 0L
     private var pendingJarvisSpeech: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var announcedManeuverIndex = -1
@@ -2113,15 +2115,50 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun isVehicleSafelyStopped(): Boolean {
         val location = currentLocation ?: return false
         if (!location.hasSpeed() || !location.hasAccuracy()) return false
-        val ageMs = System.currentTimeMillis() - location.time
+        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
         return ageMs in 0L..5000L && location.accuracy <= 25f && location.speed <= 2.5f
     }
 
+    private fun isVehicleClearlyMoving(): Boolean {
+        val location = currentLocation ?: return false
+        if (!location.hasSpeed() || !location.hasAccuracy()) return false
+        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
+        // Only a recent, reasonably accurate fix can positively establish movement.
+        return ageMs in 0L..5000L && location.accuracy <= 50f && location.speed > 2.5f
+    }
+
     private fun askJarvisOnline(transcript: String) {
-        // Free-form AI is intentionally unavailable while moving or when speed is unknown.
-        val safelyStopped = isVehicleSafelyStopped()
-        if (!safelyStopped) {
-            speakJarvis("Per le richieste libere, fermati in sicurezza prima. I comandi di navigazione restano disponibili.")
+        // A reliable fresh fix showing movement always wins over a prior confirmation.
+        if (isVehicleClearlyMoving()) {
+            jarvisStationaryConfirmationUntilMs = 0L
+            speakJarvis("Ti rispondo alle richieste libere quando sei fermo in sicurezza. I comandi di navigazione restano disponibili.")
+            return
+        }
+        val confirmedUntil = jarvisStationaryConfirmationUntilMs
+        if (!isVehicleSafelyStopped() && System.currentTimeMillis() > confirmedUntil) {
+            AlertDialog.Builder(this)
+                .setTitle("Jarvis • verifica sicurezza")
+                .setMessage("Il GPS non riesce a confermare con sufficiente affidabilità che il veicolo sia fermo. Se sei a casa o parcheggiato in un luogo sicuro, confermalo qui; non farlo mentre guidi.")
+                .setPositiveButton("Sono fermo in sicurezza") { _, _ ->
+                    // Short-lived and in-memory only; a fresh GPS fix showing movement still blocks AI.
+                    jarvisStationaryConfirmationUntilMs = System.currentTimeMillis() + 10 * 60 * 1000L
+                    askJarvisOnline(transcript)
+                }
+                .setNegativeButton("Annulla") { _, _ ->
+                    speakJarvis("Va bene, rimango in modalità sicura. I comandi di navigazione restano disponibili.")
+                }
+                .setOnCancelListener {
+                    jarvisStatusText.text = "Jarvis • richiesta annullata"
+                }
+                .show()
             return
         }
         if (!JarvisOnlineAiClient.isConfigured()) {
