@@ -18,7 +18,10 @@ export default {
     }
     if (url.pathname !== "/jarvis") return respond({ error: "Not found" }, 404);
     if (request.method !== "POST") return respond({ error: "Method not allowed" }, 405);
-    if (!env.GEMINI_API_KEY) return respond({ error: "Provider not configured" }, 503);
+    if (!env.GEMINI_API_KEY) {
+      console.error("Jarvis configuration error: GEMINI_API_KEY is missing");
+      return respond({ error: "Provider not configured" }, 503);
+    }
 
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
     const now = Date.now();
@@ -28,6 +31,7 @@ export default {
       ipWindows.set(ip, window);
     }
     if (window.count >= MAX_REQUESTS_PER_WINDOW) {
+      console.warn("Jarvis rate limit reached");
       return respond({ error: "Too many requests; try again later" }, 429);
     }
     window.count += 1;
@@ -39,11 +43,17 @@ export default {
 
     let input;
     try { input = await request.json(); }
-    catch { return respond({ error: "Invalid JSON" }, 400); }
+    catch {
+      console.warn("Jarvis request rejected: invalid JSON");
+      return respond({ error: "Invalid JSON" }, 400);
+    }
 
     const message = typeof input?.message === "string" ? input.message.trim().slice(0, 500) : "";
     const language = typeof input?.language === "string" ? input.language.slice(0, 20) : "it-IT";
-    if (!message) return respond({ error: "Message is required" }, 400);
+    if (!message) {
+      console.warn("Jarvis request rejected: missing message");
+      return respond({ error: "Message is required" }, 400);
+    }
 
     const instructions = "You are Jarvis, a concise spoken conversational assistant for NEXT NAVI PRO. Reply in " + language + ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. If you cannot verify a live fact, say so. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data.";
 
@@ -62,18 +72,42 @@ export default {
           generationConfig: { temperature: 0.4, maxOutputTokens: 300 }
         })
       });
-    } catch {
+    } catch (error) {
+      console.error("Jarvis provider network failure", {
+        errorType: error instanceof Error ? error.name : "UnknownError",
+        model
+      });
       return respond({ error: "AI provider unreachable" }, 502);
     }
     if (!response.ok) {
-      return respond({ error: response.status === 429 ? "Free-tier limit reached" : "AI provider request failed" }, response.status === 429 ? 429 : 502);
+      // Log only status/model; never log the API key, prompt, or provider response body.
+      console.error("Jarvis provider returned HTTP error", {
+        status: response.status,
+        model
+      });
+      return respond({
+        error: response.status === 429
+          ? "Free-tier limit reached"
+          : response.status === 400
+            ? "AI provider rejected the request"
+            : response.status === 401 || response.status === 403
+              ? "AI provider authentication or permission error"
+              : "AI provider request failed",
+        providerStatus: response.status
+      }, response.status === 429 ? 429 : 502);
     }
     let data;
     try { data = await response.json(); }
-    catch { return respond({ error: "Invalid provider response" }, 502); }
+    catch {
+      console.error("Jarvis provider returned invalid JSON", { model });
+      return respond({ error: "Invalid provider response" }, 502);
+    }
     const reply = data?.candidates?.[0]?.content?.parts
       ?.map(part => typeof part.text === "string" ? part.text : "").join("\n").trim().slice(0, 800);
-    if (!reply) return respond({ error: "AI returned no text" }, 502);
+    if (!reply) {
+      console.error("Jarvis provider response contained no text", { model });
+      return respond({ error: "AI returned no text" }, 502);
+    }
     return respond({ reply });
   }
 };
