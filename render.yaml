@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: next-navi-pro-jarvis
+    runtime: node
+    plan: free
+    rootDir: backend/jarvis-render
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: MAX_REQUEST_CHARS
+        value: "500"
