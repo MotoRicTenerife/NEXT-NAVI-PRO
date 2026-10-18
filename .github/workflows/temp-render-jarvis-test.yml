@@ -1,0 +1,28 @@
+name: Temporary Render Jarvis connectivity test
+
+on:
+  push:
+    branches:
+      - fix/jarvis-render-backend
+
+permissions:
+  contents: read
+
+jobs:
+  test-render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test health endpoint
+        run: |
+          set -eu
+          echo "=== HEALTH ==="
+          curl --fail-with-body --silent --show-error --max-time 30 -i https://next-navi-pro-jarvis.onrender.com/health
+      - name: Test Jarvis POST without exposing secrets
+        run: |
+          set -eu
+          code="$(curl --silent --show-error --max-time 60 -o /tmp/jarvis-response.json -w '%{http_code}' -X POST 'https://next-navi-pro-jarvis.onrender.com/jarvis' -H 'Content-Type: application/json' -d '{"message":"Rispondi solo: Jarvis online","language":"it-IT","app":"NEXT NAVI PRO"}')"
+          echo "HTTP_STATUS=$code"
+          cat /tmp/jarvis-response.json
+          echo
+          test "$code" = "200"
+          grep -q '"reply"' /tmp/jarvis-response.json
