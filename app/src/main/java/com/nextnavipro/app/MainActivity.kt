@@ -2172,9 +2172,31 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     jarvisStatusText.text = "Jarvis AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
                     speakJarvis(reply)
-                }.onFailure {
-                    jarvisStatusText.text = "AI online non disponibile • modalità offline attiva"
-                    speakJarvis("Non riesco a raggiungere l'assistente online. I comandi offline sono ancora disponibili.")
+                }.onFailure { error ->
+                    val detail = error.message.orEmpty()
+                    jarvisStatusText.text = "Jarvis AI • errore: " + detail.take(90)
+                    val spoken = when {
+                        detail.contains("HTTP_503") ->
+                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il secret Gemini nel Worker Cloudflare."
+                        detail.contains("provider HTTP 401") || detail.contains("provider HTTP 403") ->
+                            "Il server Jarvis raggiunge Google, ma la chiave Gemini o i suoi permessi non sono validi."
+                        detail.contains("provider HTTP 400") ->
+                            "Google Gemini ha rifiutato la richiesta. Potrebbe essere necessario correggere il modello configurato nel Worker."
+                        detail.contains("HTTP_429") || detail.contains("provider HTTP 429") ->
+                            "È stato raggiunto un limite di richieste o la quota gratuita di Gemini. Riprova più tardi."
+                        detail.contains("HTTP_404") ->
+                            "Il server Jarvis risponde con indirizzo non trovato. L'endpoint configurato nell'app potrebbe essere errato."
+                        detail.contains("HTTP_502") ->
+                            "Il proxy Jarvis è raggiungibile, ma il servizio Gemini ha restituito un errore. Controllare modello, chiave e quota."
+                        detail.contains("SocketTimeoutException") || detail.contains("timed out", ignoreCase = true) ->
+                            "Il server Jarvis non risponde in tempo. Controlla la connessione e riprova."
+                        detail.contains("UnknownHostException") || detail.contains("ConnectException") ->
+                            "Non riesco a collegarmi al server Jarvis. Controlla internet e indirizzo del servizio."
+                        else ->
+                            "Jarvis online ha un problema tecnico. Dettaglio: " + detail.take(100) +
+                                ". I comandi offline restano disponibili."
+                    }
+                    speakJarvis(spoken)
                 }
             }
         }
