@@ -54,7 +54,24 @@ object JarvisOnlineAiClient {
                     .toString()
                 connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val status = connection.responseCode
-                if (status !in 200..299) throw IllegalStateException("Servizio AI HTTP $status")
+                if (status !in 200..299) {
+                    val errorBody = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use {
+                        it.readText().take(4096)
+                    }.orEmpty()
+                    val backendError = try {
+                        val json = JSONObject(errorBody)
+                        val message = json.optString("error").take(160)
+                        val providerStatus = json.optInt("providerStatus", 0)
+                        buildString {
+                            append("HTTP_").append(status)
+                            if (message.isNotBlank()) append(": ").append(message)
+                            if (providerStatus > 0) append(" (provider HTTP ").append(providerStatus).append(")")
+                        }
+                    } catch (_: Exception) {
+                        "HTTP_$status"
+                    }
+                    throw IllegalStateException(backendError)
+                }
                 val response = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText().take(16_384) }
                 val reply = JSONObject(response).optString("reply").trim().take(MAX_REPLY_CHARS)
                 if (reply.isBlank()) throw IllegalStateException("Risposta AI vuota")

@@ -169,6 +169,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
     private var jarvisListening = false
+    // Temporary, explicit user confirmation is used only when GPS cannot prove a safe stop.
+    private var jarvisStationaryConfirmationUntilMs = 0L
     private var pendingJarvisSpeech: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var announcedManeuverIndex = -1
@@ -2113,15 +2115,50 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun isVehicleSafelyStopped(): Boolean {
         val location = currentLocation ?: return false
         if (!location.hasSpeed() || !location.hasAccuracy()) return false
-        val ageMs = System.currentTimeMillis() - location.time
+        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
         return ageMs in 0L..5000L && location.accuracy <= 25f && location.speed <= 2.5f
     }
 
+    private fun isVehicleClearlyMoving(): Boolean {
+        val location = currentLocation ?: return false
+        if (!location.hasSpeed() || !location.hasAccuracy()) return false
+        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
+        // Only a recent, reasonably accurate fix can positively establish movement.
+        return ageMs in 0L..5000L && location.accuracy <= 50f && location.speed > 2.5f
+    }
+
     private fun askJarvisOnline(transcript: String) {
-        // Free-form AI is intentionally unavailable while moving or when speed is unknown.
-        val safelyStopped = isVehicleSafelyStopped()
-        if (!safelyStopped) {
-            speakJarvis("Per le richieste libere, fermati in sicurezza prima. I comandi di navigazione restano disponibili.")
+        // A reliable fresh fix showing movement always wins over a prior confirmation.
+        if (isVehicleClearlyMoving()) {
+            jarvisStationaryConfirmationUntilMs = 0L
+            speakJarvis("Ti rispondo alle richieste libere quando sei fermo in sicurezza. I comandi di navigazione restano disponibili.")
+            return
+        }
+        val confirmedUntil = jarvisStationaryConfirmationUntilMs
+        if (!isVehicleSafelyStopped() && System.currentTimeMillis() > confirmedUntil) {
+            AlertDialog.Builder(this)
+                .setTitle("Jarvis • verifica sicurezza")
+                .setMessage("Il GPS non riesce a confermare con sufficiente affidabilità che il veicolo sia fermo. Se sei a casa o parcheggiato in un luogo sicuro, confermalo qui; non farlo mentre guidi.")
+                .setPositiveButton("Sono fermo in sicurezza") { _, _ ->
+                    // Short-lived and in-memory only; a fresh GPS fix showing movement still blocks AI.
+                    jarvisStationaryConfirmationUntilMs = System.currentTimeMillis() + 10 * 60 * 1000L
+                    askJarvisOnline(transcript)
+                }
+                .setNegativeButton("Annulla") { _, _ ->
+                    speakJarvis("Va bene, rimango in modalità sicura. I comandi di navigazione restano disponibili.")
+                }
+                .setOnCancelListener {
+                    jarvisStatusText.text = "Jarvis • richiesta annullata"
+                }
+                .show()
             return
         }
         if (!JarvisOnlineAiClient.isConfigured()) {
@@ -2135,9 +2172,31 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     jarvisStatusText.text = "Jarvis AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
                     speakJarvis(reply)
-                }.onFailure {
-                    jarvisStatusText.text = "AI online non disponibile • modalità offline attiva"
-                    speakJarvis("Non riesco a raggiungere l'assistente online. I comandi offline sono ancora disponibili.")
+                }.onFailure { error ->
+                    val detail = error.message.orEmpty()
+                    jarvisStatusText.text = "Jarvis AI • errore: " + detail.take(90)
+                    val spoken = when {
+                        detail.contains("HTTP_503") ->
+                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il secret Gemini nel Worker Cloudflare."
+                        detail.contains("provider HTTP 401") || detail.contains("provider HTTP 403") ->
+                            "Il server Jarvis raggiunge Google, ma la chiave Gemini o i suoi permessi non sono validi."
+                        detail.contains("provider HTTP 400") ->
+                            "Google Gemini ha rifiutato la richiesta. Potrebbe essere necessario correggere il modello configurato nel Worker."
+                        detail.contains("HTTP_429") || detail.contains("provider HTTP 429") ->
+                            "È stato raggiunto un limite di richieste o la quota gratuita di Gemini. Riprova più tardi."
+                        detail.contains("HTTP_404") ->
+                            "Il server Jarvis risponde con indirizzo non trovato. L'endpoint configurato nell'app potrebbe essere errato."
+                        detail.contains("HTTP_502") ->
+                            "Il proxy Jarvis è raggiungibile, ma il servizio Gemini ha restituito un errore. Controllare modello, chiave e quota."
+                        detail.contains("SocketTimeoutException") || detail.contains("timed out", ignoreCase = true) ->
+                            "Il server Jarvis non risponde in tempo. Controlla la connessione e riprova."
+                        detail.contains("UnknownHostException") || detail.contains("ConnectException") ->
+                            "Non riesco a collegarmi al server Jarvis. Controlla internet e indirizzo del servizio."
+                        else ->
+                            "Jarvis online ha un problema tecnico. Dettaglio: " + detail.take(100) +
+                                ". I comandi offline restano disponibili."
+                    }
+                    speakJarvis(spoken)
                 }
             }
         }
