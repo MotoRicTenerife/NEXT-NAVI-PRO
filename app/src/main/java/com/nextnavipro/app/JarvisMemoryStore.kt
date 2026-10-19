@@ -151,8 +151,10 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
 
     @Synchronized
     fun clearCurrentConversation() {
-        writableDatabase.delete("messages", null, null)
+        val db = writableDatabase
+        db.delete("messages", null, null)
         // Compacted long-term summaries are deliberately retained for a new chat.
+        reclaimSpace(db)
     }
 
     @Synchronized
