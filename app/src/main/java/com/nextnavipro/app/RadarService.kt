@@ -19,19 +19,35 @@ data class RadarCamera(
 )
 
 object RadarService {
-    private const val ENDPOINT = "https://overpass-api.de/api/interpreter"
+    // Public OSM Overpass endpoints: try a secondary instance if the primary is unavailable or rate-limited.
+    private val ENDPOINTS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter"
+    )
     private const val RADIUS_METERS = 15000
     private const val CONNECT_TIMEOUT_MS = 10000
     private const val READ_TIMEOUT_MS = 20000
 
     fun fetchNear(center: NavPoint): List<RadarCamera> {
+        var lastError: Exception? = null
+        for (endpoint in ENDPOINTS) {
+            try {
+                return fetchNearAtEndpoint(center, endpoint)
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile per i radar")
+    }
+
+    private fun fetchNearAtEndpoint(center: NavPoint, endpoint: String): List<RadarCamera> {
         val lat = center.latitude.toString()
         val lon = center.longitude.toString()
         val query = "[out:json][timeout:20];(" +
             "node[\"highway\"=\"speed_camera\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
             "node[\"enforcement\"=\"maxspeed\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
             ");out body;"
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = CONNECT_TIMEOUT_MS
