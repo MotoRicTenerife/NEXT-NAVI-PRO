@@ -6,6 +6,9 @@ import org.junit.Test
 class JarvisCommandParserTest {
     @Test fun parsesDestinationCommands() {
         assertEquals(JarvisCommand.Navigate("Santa Cruz"), JarvisCommandParser.parse("Portami a Santa Cruz"))
+        assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Mi porti a Los Cristianos"))
+        assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Puoi portarmi a Los Cristianos"))
+        assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Portami a Los Cristianos"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("naviga verso Adeje"))
         assertEquals(JarvisCommand.Navigate("casa"), JarvisCommandParser.parse("Vai a casa"))
     }
