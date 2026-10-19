@@ -2253,7 +2253,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     else -> "Ciao! Sono qui, pronto ad aiutarti."
                 }
                 voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
-                speakJarvis(line, remember = false)
+                if (voiceGuideReady) voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, "jarvis-personality-preview")
             }
         }
         dialog.show()
