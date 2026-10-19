@@ -31,7 +31,12 @@ data class RoadMatch(
 }
 
 object SpeedLimitService {
-    private const val ENDPOINT = "https://overpass-api.de/api/interpreter"
+    // The primary public Overpass instance can rate-limit or temporarily fail.
+    // Retry a second public instance before reporting the road/limit as unknown.
+    private val ENDPOINTS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter"
+    )
     private const val RADIUS_METERS = 80
     private const val MAX_MATCH_DISTANCE_METERS = 28f
     private const val MAX_HEADING_DIFFERENCE_DEGREES = 50f
@@ -44,12 +49,24 @@ object SpeedLimitService {
      * or a nearby slip road simply because it is the only tagged candidate.
      */
     fun findRoadNear(point: NavPoint, bearing: Float?): RoadMatch? {
+        var lastError: Exception? = null
+        for (endpoint in ENDPOINTS) {
+            try {
+                return findRoadNearAtEndpoint(point, bearing, endpoint)
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile")
+    }
+
+    private fun findRoadNearAtEndpoint(point: NavPoint, bearing: Float?, endpoint: String): RoadMatch? {
         require(point.latitude.isFinite() && point.latitude in -90.0..90.0)
         require(point.longitude.isFinite() && point.longitude in -180.0..180.0)
         val lat = point.latitude.toString()
         val lon = point.longitude.toString()
         val query = "[out:json][timeout:12];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = CONNECT_TIMEOUT_MS
