@@ -313,7 +313,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         voiceGuide = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val languageStatus = voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                val languageStatus = voiceGuide?.setLanguage(preferredJarvisTtsLocale()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 if (voiceGuideReady) {
                     applyJarvisVoicePreference()
@@ -1973,9 +1973,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun preferredJarvisTtsLocale(): Locale {
+        // The app UI and greeting cover these locales. For other system languages, use English
+        // consistently instead of silently disabling speech when a TTS voice/data pack is absent.
+        val language = Locale.getDefault().language.lowercase(Locale.ROOT)
+        return if (language in setOf("it", "es", "fr", "de", "pt", "nl")) Locale.getDefault() else Locale.ENGLISH
+    }
+
     private fun applyJarvisVoicePreference() {
         val tts = voiceGuide ?: return
-        val language = Locale.getDefault().language
+        val language = preferredJarvisTtsLocale().language
         val available = tts.voices?.filter { it.locale.language.equals(language, ignoreCase = true) }.orEmpty()
         if (available.isEmpty()) return
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -1983,7 +1990,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val mode = prefs.getString("jarvis_voice_style", "female").orEmpty()
         if (mode == "auto") {
             // Leave the TTS engine's own default voice selected, while keeping the system language.
-            tts.setLanguage(Locale.getDefault())
+            tts.setLanguage(preferredJarvisTtsLocale())
             tts.setPitch(prefs.getFloat("jarvis_voice_pitch", 1.0f).coerceIn(0.7f, 1.4f))
             return
         }
@@ -2011,7 +2018,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showJarvisVoiceSettings() {
         val tts = voiceGuide
-        val language = Locale.getDefault().language
+        val language = preferredJarvisTtsLocale().language
         val available = tts?.voices?.filter { it.locale.language.equals(language, ignoreCase = true) }
             ?.sortedBy { it.name.lowercase(Locale.ROOT) }.orEmpty()
         val labels = mutableListOf(
@@ -2071,12 +2078,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val name = nameInput.text.toString().trim().take(30).ifBlank { "Jarvis" }
                 prefs.edit().putString("jarvis_assistant_name", name).apply()
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name • " + appText("pronto • premi per parlare")
-                Toast.makeText(this, "Assistente rinominato in $name", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, appText("Assistente rinominato in ") + name, Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton(appText("Ripristina Jarvis")) { _, _ ->
                 prefs.edit().putString("jarvis_assistant_name", "Jarvis").apply()
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis • " + appText("pronto • premi per parlare")
-                Toast.makeText(this, "Nome ripristinato: Jarvis", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, appText("Nome ripristinato: Jarvis"), Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(appText("Annulla"), null)
             .show()
