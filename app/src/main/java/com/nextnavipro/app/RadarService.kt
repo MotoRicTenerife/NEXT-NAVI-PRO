@@ -96,7 +96,6 @@ object RadarService {
                     if (tags.optString("type") != "enforcement" ||
                         enforcement !in setOf("maxspeed", "average_speed")) continue
                     val members = item.optJSONArray("members") ?: continue
-                    val relationId = item.optLong("id", -1L)
                     val kind = if (enforcement == "average_speed") "Controllo velocità media" else "Controllo velocità"
                     for (j in 0 until members.length()) {
                         val member = members.optJSONObject(j) ?: continue
@@ -110,7 +109,6 @@ object RadarService {
                             if (direction.isNotBlank()) relationDirections[nodeId] = direction
                         }
                     }
-                    if (relationId >= 0L && members.length() == 0) continue
                 }
             }
         }
