@@ -104,7 +104,7 @@ internal object HereRouteMatchingService {
             connection.readTimeout = READ_TIMEOUT_MS
             connection.doOutput = true
             connection.setRequestProperty("User-Agent", "NEXT-NAVI-PRO/0.3")
-            connection.setRequestProperty("Content-Type", "text/csv; charset=utf-8")
+            connection.setRequestProperty("Content-Type", "application/octet-stream")
             connection.setRequestProperty("Accept", "application/json")
             OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(csv) }
 
@@ -129,7 +129,8 @@ internal object HereRouteMatchingService {
         val root = JSONObject(body)
         val response = root.optJSONObject("response") ?: root
         val routes = response.optJSONArray("route") ?: return null
-        var result: Int? = null
+        var lastLinkLimit: Int? = null
+        var sawLink = false
         for (routeIndex in 0 until routes.length()) {
             val route = routes.optJSONObject(routeIndex) ?: continue
             val legs = route.optJSONArray("leg") ?: continue
@@ -138,13 +139,15 @@ internal object HereRouteMatchingService {
                 val links = leg.optJSONArray("link") ?: continue
                 for (linkIndex in 0 until links.length()) {
                     val link = links.optJSONObject(linkIndex) ?: continue
-                    val attributes = link.optJSONObject("attributes") ?: continue
-                    val candidate = parseDirectionalAttributes(attributes) ?: continue
-                    result = candidate
+                    sawLink = true
+                    val attributes = link.optJSONObject("attributes")
+                    // Never carry a limit forward from an earlier link if the latest
+                    // matched link has missing or conflicting directional values.
+                    lastLinkLimit = attributes?.let { parseDirectionalAttributes(it) }
                 }
             }
         }
-        return result
+        return if (sawLink) lastLinkLimit else null
     }
 
     private fun parseDirectionalAttributes(attributes: JSONObject): Int? {
