@@ -323,8 +323,8 @@ async function handle(req, res) {
         };
         const description = descriptions[weatherResult.weatherCode] || "condizioni meteo variabili";
         fallbackReplies.push("Meteo attuale da " + weatherResult.source + ": " + description + ", " +
-          weatherResult.temperatureC + " gradi, vento " + weatherResult.windKmh +
-          " km/h e raffiche fino a " + weatherResult.gustKmh + " km/h. Dato aggiornato alle " +
+          weatherResult.temperatureC + " gradi, vento " + weatherResult.windKmh + " km/h" +
+          (Number.isFinite(weatherResult.gustKmh) ? " e raffiche fino a " + weatherResult.gustKmh + " km/h" : "; dati sulle raffiche non disponibili") + ". Dato aggiornato alle " +
           (weatherResult.validTime || "ora locale del servizio") + ".");
       } else {
         fallbackReplies.push("Non riesco a verificare il meteo attuale dai dati disponibili.");
