@@ -17,7 +17,7 @@ object JarvisOnlineAiClient {
     data class LiveLocation(val latitude: Double, val longitude: Double)
 
     private const val CONNECT_TIMEOUT_MS = 4000
-    private const val READ_TIMEOUT_MS = 7000
+    private const val READ_TIMEOUT_MS = 50000
     private const val MAX_REPLY_CHARS = 800
 
     private val endpoint: String
