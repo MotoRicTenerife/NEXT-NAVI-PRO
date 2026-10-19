@@ -15,7 +15,7 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 ## API contract
 
 - `GET /` and `GET /health`: health response.
-- `POST /jarvis`: accepts JSON containing `message` and optional `language`; returns `{"reply":"..."}`.
+- `POST /jarvis`: accepts JSON containing `message`, optional `language`, and optional `personality` (`preset`, `irony`, `warmth`, `energy`, `concision`); returns `{"reply":"..."}`. Personality fields are bounded and allow-listed by the server. Voice speed and pitch are applied locally by Android and are not sent to the backend.
 - Gemini key remains server-side in `GEMINI_API_KEY`.
 - The server listens on `0.0.0.0` and Render's `PORT`.
 - Request body is capped at 16 KiB, user text is capped by `MAX_REQUEST_CHARS`, and an in-memory best-effort per-IP rate limit is applied. This is not authentication and is not a robust global abuse-control system.
