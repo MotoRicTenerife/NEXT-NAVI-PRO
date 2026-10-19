@@ -17,8 +17,10 @@ class JarvisCommandParserTest {
 
     @Test fun parsesCommonNavigationCommandsInSeveralLanguages() {
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Llévame a Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Llévame al centro de Adeje"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Take me to Adeje"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Emmène-moi à Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Conduis-moi à Adeje"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Bring mich nach Adeje"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Breng me naar Adeje"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Leva-me a Adeje"))
