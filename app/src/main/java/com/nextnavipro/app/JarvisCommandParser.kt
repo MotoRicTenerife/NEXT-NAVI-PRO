@@ -24,26 +24,36 @@ object JarvisCommandParser {
         val normalized = normalize(transcript)
         if (normalized.isBlank()) return JarvisCommand.Unknown
 
-        if (matchesAny(normalized, "silenzio", "zitto", "basta parlare", "ferma la voce", "smetti di parlare", "stop voce")) {
+        if (matchesAny(normalized, "silenzio", "zitto", "basta parlare", "ferma la voce", "smetti di parlare", "stop voce",
+            "silencio", "calla", "deja de hablar", "stop voice", "be quiet", "silence", "tais toi", "arrête de parler",
+            "stille", "sei still", "hör auf zu sprechen", "stilte", "zwijg", "para de falar")) {
             return JarvisCommand.Silence
         }
-        if (matchesAny(normalized, "ripeti", "ripeti istruzione", "ripeti indicazione", "ripeti l indicazione", "ripeti l istruzione", "cosa devo fare")) {
+        if (matchesAny(normalized, "ripeti", "ripeti istruzione", "ripeti indicazione", "ripeti l indicazione", "ripeti l istruzione", "cosa devo fare",
+            "repite", "repite la indicacion", "repeat", "repeat instruction", "repete", "wiederholen", "herhaal")) {
             return JarvisCommand.Repeat
         }
-        if (matchesAny(normalized, "dove sono", "la mia posizione", "posizione attuale", "come mi trovo")) {
+        if (matchesAny(normalized, "dove sono", "la mia posizione", "posizione attuale", "come mi trovo",
+            "donde estoy", "mi ubicacion", "where am i", "my location", "ou suis je", "wo bin ich", "waar ben ik", "onde estou")) {
             return JarvisCommand.WhereAmI
         }
-        if (matchesAny(normalized, "quanto manca", "quanta strada manca", "quanto manca all arrivo", "tempo all arrivo", "distanza rimanente")) {
+        if (matchesAny(normalized, "quanto manca", "quanta strada manca", "quanto manca all arrivo", "tempo all arrivo", "distanza rimanente",
+            "cuanto falta", "distancia restante", "how much longer", "remaining distance", "combien reste t il",
+            "wie weit noch", "hoe ver nog", "quanto falta para chegar")) {
             return JarvisCommand.Remaining
         }
-        if (matchesAny(normalized, "mostra risultati", "mostra le alternative", "risultati destinazione")) {
+        if (matchesAny(normalized, "mostra risultati", "mostra le alternative", "risultati destinazione",
+            "mostrar resultados", "show results", "afficher les resultats", "ergebnisse anzeigen", "toon resultaten")) {
             return JarvisCommand.ShowResults
         }
-        if (matchesAny(normalized, "aiuto", "cosa sai fare", "comandi disponibili", "cosa puoi fare")) {
+        if (matchesAny(normalized, "aiuto", "cosa sai fare", "comandi disponibili", "cosa puoi fare",
+            "ayuda", "que puedes hacer", "help", "what can you do", "aide", "was kannst du", "ajuda")) {
             return JarvisCommand.Help
         }
 
-        val homePhrases = listOf("vai a casa", "portami a casa", "naviga verso casa", "andiamo a casa", "guidami a casa")
+        val homePhrases = listOf("vai a casa", "portami a casa", "naviga verso casa", "andiamo a casa", "guidami a casa",
+            "llevame a casa", "llevame al domicilio", "take me home", "go home", "bring me home",
+            "emmenemoi a la maison", "bring mich nach hause", "breng me naar huis", "leva me para casa")
         if (homePhrases.any { normalized == it }) return JarvisCommand.Navigate("casa")
 
         // Cover common spontaneous Italian speech variants. These are deterministic
@@ -54,6 +64,13 @@ object JarvisCommandParser {
             "portami a ", "portami ad ", "portami al ", "portami alla ",
             "portami allo ", "portami all ", "portami in ", "portami verso ",
             "portami dal ", "portami dalla ",
+            "llévame a ", "llevame a ", "llévame al ", "llevame al ", "llévame a la ", "llevame a la ",
+            "llévame hacia ", "llévame hasta ", "llevarme a ",
+            "take me to ", "navigate to ", "go to ", "drive to ", "head to ",
+            "emmène-moi à ", "emmene-moi a ", "emmène-moi au ", "emmene-moi au ", "conduis-moi à ",
+            "bring mich nach ", "bring mich zu ", "fahr mich nach ", "navigiere zu ",
+            "breng me naar ", "rij naar ", "navigeer naar ",
+            "leva-me a ", "leva-me ao ", "leva-me à ", "leva me a ", "navega para ",
             "voglio andare a ", "voglio andare al ", "voglio andare alla ",
             "vorrei andare a ", "vorrei raggiungere ", "raggiungimi a ",
             "naviga verso ", "naviga a ", "guidami a ", "guidami verso ",
