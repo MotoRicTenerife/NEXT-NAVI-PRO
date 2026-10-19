@@ -5,40 +5,18 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HereRouteMatchingServiceTest {
-    @Test fun readsUnambiguousLimitFromLastMatchedLink() {
-        val json = """{
-          "response":{"route":[{"leg":[{"link":[
-            {"attributes":{"SPEED_LIMITS_FC2":[{"FROM_REF_SPEED_LIMIT":80,"TO_REF_SPEED_LIMIT":80,"UNIT":"K"}]}},
-            {"attributes":{"SPEED_LIMITS_FC2":[{"FROM_REF_SPEED_LIMIT":50,"TO_REF_SPEED_LIMIT":50,"UNIT":"K"}]}}
-          ]}]}]}
-        }"""
-        assertEquals(50, HereRouteMatchingService.parseSpeedLimitFromResponse(json))
+    @Test fun acceptsExplicitKilometersPerHourLimitFromProxy() {
+        assertEquals(50, HereRouteMatchingService.parseProxyResponse("""{"speedLimitKmh":50}"""))
     }
 
-    @Test fun convertsMilesPerHourWhenProviderMarksImperialUnits() {
-        val json = """{"response":{"route":[{"leg":[{"link":[
-          {"attributes":{"SPEED_LIMITS_FC1":[{"FROM_REF_SPEED_LIMIT":30,"TO_REF_SPEED_LIMIT":30,"UNIT":"M"}]}}
-        ]}]}]}}"""
-        assertEquals(48, HereRouteMatchingService.parseSpeedLimitFromResponse(json))
+    @Test fun rejectsOutOfRangeOrMalformedLimits() {
+        assertNull(HereRouteMatchingService.parseProxyResponse("""{"speedLimitKmh":250}"""))
+        assertNull(HereRouteMatchingService.parseProxyResponse("""{"speedLimitKmh":"unknown"}"""))
+        assertNull(HereRouteMatchingService.parseProxyResponse("""{"error":"provider unavailable"}"""))
     }
 
-    @Test fun rejectsConflictingDirectionalLimitsInsteadOfGuessing() {
-        val json = """{"response":{"route":[{"leg":[{"link":[
-          {"attributes":{"SPEED_LIMITS_FC2":[{"FROM_REF_SPEED_LIMIT":30,"TO_REF_SPEED_LIMIT":50,"UNIT":"K"}]}}
-        ]}]}]}}"""
-        assertNull(HereRouteMatchingService.parseSpeedLimitFromResponse(json))
-    }
-
-    @Test fun doesNotReuseAnEarlierLimitWhenLatestMatchedLinkHasNoLimit() {
-        val json = """{"response":{"route":[{"leg":[{"link":[
-          {"attributes":{"SPEED_LIMITS_FC2":[{"FROM_REF_SPEED_LIMIT":50,"TO_REF_SPEED_LIMIT":50,"UNIT":"K"}]}},
-          {"attributes":{"LINK_ATTRIBUTE_FC2":[{"ISO_COUNTRY_CODE":"ESP"}]}}
-        ]}]}]}}"""
-        assertNull(HereRouteMatchingService.parseSpeedLimitFromResponse(json))
-    }
-
-    @Test fun missingOrEmptyResponseReturnsUnknown() {
-        assertNull(HereRouteMatchingService.parseSpeedLimitFromResponse("""{"response":{"route":[]}}"""))
-        assertNull(HereRouteMatchingService.parseSpeedLimitFromResponse("""{"response":{}}"""))
+    @Test fun missingOrNullLimitStaysUnknown() {
+        assertNull(HereRouteMatchingService.parseProxyResponse("""{"speedLimitKmh":null}"""))
+        assertNull(HereRouteMatchingService.parseProxyResponse("""{}"""))
     }
 }
