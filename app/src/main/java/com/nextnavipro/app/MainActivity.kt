@@ -2105,7 +2105,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer?.cancel()
             jarvisListening = false
             jarvisButton.text = "🎙 JARVIS"
-            jarvisStatusText.text = "Ascolto annullato"
+            jarvisStatusText.text = appText("Ascolto annullato")
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -2117,7 +2117,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun startJarvisListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            jarvisStatusText.text = "Riconoscimento vocale non disponibile"
+            jarvisStatusText.text = appText("Riconoscimento vocale non disponibile")
             speakJarvis("Il riconoscimento vocale non è disponibile su questo dispositivo.")
             return
         }
@@ -2125,15 +2125,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Ti ascolto…" }
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Ti ascolto…") }
                     }
                     override fun onBeginningOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Sto ascoltando…" }
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Sto ascoltando…") }
                     }
                     override fun onRmsChanged(rmsdB: Float) = Unit
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
                     override fun onEndOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Elaboro…" }
+                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Elaboro…") }
                     }
                     override fun onError(error: Int) {
                         runOnUiThread {
@@ -2141,10 +2141,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
                             if (::jarvisStatusText.isInitialized) {
                                 jarvisStatusText.text = when (error) {
-                                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Non ho capito • riprova"
-                                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Permesso microfono mancante"
-                                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Rete non disponibile • riprova"
-                                    else -> "Ascolto terminato • riprova"
+                                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> appText("Non ho capito • riprova")
+                                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> appText("Permesso microfono mancante")
+                                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> appText("Rete non disponibile • riprova")
+                                    else -> appText("Ascolto terminato • riprova")
                                 }
                             }
                         }
@@ -2156,7 +2156,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull().orEmpty().trim()
                             if (transcript.isBlank()) {
-                                jarvisStatusText.text = "Non ho ricevuto parole • riprova"
+                                jarvisStatusText.text = appText("Non ho ricevuto parole • riprova")
                             } else {
                                 jarvisStatusText.text = "Hai detto: $transcript"
                                 handleJarvisCommand(transcript)
@@ -2355,12 +2355,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
+    private fun localizedVoiceTestPhrase(): String = when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+        "it" -> "Avvio la navigazione. Tra trecento metri, prosegui."
+        "es" -> "Iniciando la navegación. En trescientos metros, continúa."
+        "fr" -> "Navigation en cours. Dans trois cents mètres, continuez."
+        "de" -> "Navigation wird gestartet. In dreihundert Metern weiterfahren."
+        "pt" -> "A iniciar a navegação. Daqui a trezentos metros, continue."
+        "nl" -> "Navigatie gestart. Ga over driehonderd meter rechtdoor."
+        else -> "Starting navigation. Continue in three hundred meters."
+    }
+
     private fun testNavigationVoice() {
         if (!voiceGuideReady) {
-            Toast.makeText(this, "Voce non pronta o lingua TTS non disponibile.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, appText("Voce non pronta o lingua TTS non disponibile."), Toast.LENGTH_LONG).show()
             return
         }
-        voiceGuide?.speak("Avvio la navigazione. Tra trecento metri, prosegui.", TextToSpeech.QUEUE_FLUSH, null, "voice-test")
+        voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, "voice-test")
     }
 
     private fun applyTheme() {
