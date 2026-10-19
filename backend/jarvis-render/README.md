@@ -16,6 +16,7 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 
 - `GET /` and `GET /health`: health response.
 - `POST /jarvis`: accepts JSON containing `message`, optional `language`, and optional `personality` (`preset`, `irony`, `warmth`, `energy`, `concision`); returns `{"reply":"..."}`. Personality fields are bounded and allow-listed by the server. Voice speed and pitch are applied locally by Android and are not sent to the backend.
+- `GET /speed-limit?lat=28.12271&lon=-16.72600`: diagnostic query using OSM/Overpass. Returns an explicit mapped `speedLimitKmh`, nearby road name/ref, and estimated distance, or `speedLimitKmh: null` if no unambiguous mapped limit is found. This endpoint is suitable for a browser smoke test and does not require a HERE key. It can return HTTP 502 if Overpass is unavailable.
 - `POST /speed-limit`: accepts 3–8 recent valid GPS points and, when `HERE_API_KEY` is configured, asks HERE Route Matching for an unambiguous explicit limit on the last matched link. Returns `{"speedLimitKmh":50}` or `{"speedLimitKmh":null}`. Requests are throttled on Android and rate-limited separately on the server. The key remains server-side.
 - Gemini key remains server-side in `GEMINI_API_KEY`.
 - The server listens on `0.0.0.0` and Render's `PORT`.
