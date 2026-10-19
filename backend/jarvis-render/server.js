@@ -68,26 +68,53 @@ async function fetchLiveWeather(location) {
     current: "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
     timezone: "auto"
   }).toString();
-  const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
-  if (!response.ok) throw new Error("Open-Meteo HTTP " + response.status);
-  const data = await response.json();
-  const current = data?.current;
-  if (!current || !Number.isFinite(current.temperature_2m)) throw new Error("Invalid Open-Meteo response");
-  return {
-    source: "Open-Meteo",
-    fetchedAt: new Date().toISOString(),
-    validTime: current.time,
-    temperatureC: current.temperature_2m,
-    feelsLikeC: current.apparent_temperature,
-    humidityPercent: current.relative_humidity_2m,
-    precipitationMm: current.precipitation,
-    weatherCode: current.weather_code,
-    windKmh: current.wind_speed_10m,
-    windDirectionDegrees: current.wind_direction_10m,
-    gustKmh: current.wind_gusts_10m
-  };
-}
 
+  let lastError;
+  // Render instances can have a cold network path after sleeping. Retry once on
+  // transient transport/5xx failures; never substitute guessed weather values.
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(12000),
+        headers: { "accept": "application/json" }
+      });
+      if (!response.ok) {
+        const error = new Error("Open-Meteo HTTP " + response.status);
+        if (response.status >= 500 && attempt < 2) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+      const data = await response.json();
+      const current = data?.current;
+      if (!current || !Number.isFinite(current.temperature_2m) ||
+          !Number.isFinite(current.weather_code) || !Number.isFinite(current.wind_speed_10m) ||
+          !Number.isFinite(current.wind_gusts_10m) || typeof current.time !== "string") {
+        throw new Error("Invalid Open-Meteo response");
+      }
+      return {
+        source: "Open-Meteo",
+        fetchedAt: new Date().toISOString(),
+        validTime: current.time,
+        temperatureC: current.temperature_2m,
+        feelsLikeC: current.apparent_temperature,
+        humidityPercent: current.relative_humidity_2m,
+        precipitationMm: current.precipitation,
+        weatherCode: current.weather_code,
+        windKmh: current.wind_speed_10m,
+        windDirectionDegrees: current.wind_direction_10m,
+        gustKmh: current.wind_gusts_10m
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt >= 2 || (error instanceof Error && /^Open-Meteo HTTP 4/.test(error.message))) {
+        throw error;
+      }
+    }
+  }
+  throw lastError || new Error("Open-Meteo lookup failed");
+}
 function xmlText(block, names) {
   for (const name of names) {
     const pattern = "<(?:[\\w.-]+:)?" + name + "\\b[^>]*>([\\s\\S]*?)</(?:[\\w.-]+:)?" + name + ">";
@@ -231,7 +258,7 @@ async function handle(req, res) {
       weatherResult = await fetchLiveWeather(location);
       liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(weatherResult);
     } catch (error) {
-      console.warn("Jarvis live weather lookup failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
+      console.warn("Jarvis live weather lookup failed", { errorType: error instanceof Error ? error.name : "UnknownError", reason: error instanceof Error ? error.message.slice(0, 180) : "unknown" });
       liveContext += "\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
     }
   } else if (asksWeather) {
