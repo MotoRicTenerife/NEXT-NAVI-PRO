@@ -145,6 +145,11 @@ jobs:
           else
             echo "Stable APK signing is enabled."
           fi
+      - name: Verify APK signature fingerprint
+        run: |
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
       - name: Run unit tests
         env:
           NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro.motorictenerife.workers.dev/jarvis' }}
