@@ -89,6 +89,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val PREFS = "next_navi_settings"
         private const val PREF_NEGATIVE = "negative_theme"
         private const val PREF_THEME_MODE = "theme_mode"
+        private const val PREF_MAP_LAYER = "map_layer"
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val PERMISSION_AUDIO = 101
@@ -142,6 +143,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var selectionMode = false
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
+    private var mapLayer = "standard"
     private var destinationPickerOpen = false
     private var gpsMarkerAnimator: ValueAnimator? = null
     private var displayedMarkerLocation: Location? = null
@@ -362,6 +364,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
         // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
         themeMode = "auto"
+        mapLayer = preferences.getString(PREF_MAP_LAYER, "standard") ?: "standard"
         preferences.edit().putString(PREF_THEME_MODE, "auto").apply()
         negativeTheme = when (themeMode) { "positive" -> false; "negative" -> true; else -> preferences.getBoolean(PREF_NEGATIVE, true) }
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
@@ -815,9 +818,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun applyMapStyle(readyMap: MapLibreMap) {
         mapStyleReady = false
-        val styleUrl = if (negativeTheme) STYLE_URL else "https://tiles.openfreemap.org/styles/positron"
-        readyMap.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
-            if (!negativeTheme) {
+        val satelliteStyle = """{"version":8,"name":"NEXT NAVI PRO Satellite","sources":{"satellite":{"type":"raster","tiles":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],"tileSize":256,"maxzoom":19,"attribution":"Imagery © Esri, Maxar, Earthstar Geographics and the GIS community"}},"layers":[{"id":"satellite-imagery","type":"raster","source":"satellite","minzoom":0,"maxzoom":22}]}"""
+        val builder = when (mapLayer) {
+            "satellite" -> Style.Builder().fromJson(satelliteStyle)
+            "light" -> Style.Builder().fromUri("https://tiles.openfreemap.org/styles/positron")
+            else -> Style.Builder().fromUri(if (negativeTheme) STYLE_URL else "https://tiles.openfreemap.org/styles/positron")
+        }
+        readyMap.setStyle(builder) { style ->
+            if (mapLayer != "satellite" && (mapLayer == "light" || !negativeTheme)) {
                 style.layers.forEach { layer ->
                     when (layer) {
                         is SymbolLayer -> layer.setProperties(
@@ -3609,19 +3617,34 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         fullScreenRoot = page
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        bar.addView(makeButton("⌖ GPS") { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        val flagButton = makeButton(if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI") { }
+        bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 0.8f))
+        bar.addView(makeButton("⌖ GPS") { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
+        bar.addView(makeButton("LAYER") { showMapLayerPicker() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
+        val flagButton = makeButton(if (selectionMode) "FLAG ✓" else "SELEZIONA") { }
         flagButton.setOnClickListener {
             selectionMode = !selectionMode
-            flagButton.text = if (selectionMode) "FLAG ATTIVO" else "SELEZIONA PUNTI"
+            flagButton.text = if (selectionMode) "FLAG ✓" else "SELEZIONA"
         }
-        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 1f))
+        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 0.85f))
         page.addView(bar, params(-1, dp(48)))
         page.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
     }
 
+    private fun showMapLayerPicker() {
+        val options = arrayOf("Stradale (segue il tema automatico)", "Chiara", "Satellite")
+        val selected = when (mapLayer) { "light" -> 1; "satellite" -> 2; else -> 0 }
+        AlertDialog.Builder(this)
+            .setTitle("Livello mappa")
+            .setSingleChoiceItems(options, selected) { dialog, which ->
+                mapLayer = when (which) { 1 -> "light"; 2 -> "satellite"; else -> "standard" }
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_MAP_LAYER, mapLayer).apply()
+                map?.let { applyMapStyle(it) }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
     private fun exitMapFullScreen() {
         val view = mapView ?: return
         (view.parent as? android.view.ViewGroup)?.removeView(view)
