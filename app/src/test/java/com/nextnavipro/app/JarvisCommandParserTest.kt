@@ -66,9 +66,12 @@ class JarvisCommandParserTest {
             val result = JarvisCommandParser.parse(inputs[inputIndex])
             when (inputIndex) {
                 0, 1 -> assertEquals(JarvisCommand.PreviewRoute("Guaza"), result)
+                2 -> assertEquals(JarvisCommand.Navigate("Mercadona"), result)
+                3 -> assertEquals(JarvisCommand.WhereAmI, result)
                 4 -> assertEquals(JarvisCommand.BriefRoute, result)
                 5, 6, 7 -> assertEquals(JarvisCommand.Unknown, result)
-                else -> assertEquals("Parser returned null for input index $inputIndex", false, result == null)
+                8 -> assertEquals(JarvisCommand.Navigate("x".repeat(4096)), result)
+                9 -> assertEquals(JarvisCommand.PreviewRoute("Santa Cruz"), result)
             }
         }
     }
