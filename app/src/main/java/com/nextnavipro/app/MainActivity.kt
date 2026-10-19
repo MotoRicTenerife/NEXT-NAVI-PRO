@@ -3638,11 +3638,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
-        // Public Overpass is rate-limited: refresh at least every 6 s, or sooner
-        // if the vehicle has moved over 250 m. Avoid showing a previous road's
-        // name/limit while the new road match is being resolved.
-        if (previous != null && previous.distanceTo(location) < 250f &&
-            now - lastSpeedLimitQueryMs < 6_000L) {
+        // Public Overpass is rate-limited and can take several seconds to respond.
+        // Avoid repeated requests while riding along the same road: refresh after 20 s,
+        // or sooner only after a meaningful 450 m displacement.
+        if (previous != null && previous.distanceTo(location) < 450f &&
+            now - lastSpeedLimitQueryMs < 20_000L) {
             updateSpeedLimitDisplay()
             return
         }
@@ -3661,7 +3661,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
         }
         thread(name = "osm-road-match") {
-            val match = try { SpeedLimitService.findRoadNear(point, bearing) } catch (_: Exception) { null }
+            val match = try {
+                SpeedLimitService.findRoadNear(point, bearing)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass road lookup failed", error)
+                null
+            }
             runOnUiThread {
                 // A slow Overpass response must not overwrite a newer road match.
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
