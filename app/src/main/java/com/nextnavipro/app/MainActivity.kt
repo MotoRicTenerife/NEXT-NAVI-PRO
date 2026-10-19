@@ -141,6 +141,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var selectionMode = false
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
+    private var destinationPickerOpen = false
     private var gpsMarkerAnimator: ValueAnimator? = null
     private var displayedMarkerLocation: Location? = null
     private var dashboardStarted = false
@@ -778,7 +779,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             readyMap.uiSettings.isZoomGesturesEnabled = true
             readyMap.uiSettings.isRotateGesturesEnabled = true
             readyMap.addOnMapClickListener { point ->
-                if (fullScreenMap && selectionMode) {
+                if (destinationPickerOpen) {
+                    // Taps in the chooser inspect the map; they must not reparent it
+                    // into full-screen mode or replace the selected geocoder result.
+                    true
+                } else if (fullScreenMap && selectionMode) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     showPickedPointDialog(picked)
                     true
@@ -788,6 +793,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
             readyMap.addOnCameraMoveStartedListener { reason ->
+                if (destinationPickerOpen) {
+                    followGps = false
+                    mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    return@addOnCameraMoveStartedListener
+                }
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
                     // Full-screen: manual control until GPS is tapped. Dashboard: resume after 10 s idle.
                     followGps = false
@@ -3054,6 +3064,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         dialog.setContentView(page)
         dialog.setOnDismissListener {
+            destinationPickerOpen = false
             // Return the map to the dashboard without recreating it or losing its current style.
             (activityMapView.parent as? android.view.ViewGroup)?.removeView(activityMapView)
             if (oldParent != null && activityMapView.parent == null) {
@@ -3065,6 +3076,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             followGps = oldFollowGps
             if (followGps && !fullScreenMap) mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
         }
+        destinationPickerOpen = true
         followGps = false
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
         dialog.setOnShowListener {
