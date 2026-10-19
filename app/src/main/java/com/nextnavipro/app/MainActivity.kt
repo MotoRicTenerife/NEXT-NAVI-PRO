@@ -2687,13 +2687,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speakJarvis("Non ci sono risultati in attesa. Dimmi, per esempio, portami a Santa Cruz.")
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("Scegli destinazione • " + results.size + " risultati")
-            .setItems(results.map { it.name + if (it.description.isBlank()) "" else " • " + it.description }.toTypedArray()) { _, which ->
-                results.getOrNull(which)?.let { selectJarvisOrSearchDestination(it) }
-            }
-            .setNegativeButton(appText("Annulla"), null)
-            .show()
+        showDestinationPicker(results, currentLocation, pendingJarvisPreview)
     }
 
     private fun localizedVoiceTestPhrase(): String = when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
