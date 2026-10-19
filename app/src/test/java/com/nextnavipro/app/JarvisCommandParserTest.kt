@@ -9,6 +9,8 @@ class JarvisCommandParserTest {
         assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Mi porti a Los Cristianos"))
         assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Puoi portarmi a Los Cristianos"))
         assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Portami a Los Cristianos"))
+        assertEquals(JarvisCommand.Navigate("Scristiano"), JarvisCommandParser.parse("Portami allo Scristiano"))
+        assertEquals(JarvisCommand.Navigate("Mercadona"), JarvisCommandParser.parse("Portami al Mercadona"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("naviga verso Adeje"))
         assertEquals(JarvisCommand.Navigate("casa"), JarvisCommandParser.parse("Vai a casa"))
     }
