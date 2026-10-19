@@ -169,8 +169,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
     private var jarvisListening = false
-    // Temporary, explicit user confirmation is used only when GPS cannot prove a safe stop.
-    private var jarvisStationaryConfirmationUntilMs = 0L
     private var pendingJarvisSpeech: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var pendingJarvisLocality: String? = null
@@ -1080,7 +1078,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Debug • CSV GPS: esporta / elimina", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO")
+        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Debug • CSV GPS: esporta / elimina", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO", "Nome assistente vocale")
         AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1095,6 +1093,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     8 -> showGpxMenu()
                     9 -> showGpsDiagnosticsMenu()
                     10 -> showVehicleProfileMenu()
+                    11 -> showJarvisNameSettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -1929,40 +1928,64 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun initializeJarvis() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val savedName = prefs.getString("jarvis_user_name", "").orEmpty().trim()
-        if (savedName.isNotEmpty()) {
-            jarvisStatusText.text = "Jarvis pronto • premi per parlare"
-            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-            val greeting = when (hour) {
-                in 5..11 -> "Buongiorno"
-                in 12..17 -> "Buon pomeriggio"
-                else -> "Buonasera"
-            }
-            speakJarvis("$greeting $savedName, sono Jarvis. Sono qui per aiutarti. L'armatura è in manutenzione, ma le indicazioni sono pronte. Dimmi dove vuoi andare e ti accompagnerò.")
-            return
+        val assistantName = prefs.getString("jarvis_assistant_name", "Jarvis").orEmpty().trim()
+            .ifBlank { "Jarvis" }
+        jarvisStatusText.text = "$assistantName pronto • premi per parlare"
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val greeting = when (hour) {
+            in 5..11 -> "Buongiorno"
+            in 12..17 -> "Buon pomeriggio"
+            else -> "Buonasera"
         }
+        val personalGreeting = if (savedName.isNotBlank()) " $savedName," else ""
+        speakJarvis("$greeting$personalGreeting sono $assistantName, il tuo assistente di navigazione NEXT NAVI PRO. Sono pronto. Dimmi dove vuoi andare e ti guiderò.")
+        // Preserve first-run name setup, but do not make the startup greeting depend on it.
+        if (savedName.isBlank() && !prefs.getBoolean("jarvis_user_name_prompted", false)) {
+            prefs.edit().putBoolean("jarvis_user_name_prompted", true).apply()
+            val nameInput = EditText(this).apply {
+                hint = "Il tuo nome (facoltativo)"
+                setSingleLine(true)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                setPadding(dp(16), dp(10), dp(16), dp(10))
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Personalizza Jarvis")
+                .setMessage("Come vuoi che ti chiami? È facoltativo e puoi saltare.")
+                .setView(nameInput)
+                .setPositiveButton("Salva") { _, _ ->
+                    val name = nameInput.text.toString().trim().take(40)
+                    if (name.isNotBlank()) prefs.edit().putString("jarvis_user_name", name).apply()
+                }
+                .setNegativeButton("Salta", null)
+                .show()
+        }
+    }
+
+    private fun showJarvisNameSettings() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val nameInput = EditText(this).apply {
-            hint = "Il tuo nome"
+            setText(prefs.getString("jarvis_assistant_name", "Jarvis").orEmpty())
+            hint = "Nome dell'assistente"
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             setPadding(dp(16), dp(10), dp(16), dp(10))
         }
         AlertDialog.Builder(this)
-            .setTitle("Configura Jarvis")
-            .setMessage("Come vuoi che ti chiami? Il nome viene salvato solo su questo dispositivo.")
+            .setTitle("Nome dell'assistente vocale")
+            .setMessage("Scegli come vuoi chiamare l'assistente di navigazione.")
             .setView(nameInput)
             .setPositiveButton("Salva") { _, _ ->
-                val name = nameInput.text.toString().trim().take(40)
-                if (name.isBlank()) {
-                    jarvisStatusText.text = "Nome non impostato • Jarvis pronto"
-                    speakJarvis("Va bene. Puoi impostare il tuo nome dal menu quando vuoi.")
-                } else {
-                    prefs.edit().putString("jarvis_user_name", name).apply()
-                    initializeJarvis()
-                }
+                val name = nameInput.text.toString().trim().take(30).ifBlank { "Jarvis" }
+                prefs.edit().putString("jarvis_assistant_name", name).apply()
+                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name pronto • premi per parlare"
+                Toast.makeText(this, "Assistente rinominato in $name", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Più tardi") { _, _ ->
-                jarvisStatusText.text = "Jarvis pronto • premi per parlare"
+            .setNeutralButton("Ripristina Jarvis") { _, _ ->
+                prefs.edit().putString("jarvis_assistant_name", "Jarvis").apply()
+                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis pronto • premi per parlare"
+                Toast.makeText(this, "Nome ripristinato: Jarvis", Toast.LENGTH_SHORT).show()
             }
+            .setNegativeButton("Annulla", null)
             .show()
     }
 
@@ -2162,7 +2185,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             JarvisCommand.Help -> speakJarvis(
                 "Posso cercare una destinazione, andare a casa se l'hai salvata, dirti la precisione GPS, " +
-                    "ripetere la prossima manovra o leggere la distanza residua. Per scegliere un risultato, fermati prima. " +
+                    "ripetere la prossima manovra o leggere la distanza residua. Puoi chiedermi una destinazione o un punto di interesse. " +
                     "Non serve trasformare ogni rotonda in una scena d'azione."
             )
             JarvisCommand.ShowResults -> showJarvisPendingResults()
@@ -2170,55 +2193,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun isVehicleSafelyStopped(): Boolean {
-        val location = currentLocation ?: return false
-        if (!location.hasSpeed() || !location.hasAccuracy()) return false
-        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
-            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
-        } else {
-            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
-        }
-        return ageMs in 0L..5000L && location.accuracy <= 25f && location.speed <= 2.5f
-    }
-
-    private fun isVehicleClearlyMoving(): Boolean {
-        val location = currentLocation ?: return false
-        if (!location.hasSpeed() || !location.hasAccuracy()) return false
-        val ageMs = if (location.elapsedRealtimeNanos > 0L) {
-            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
-        } else {
-            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
-        }
-        // Only a recent, reasonably accurate fix can positively establish movement.
-        return ageMs in 0L..5000L && location.accuracy <= 50f && location.speed > 2.5f
-    }
-
     private fun askJarvisOnline(transcript: String) {
-        // A reliable fresh fix showing movement always wins over a prior confirmation.
-        if (isVehicleClearlyMoving()) {
-            jarvisStationaryConfirmationUntilMs = 0L
-            speakJarvis("Ti rispondo alle richieste libere quando sei fermo in sicurezza. I comandi di navigazione restano disponibili.")
-            return
-        }
-        val confirmedUntil = jarvisStationaryConfirmationUntilMs
-        if (!isVehicleSafelyStopped() && System.currentTimeMillis() > confirmedUntil) {
-            AlertDialog.Builder(this)
-                .setTitle("Jarvis • verifica sicurezza")
-                .setMessage("Il GPS non riesce a confermare con sufficiente affidabilità che il veicolo sia fermo. Se sei a casa o parcheggiato in un luogo sicuro, confermalo qui; non farlo mentre guidi.")
-                .setPositiveButton("Sono fermo in sicurezza") { _, _ ->
-                    // Short-lived and in-memory only; a fresh GPS fix showing movement still blocks AI.
-                    jarvisStationaryConfirmationUntilMs = System.currentTimeMillis() + 10 * 60 * 1000L
-                    askJarvisOnline(transcript)
-                }
-                .setNegativeButton("Annulla") { _, _ ->
-                    speakJarvis("Va bene, rimango in modalità sicura. I comandi di navigazione restano disponibili.")
-                }
-                .setOnCancelListener {
-                    jarvisStatusText.text = "Jarvis • richiesta annullata"
-                }
-                .show()
-            return
-        }
+        // The online assistant answers conversational requests only. Navigation commands
+        // are handled locally; no GPS-based stationary gate blocks ordinary use.
         if (!JarvisOnlineAiClient.isConfigured()) {
             speakJarvis("L'assistente AI online non è ancora configurato. I comandi offline restano disponibili; non invio dati a servizi non impostati.")
             return
@@ -2261,12 +2238,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showJarvisPendingResults() {
-        // Never open a choice dialog while moving, or when the app cannot confirm a safe stop.
-        val safelyStopped = currentLocation?.let { it.hasSpeed() && it.speed <= 2.5f } == true
-        if (!safelyStopped) {
-            speakJarvis("Ti mostro i risultati quando il GPS conferma che sei fermo. Prima la sicurezza.")
-            return
-        }
         val results = pendingJarvisPlaces
         if (results.isEmpty()) {
             speakJarvis("Non ci sono risultati in attesa. Dimmi, per esempio, portami a Santa Cruz.")
@@ -2274,7 +2245,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         AlertDialog.Builder(this)
             .setTitle("Scegli destinazione • " + results.size + " risultati")
-            .setItems(results.map { it.name }.toTypedArray()) { _, which ->
+            .setItems(results.map { it.name + if (it.description.isBlank()) "" else " • " + it.description }.toTypedArray()) { _, which ->
                 results.getOrNull(which)?.let { selectJarvisOrSearchDestination(it) }
             }
             .setNegativeButton("Annulla", null)
