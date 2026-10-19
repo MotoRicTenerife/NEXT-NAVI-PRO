@@ -13,6 +13,8 @@ sealed class JarvisCommand {
     data class PreviewRoute(val destination: String) : JarvisCommand()
     object BriefRoute : JarvisCommand()
     object AssistantName : JarvisCommand()
+    object CancelNavigation : JarvisCommand()
+    data class ChangeDestination(val destination: String? = null) : JarvisCommand()
     object WhereAmI : JarvisCommand()
     object Remaining : JarvisCommand()
     object Repeat : JarvisCommand()
@@ -60,6 +62,34 @@ object JarvisCommandParser {
         if (matchesAny(normalized, "cosa mi aspetta", "analizza il percorso", "briefing del percorso",
             "cosa c e lungo il percorso", "cosa trovo lungo la strada", "what should i expect on the road")) {
             return JarvisCommand.BriefRoute
+        }
+
+        if (matchesAny(normalized,
+            "annulla navigazione", "annulla la navigazione", "termina navigazione", "termina la navigazione",
+            "ferma navigazione", "ferma la navigazione", "cancella percorso", "cancella il percorso",
+            "stop navigazione", "stop navigation", "cancel navigation", "cancel the navigation",
+            "end navigation", "stop navigation", "cancel route", "cancel the route",
+            "cancela la navegacion", "deten la navegacion", "terminer la navigation",
+            "navigation annuler", "navigation beenden", "navigatie annuleren", "cancela navegacao")) {
+            return JarvisCommand.CancelNavigation
+        }
+        val changeDestinationPrefixes = listOf(
+            "cambia destinazione a ", "cambia la destinazione a ", "imposta nuova destinazione ", 
+            "nuova destinazione ", "change destination to ", "change the destination to ",
+            "set new destination to ", "cambia destino a ", "cambia la destinacion a ",
+            "changer la destination pour ", "ziel andern zu ", "verander bestemming naar "
+        ).sortedByDescending { it.length }
+        val changePrefix = changeDestinationPrefixes.firstOrNull { normalized.startsWith(it) }
+        if (changePrefix != null) {
+            val destination = transcript.trim().drop(changePrefix.length).trim().trim(',', '.', '!', '?', ' ')
+            if (destination.length >= 2) return JarvisCommand.ChangeDestination(destination)
+        }
+        if (matchesAny(normalized, "cambia destinazione", "cambia la destinazione", "modifica destinazione",
+            "modifica la destinazione", "voglio cambiare destinazione", "nuova destinazione",
+            "change destination", "change the destination", "set a new destination",
+            "cambiar destino", "cambiar la destinacion", "changer de destination",
+            "ziel andern", "bestemming wijzigen")) {
+            return JarvisCommand.ChangeDestination()
         }
 
         if (matchesAny(normalized, "silenzio", "zitto", "basta parlare", "ferma la voce", "smetti di parlare", "stop voce",
