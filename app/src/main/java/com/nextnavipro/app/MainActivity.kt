@@ -2367,7 +2367,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speakJarvis("L'assistente AI online non è ancora configurato. I comandi offline restano disponibili; non invio dati a servizi non impostati.")
             return
         }
-        jarvisStatusText.text = "Jarvis AI • elaborazione online…"
+        jarvisStatusText.text = jarvisAssistantName() + " AI • elaborazione online…"
         val liveQuestion = Regex("\\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(transcript)
         val liveLocation = if (liveQuestion) currentLocation?.let {
@@ -2380,12 +2380,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         ) { result ->
             runOnUiThread {
                 result.onSuccess { reply ->
-                    jarvisStatusText.text = "Jarvis AI • risposta ricevuta"
+                    jarvisStatusText.text = jarvisAssistantName() + " AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
                     speakJarvis(reply)
                 }.onFailure { error ->
                     val detail = error.message.orEmpty()
-                    jarvisStatusText.text = "Jarvis AI • errore: " + detail.take(90)
+                    jarvisStatusText.text = jarvisAssistantName() + " AI • errore: " + detail.take(90)
                     val spoken = when {
                         detail.contains("HTTP_503") ->
                             "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il secret Gemini nel Worker Cloudflare."
