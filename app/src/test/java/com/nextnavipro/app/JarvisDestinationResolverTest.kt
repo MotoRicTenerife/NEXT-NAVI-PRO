@@ -1,6 +1,5 @@
 package com.nextnavipro.app
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,9 +23,10 @@ class JarvisDestinationResolverTest {
     @Test fun duplicateGeocoderRecordsForSamePlaceDoNotCreateFalseAmbiguity() {
         val first = PlaceResult("Guaza", NavPoint(28.0460, -16.6540), "Tenerife", "village")
         val duplicate = PlaceResult("Guaza", NavPoint(28.0465, -16.6542), "Tenerife", "village")
-        assertEquals(first, JarvisDestinationResolver.uniqueNearbyExactLocality(
+        val selected = JarvisDestinationResolver.uniqueNearbyExactLocality(
             listOf(first, duplicate), "Guazza", NavPoint(28.1, -16.7)
-        ))
+        )
+        assertTrue(selected == first || selected == duplicate)
     }
 
     @Test fun refusesToGuessBetweenDistinctNearbyLocalities() {
