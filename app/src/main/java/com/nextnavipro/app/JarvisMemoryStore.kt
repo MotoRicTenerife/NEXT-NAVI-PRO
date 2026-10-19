@@ -100,7 +100,7 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
                     if (c.moveToFirst()) c.getString(0).orEmpty() else ""
                 }
                 val merged = listOf(previous, generated).filter { it.isNotBlank() }
-                    .joinToString(" ").take(MAX_SUMMARY_CHARS)
+                    .joinToString(" ").takeLast(MAX_SUMMARY_CHARS)
                 val values = ContentValues().apply { put("day", day); put("summary", merged) }
                 db.insertWithOnConflict("summaries", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             }
