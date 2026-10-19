@@ -2,6 +2,7 @@ services:
   - type: web
     name: next-navi-pro-jarvis
     runtime: node
+    branch: fix/jarvis-render-backend
     plan: free
     rootDir: backend/jarvis-render
     buildCommand: npm install
