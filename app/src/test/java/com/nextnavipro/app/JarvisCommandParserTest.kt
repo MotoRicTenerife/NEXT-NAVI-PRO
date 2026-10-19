@@ -62,16 +62,14 @@ class JarvisCommandParserTest {
             "Vorrei andare a Santa Cruz, fammi un briefing del percorso"
         )
         repeat(10_000) { index ->
-            val result = JarvisCommandParser.parse(inputs[index % inputs.size])
-            assertEquals(
-                if (index % inputs.size == 0 || index % inputs.size == 1)
-                    JarvisCommand.PreviewRoute("Guaza")
-                else if (index % inputs.size == 4) JarvisCommand.BriefRoute
-                else if (index % inputs.size == 5 || index % inputs.size == 6 || index % inputs.size == 7)
-                    JarvisCommand.Unknown
-                else null,
-                if (index % inputs.size in setOf(0, 1, 4, 5, 6, 7)) result else null
-            )
+            val inputIndex = index % inputs.size
+            val result = JarvisCommandParser.parse(inputs[inputIndex])
+            when (inputIndex) {
+                0, 1 -> assertEquals(JarvisCommand.PreviewRoute("Guaza"), result)
+                4 -> assertEquals(JarvisCommand.BriefRoute, result)
+                5, 6, 7 -> assertEquals(JarvisCommand.Unknown, result)
+                else -> assertEquals("Parser returned null for input index $inputIndex", false, result == null)
+            }
         }
     }
 
