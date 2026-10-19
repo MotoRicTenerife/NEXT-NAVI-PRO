@@ -2370,11 +2370,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                     if (voiceCommand) {
                         pendingJarvisPlaces = sortedResults
+                        // One real geocoder result can be routed without a touch interaction.
+                        // If the search is ambiguous, require the rider to stop before choosing.
+                        if (sortedResults.size == 1) {
+                            rememberSearch(query)
+                            selectJarvisOrSearchDestination(sortedResults.first(), autoStart = true)
+                            return@runOnUiThread
+                        }
                         val safeToConfirm = isVehicleSafelyStopped()
                         if (!safeToConfirm) {
-                            routeText.text = "DESTINAZIONE TROVATA • Conferma quando sei fermo"
-                            jarvisStatusText.text = "Risultati pronti: dì «mostra risultati» da fermo"
-                            speakJarvis("Ho trovato " + sortedResults.size + " risultati. Per sicurezza, fermati e poi dimmi «mostra risultati» per scegliere la destinazione.")
+                            routeText.text = "DESTINAZIONE TROVATA • scelta necessaria da fermo"
+                            jarvisStatusText.text = "Risultati pronti: fermati e dì «mostra risultati»"
+                            speakJarvis("Ho trovato " + sortedResults.size + " possibili destinazioni. Per evitare di scegliere il posto sbagliato, fermati in sicurezza e dimmi «mostra risultati».")
                             return@runOnUiThread
                         }
                     }
@@ -2410,7 +2417,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun selectJarvisOrSearchDestination(place: PlaceResult) {
+    private fun selectJarvisOrSearchDestination(place: PlaceResult, autoStart: Boolean = false) {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
@@ -2422,7 +2429,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeText.text = "DESTINAZIONE: " + place.name + "\nPremi AVVIA PERCORSO"
         routeButton.text = "AVVIA PERCORSO"
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
-        speakJarvis("Destinazione selezionata: " + place.name + ". Controlla il percorso prima di partire.")
+        if (autoStart) {
+            speakJarvis("Ho trovato " + place.name + ". Calcolo il percorso; verifica le indicazioni e la strada in sicurezza.")
+            calculateSelectedRoute()
+        } else {
+            speakJarvis("Destinazione selezionata: " + place.name + ". Controlla il percorso prima di partire.")
+        }
     }
 
     private fun calculateSelectedRoute() {
