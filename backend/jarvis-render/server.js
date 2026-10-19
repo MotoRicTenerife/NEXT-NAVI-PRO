@@ -7,6 +7,7 @@ const MAX_REQUEST_CHARS = clampInt(process.env.MAX_REQUEST_CHARS, 500, 1, 4000);
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 const ipWindows = new Map();
+const speedLimitIpWindows = new Map();
 
 function clampInt(raw, fallback, min, max) {
   const value = Number.parseInt(raw ?? "", 10);
@@ -49,6 +50,63 @@ function rateLimited(ip, now) {
     }
   }
   return false;
+}
+
+function speedLimitRateLimited(ip, now) {
+  let window = speedLimitIpWindows.get(ip);
+  if (!window || now - window.startedAt >= WINDOW_MS) {
+    window = { startedAt: now, count: 0 };
+    speedLimitIpWindows.set(ip, window);
+  }
+  if (window.count >= 8) return true;
+  window.count += 1;
+  if (speedLimitIpWindows.size > 5000) {
+    for (const [key, value] of speedLimitIpWindows) {
+      if (now - value.startedAt >= WINDOW_MS) speedLimitIpWindows.delete(key);
+    }
+  }
+  return false;
+}
+
+function parseHereSpeedLimit(body) {
+  const root = JSON.parse(body);
+  const response = root?.response || root;
+  const routes = Array.isArray(response?.route) ? response.route : [];
+  let lastLinkLimit = null;
+  let sawLink = false;
+  for (const route of routes) {
+    for (const leg of Array.isArray(route?.leg) ? route.leg : []) {
+      for (const link of Array.isArray(leg?.link) ? leg.link : []) {
+        sawLink = true;
+        lastLinkLimit = null;
+        const attributes = link?.attributes;
+        if (!attributes || typeof attributes !== "object") continue;
+        for (const [key, value] of Object.entries(attributes)) {
+          if (!key.startsWith("SPEED_LIMITS_FC") || !Array.isArray(value)) continue;
+          for (const item of value) {
+            const parse = field => {
+              const raw = item?.[field];
+              if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+              const numeric = Number(raw);
+              if (!Number.isFinite(numeric) || numeric <= 0) return null;
+              const unit = String(item.UNIT ?? item.SPEED_LIMIT_UNIT ?? "K").toUpperCase();
+              const kmh = unit === "M" || unit.includes("MPH") ? numeric * 1.609344 : numeric;
+              const rounded = Math.round(kmh);
+              return rounded >= 5 && rounded <= 200 ? rounded : null;
+            };
+            const from = parse("FROM_REF_SPEED_LIMIT");
+            const to = parse("TO_REF_SPEED_LIMIT");
+            if (from !== null && to !== null && from === to) {
+              lastLinkLimit = from;
+              break;
+            }
+          }
+          if (lastLinkLimit !== null) break;
+        }
+      }
+    }
+  }
+  return sawLink ? lastLinkLimit : null;
 }
 
 function haversineKm(a, b) {
@@ -224,6 +282,56 @@ async function handle(req, res) {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
   }
+  if (url.pathname === "/speed-limit") {
+    if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    const hereApiKey = process.env.HERE_API_KEY;
+    if (!hereApiKey) return send(res, 503, { error: "Speed-limit provider not configured" });
+    if (speedLimitRateLimited(getClientIp(req), Date.now())) {
+      return send(res, 429, { error: "Too many speed-limit requests; try again later" });
+    }
+
+    let input;
+    try {
+      input = await readJson(req);
+    } catch (error) {
+      return send(res, error.statusCode || 400, { error: "Invalid speed-limit request" });
+    }
+    const points = Array.isArray(input?.points) ? input.points.slice(-8) : [];
+    if (points.length < 3 || points.some(point =>
+      !point || !Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90 ||
+      !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180)) {
+      return send(res, 400, { error: "At least three valid GPS points are required" });
+    }
+
+    const csv = "LATITUDE,LONGITUDE\\n" + points.map(point => point.latitude + "," + point.longitude).join("\\n") + "\\n";
+    const query = new URLSearchParams({
+      routeMatch: "1",
+      mode: "fastest;car;traffic:disabled",
+      attributes: "SPEED_LIMITS_FCn(FROM_REF_SPEED_LIMIT,TO_REF_SPEED_LIMIT)",
+      apiKey: hereApiKey
+    });
+    try {
+      const upstream = await fetch("https://routematching.hereapi.com/v8/match/routelinks?" + query.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", "Accept": "application/json" },
+        body: csv,
+        signal: AbortSignal.timeout(9000)
+      });
+      const body = await upstream.text();
+      if (!upstream.ok) {
+        console.warn("HERE route matching failed", { status: upstream.status });
+        return send(res, 502, { error: "Speed-limit provider unavailable" });
+      }
+      const speedLimitKmh = parseHereSpeedLimit(body);
+      return send(res, 200, { speedLimitKmh });
+    } catch (error) {
+      console.warn("HERE route matching request failed", {
+        errorType: error instanceof Error ? error.name : "UnknownError"
+      });
+      return send(res, 502, { error: "Speed-limit provider unavailable" });
+    }
+  }
+
   if (url.pathname !== "/jarvis") return send(res, 404, { error: "Not found" });
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
 
