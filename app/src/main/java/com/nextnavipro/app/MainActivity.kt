@@ -177,6 +177,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var routePreviewResult: RouteResult? = null
     private var routePreviewDestination: PlaceResult? = null
     private var routePreviewFetchedAt = 0L
+    private val routePreviewRefreshHandler = Handler(Looper.getMainLooper())
+    private val routePreviewRefreshRunnable = object : Runnable {
+        override fun run() {
+            if (!dashboardStarted || routeResult != null) return
+            val place = routePreviewDestination ?: return
+            val location = currentLocation
+            if (isCalculatingRoute || location == null || !location.hasAccuracy() || location.accuracy > 50f) {
+                routePreviewRefreshHandler.postDelayed(this, 15L * 60L * 1000L)
+                return
+            }
+            previewRouteForJarvis(place, announce = false)
+        }
+    }
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
@@ -2633,6 +2646,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routePreviewResult = null
         routePreviewDestination = null
         routePreviewFetchedAt = 0L
+        routePreviewRefreshHandler.removeCallbacks(routePreviewRefreshRunnable)
         resetRouteProgress()
         routeMetricsText.text = "— km  •  ARRIVO —"
         val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
@@ -2659,15 +2673,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * Route preview is deliberately separate from active navigation. It does not
      * start turn guidance, radar proximity alerts, or paired GPX/CSV recording.
      */
-    private fun previewRouteForJarvis(place: PlaceResult) {
+    private fun previewRouteForJarvis(place: PlaceResult, announce: Boolean = true) {
         val location = currentLocation
         val anyOrigin = location?.let { NavPoint(it.latitude, it.longitude) }
         val origin = location?.takeIf { it.hasAccuracy() && it.accuracy <= 50f }
             ?.let { NavPoint(it.latitude, it.longitude) }
         if (origin == null) {
             val cached = RouteInsightCache.loadForDestination(this, place.name, anyOrigin)
-            if (cached != null) showCachedRoutePreview(place, cached)
-            else speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            if (cached != null) showCachedRoutePreview(place, cached, announce)
+            else if (announce) speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
             return
         }
         if (isCalculatingRoute) return
@@ -2684,30 +2698,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routePreviewDestination = place
                     routePreviewFetchedAt = System.currentTimeMillis()
                     RouteInsightCache.save(this, place.name, place.point, origin, result, routePreviewFetchedAt)
+                    scheduleRoutePreviewRefresh()
                     drawRoute(result, true)
                     val minutes = (result.durationSeconds / 60.0).roundToInt()
                     routeText.text = String.format(Locale.ITALY,
                         "ANTEPRIMA • %.1f km • circa %d min\\n%s",
                         result.distanceKm, minutes, result.firstInstruction)
                     routeButton.text = appText("AVVIA PERCORSO")
-                    speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                    if (announce) speakRouteBriefing(place.name, result, routePreviewFetchedAt)
                 }
             } catch (_: Exception) {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     val cached = RouteInsightCache.loadForDestination(this, place.name, origin)
-                    if (cached != null) showCachedRoutePreview(place, cached)
+                    if (cached != null) showCachedRoutePreview(place, cached, announce)
                     else {
                         routeText.text = "ANTEPRIMA NON DISPONIBILE • connessione necessaria"
-                        speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        if (announce) speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        scheduleRoutePreviewRefresh()
                     }
                 }
             }
         }, "jarvis-route-preview").start()
     }
 
-    private fun showCachedRoutePreview(place: PlaceResult, cached: CachedRouteInsight) {
+    private fun showCachedRoutePreview(place: PlaceResult, cached: CachedRouteInsight, announce: Boolean = true) {
         routePreviewResult = cached.route
         routePreviewDestination = place
         routePreviewFetchedAt = cached.fetchedAtEpochMs
@@ -2720,7 +2736,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "ANTEPRIMA OFFLINE • %.1f km • circa %d min\\n%s",
             cached.route.distanceKm, minutes, freshness)
         routeButton.text = appText("AVVIA PERCORSO")
-        speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+        scheduleRoutePreviewRefresh()
+        if (announce) speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+    }
+
+    private fun scheduleRoutePreviewRefresh() {
+        routePreviewRefreshHandler.removeCallbacks(routePreviewRefreshRunnable)
+        if (routePreviewDestination != null && routeResult == null && dashboardStarted) {
+            routePreviewRefreshHandler.postDelayed(routePreviewRefreshRunnable, 15L * 60L * 1000L)
+        }
     }
 
     private fun speakRouteBriefing(destinationName: String, route: RouteResult, fetchedAt: Long?) {
@@ -2790,6 +2814,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routePreviewResult = null
                     routePreviewDestination = null
                     routePreviewFetchedAt = 0L
+                    routePreviewRefreshHandler.removeCallbacks(routePreviewRefreshRunnable)
                     RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
@@ -2850,6 +2875,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routePreviewResult = null
         routePreviewDestination = null
         routePreviewFetchedAt = 0L
+        routePreviewRefreshHandler.removeCallbacks(routePreviewRefreshRunnable)
         resetRouteProgress()
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
         announcedManeuverIndex = -1
