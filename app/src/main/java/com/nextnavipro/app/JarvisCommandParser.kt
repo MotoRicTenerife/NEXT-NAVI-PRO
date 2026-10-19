@@ -25,6 +25,17 @@ sealed class JarvisCommand {
 }
 
 object JarvisCommandParser {
+    /** Remove a spoken assistant-name prefix before deterministic intent parsing. */
+    fun stripAssistantName(transcript: String, assistantName: String = "Jarvis"): String {
+        val names = listOf(assistantName.trim(), "Jarvis")
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+            .joinToString("|") { Regex.escape(it) }
+        val prefix = Regex("(?iu)^\\s*(?:$names)(?:\\s*[,.:;!?-]\\s*|\\s+)")
+        val stripped = transcript.replaceFirst(prefix, "").trim()
+        return stripped.ifBlank { transcript.trim() }
+    }
+
     fun parse(transcript: String): JarvisCommand {
         val normalized = normalize(transcript)
         if (normalized.isBlank()) return JarvisCommand.Unknown
