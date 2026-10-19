@@ -4294,6 +4294,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // A normal Activity shutdown finalizes the paired session. If Android kills the process
         // without this callback, the on-disk checkpoints are recovered on the next launch.
         if (recordingGpx || gpsDiagnosticRecording) finishGpxRecording(save = true, showResult = false)
+        // Do not let the delayed preview runnable retain or call a destroyed Activity.
+        routePreviewRefreshHandler.removeCallbacksAndMessages(null)
         clockHandler.removeCallbacksAndMessages(null)
         ipFallbackHandler.removeCallbacksAndMessages(null)
         setNavigationBrightnessEnabled(false)
