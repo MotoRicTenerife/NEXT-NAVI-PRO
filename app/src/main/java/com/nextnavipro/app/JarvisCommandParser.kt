@@ -26,7 +26,7 @@ object JarvisCommandParser {
     fun parse(transcript: String): JarvisCommand {
         val normalized = normalize(transcript)
         if (normalized.isBlank()) return JarvisCommand.Unknown
-        if (matchesAny(normalized, "come ti chiami", "qual e il tuo nome", "come ti devo chiamare",
+        if (matchesAny(normalized, "come ti chiami", "come ti chiami tu", "tu come ti chiami", "qual e il tuo nome", "dimmi il tuo nome", "come ti devo chiamare",
             "chi sei", "what is your name", "what are you called", "who are you",
             "como te llamas", "cual es tu nombre", "comment tu t appelles", "wie heisst du",
             "como te chamas", "hoe heet je")) return JarvisCommand.AssistantName
