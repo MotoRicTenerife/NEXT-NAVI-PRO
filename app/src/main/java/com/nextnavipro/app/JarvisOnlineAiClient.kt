@@ -26,11 +26,15 @@ object JarvisOnlineAiClient {
     fun isConfigured(): Boolean =
         endpoint.startsWith("https://", ignoreCase = true)
 
+    data class HistoryMessage(val role: String, val text: String)
+
     fun ask(
         message: String,
         language: String = java.util.Locale.getDefault().toLanguageTag(),
         assistantName: String = "Jarvis",
         location: LiveLocation? = null,
+        history: List<HistoryMessage> = emptyList(),
+        summary: String = "",
         callback: (Result<String>) -> Unit
     ) {
         val target = endpoint
@@ -60,6 +64,14 @@ object JarvisOnlineAiClient {
                     .put("language", language.ifBlank { java.util.Locale.getDefault().toLanguageTag() })
                     .put("assistantName", assistantName.trim().take(30).ifBlank { "Jarvis" })
                     .put("app", "NEXT NAVI PRO")
+                    .put("history", org.json.JSONArray().apply {
+                        history.takeLast(16).forEach { item ->
+                            if ((item.role == "user" || item.role == "model") && item.text.isNotBlank()) {
+                                put(JSONObject().put("role", item.role).put("text", item.text.take(500)))
+                            }
+                        }
+                    })
+                    .put("summary", summary.take(2500))
                     .apply {
                         if (location != null &&
                             location.latitude.isFinite() && location.latitude in -90.0..90.0 &&
