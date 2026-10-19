@@ -4,6 +4,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class JarvisCommandParserTest {
+    @Test fun placeSearchVariantsTolerateForeignPlaceNameSpeechSpelling() {
+        assertEquals(listOf("Guazza", "Guaza"), NavigationServices.placeQueryVariants("Guazza"))
+        assertEquals(listOf("Los Cristianos"), NavigationServices.placeQueryVariants("Los Cristianos"))
+        assertEquals(listOf("Adeje"), NavigationServices.placeQueryVariants("Adeje"))
+        assertEquals(listOf("Candelaría", "Candelaria"), NavigationServices.placeQueryVariants("Candelaría"))
+    }
+
     @Test fun parsesDestinationCommands() {
         assertEquals(JarvisCommand.Navigate("Santa Cruz"), JarvisCommandParser.parse("Portami a Santa Cruz"))
         assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Mi porti a Los Cristianos"))
