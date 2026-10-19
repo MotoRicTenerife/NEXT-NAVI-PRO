@@ -71,6 +71,22 @@ jobs:
                           failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
                       else:
                           failures.append("Jarvis chat/API key/model: " + str(error))
+                  try:
+                      status, weather_reply = post_json(endpoint, {
+                          "message":"Che condizioni meteo ci sono?",
+                          "language":"it-IT",
+                          "location":{"latitude":28.05,"longitude":-16.68}
+                      }, 20)
+                      reply = weather_reply.get("reply", "")
+                      if status != 200 or "Open-Meteo" not in reply or not reply.strip():
+                          raise RuntimeError("Worker weather response is not verified Open-Meteo data")
+                      print("Deployed Jarvis Worker weather check PASSED:", reply[:180])
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Deployed Jarvis Worker weather HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Deployed Jarvis Worker weather: " + str(error))
               except Exception as error:
                   failures.append("Jarvis Worker health: " + str(error))
           else:
@@ -88,7 +104,8 @@ jobs:
               failures.append("Open-Meteo weather source: " + str(error))
           try:
               attempts = [
-                  ("Photon app-like Guaza search with Tenerife location bias", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza","limit":"20","lat":"28.1","lon":"-16.7","zoom":"14"})),
+                  ("Photon app-like Guazza search with Tenerife location bias", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guazza","limit":"20","lat":"28.1","lon":"-16.7","zoom":"14"})),
+                  ("Photon phonetic fallback Guaza with Tenerife location bias", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza","limit":"20","lat":"28.1","lon":"-16.7","zoom":"14"})),
                   ("Photon Guaza Tenerife", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza Tenerife","limit":"20"})),
                   ("Nominatim Guaza Tenerife", "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({"q":"Guaza Tenerife","format":"jsonv2","limit":"20","addressdetails":"1","accept-language":"it"}))
               ]
