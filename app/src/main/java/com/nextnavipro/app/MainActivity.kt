@@ -2706,9 +2706,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val near = origin?.let { NavPoint(it.latitude, it.longitude) }
                     ?: approximateLocation?.let { NavPoint(it.latitude, it.longitude) }
                 val results = NavigationServices.searchPlaces(query, near)
-                val sortedResults = if (origin != null) results.sortedBy { result ->
+                // Approximate IP location may rank search results, but only a reliable GPS fix
+                // can authorize automatic selection of a locality for turn-by-turn navigation.
+                val sortReference = origin ?: approximateLocation?.let {
+                    Location("approximate-search").apply {
+                        latitude = it.latitude
+                        longitude = it.longitude
+                    }
+                }
+                val sortedResults = if (sortReference != null) results.sortedBy { result ->
                     val distance = FloatArray(1)
-                    Location.distanceBetween(origin.latitude, origin.longitude, result.point.latitude, result.point.longitude, distance)
+                    Location.distanceBetween(sortReference.latitude, sortReference.longitude, result.point.latitude, result.point.longitude, distance)
                     distance[0]
                 } else results
                 runOnUiThread {
@@ -2720,16 +2728,37 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         return@runOnUiThread
                     }
                     if (voiceCommand && !pendingJarvisPreview) {
-                        val locality = sortedResults.firstOrNull { isBroadLocalityMatch(it, query) }
-                        if (locality != null) {
+                        val reliableOrigin = origin?.takeIf {
+                            it.hasAccuracy() && it.accuracy <= 100f &&
+                                System.currentTimeMillis() - it.time in 0..120_000L
+                        }?.let { NavPoint(it.latitude, it.longitude) }
+                        val exactLocality = JarvisDestinationResolver.uniqueNearbyExactLocality(
+                            sortedResults, query, reliableOrigin
+                        )
+                        if (exactLocality != null) {
                             pendingJarvisPlaces = emptyList()
-                            pendingJarvisLocality = locality.name
+                            pendingJarvisLocality = null
                             pendingJarvisAddressMode = false
-                            routeText.text = "LOCALITÀ: ${locality.name}\nScegli una destinazione più precisa con Jarvis"
-                            jarvisStatusText.text = "Jarvis • attende il tipo di destinazione"
-                            speakJarvis("Ho trovato la località " + locality.name +
-                                ". Vuoi arrivare in centro, a un indirizzo preciso, oppure cerchi un'attività, un negozio o un punto di interesse?")
+                            rememberSearch(query)
+                            selectJarvisOrSearchDestination(exactLocality, autoStart = true)
                             return@runOnUiThread
+                        }
+
+                        // Do not ask a redundant "center/address/POI?" follow-up when an exact
+                        // locality was found but remains ambiguous. Show the real candidates
+                        // with distances instead, so the rider can choose the intended place.
+                        if (!JarvisDestinationResolver.hasExactLocalityMatch(sortedResults, query)) {
+                            val locality = sortedResults.firstOrNull { isBroadLocalityMatch(it, query) }
+                            if (locality != null) {
+                                pendingJarvisPlaces = emptyList()
+                                pendingJarvisLocality = locality.name
+                                pendingJarvisAddressMode = false
+                                routeText.text = "LOCALITÀ: ${locality.name}\nScegli una destinazione più precisa con Jarvis"
+                                jarvisStatusText.text = "Jarvis • attende il tipo di destinazione"
+                                speakJarvis("Ho trovato la località " + locality.name +
+                                    ". Vuoi arrivare in centro, a un indirizzo preciso, oppure cerchi un'attività, un negozio o un punto di interesse?")
+                                return@runOnUiThread
+                            }
                         }
                     }
                     if (voiceCommand) {
