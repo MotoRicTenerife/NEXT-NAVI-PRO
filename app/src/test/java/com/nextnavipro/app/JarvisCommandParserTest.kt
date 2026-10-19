@@ -49,8 +49,13 @@ class JarvisCommandParserTest {
         assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Annulla la navigazione"))
         assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Ferma navigazione"))
         assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Cancel navigation"))
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Annulla il percorso"))
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Ferma il navigatore"))
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Smetti di navigare"))
         assertEquals(JarvisCommand.ChangeDestination(), JarvisCommandParser.parse("Cambia destinazione"))
         assertEquals(JarvisCommand.ChangeDestination("Santa Cruz"), JarvisCommandParser.parse("Cambia destinazione a Santa Cruz"))
+        assertEquals(JarvisCommand.ChangeDestination("Adeje"), JarvisCommandParser.parse("Cambia destinazione in Adeje"))
+        assertEquals(JarvisCommand.ChangeDestination("Guaza"), JarvisCommandParser.parse("Portami invece a Guaza"))
         assertEquals(JarvisCommand.ChangeDestination("Adeje"), JarvisCommandParser.parse("Change destination to Adeje"))
     }
 
