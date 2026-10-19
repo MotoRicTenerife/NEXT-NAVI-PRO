@@ -32,6 +32,10 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
+      - name: Check Cloudflare Worker JavaScript syntax
+        run: node --check backend/jarvis-cloudflare/src/index.js
+      - name: Test Cloudflare Worker weather fallback
+        run: node --test backend/jarvis-cloudflare/test/worker.test.js
       - name: Smoke-test live Jarvis, weather source and Guaza geocoder (diagnostic)
         continue-on-error: true
         env:
