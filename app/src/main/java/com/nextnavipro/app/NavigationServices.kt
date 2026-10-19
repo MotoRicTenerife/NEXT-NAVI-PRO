@@ -115,8 +115,12 @@ object NavigationServices {
                     properties.optString("state").takeIf { it.isNotBlank() },
                     properties.optString("country").takeIf { it.isNotBlank() }
                 ).filterNotNull()
-                val kind = listOf(properties.optString("type"), properties.optString("osm_value"), properties.optString("osm_key"))
-                    .firstOrNull { it.isNotBlank() }?.lowercase() ?: "unknown"
+                val kindCandidates = listOf(properties.optString("type"), properties.optString("osm_value"), properties.optString("osm_key"))
+                    .map { it.lowercase(Locale.ROOT) }
+                val localityKinds = setOf("city", "town", "village", "hamlet", "municipality", "suburb",
+                    "quarter", "neighbourhood", "neighborhood", "district", "locality", "borough")
+                val kind = kindCandidates.firstOrNull { it in localityKinds }
+                    ?: kindCandidates.firstOrNull { it.isNotBlank() } ?: "unknown"
                 results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", "), kind))
             }
             if (results.isNotEmpty()) return results
@@ -159,8 +163,14 @@ object NavigationServices {
                     ?: item.optString("display_name").substringBefore(",").takeIf { it.isNotBlank() }
                     ?: continue
                 val detail = item.optString("display_name").removePrefix(name).trim().trimStart(',')
-                val kind = listOf(item.optString("type"), item.optString("class"), address.optString("city"), address.optString("town"), address.optString("village"))
-                    .firstOrNull { it.isNotBlank() }?.lowercase() ?: "unknown"
+                val kindCandidates = listOf(
+                    item.optString("addresstype"), item.optString("type"), item.optString("class"),
+                    address.optString("city"), address.optString("town"), address.optString("village")
+                ).map { it.lowercase(Locale.ROOT) }
+                val localityKinds = setOf("city", "town", "village", "hamlet", "municipality", "suburb",
+                    "quarter", "neighbourhood", "neighborhood", "district", "locality", "borough")
+                val kind = kindCandidates.firstOrNull { it in localityKinds }
+                    ?: kindCandidates.firstOrNull { it.isNotBlank() } ?: "unknown"
                 results.add(PlaceResult(name, NavPoint(lat, lon), detail, kind))
             }
             return results
