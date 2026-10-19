@@ -62,7 +62,11 @@ jobs:
                           raise RuntimeError("No reply in HTTP 200 response")
                       print("Jarvis Gemini chat check PASSED:", reply[:180])
                   except Exception as error:
-                      failures.append("Jarvis chat/API key/model: " + str(error))
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Jarvis chat/API key/model: " + str(error))
               except Exception as error:
                   failures.append("Jarvis Worker health: " + str(error))
           else:
