@@ -2114,6 +2114,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         getSharedPreferences(PREFS, MODE_PRIVATE).getString("jarvis_assistant_name", "Jarvis")
             .orEmpty().trim().take(30).ifBlank { "Jarvis" }
 
+    private fun jarvisIdentityReply(): String {
+        val name = jarvisAssistantName()
+        return when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+            "it" -> "Mi chiamo $name. Sono il tuo assistente di navigazione NEXT NAVI PRO."
+            "es" -> "Me llamo $name. Soy tu asistente de navegación de NEXT NAVI PRO."
+            "fr" -> "Je m'appelle $name. Je suis votre assistant de navigation NEXT NAVI PRO."
+            "de" -> "Ich heiße $name. Ich bin dein Navigationsassistent von NEXT NAVI PRO."
+            "pt" -> "Chamo-me $name. Sou o teu assistente de navegação NEXT NAVI PRO."
+            "nl" -> "Ik heet $name. Ik ben je navigatieassistent van NEXT NAVI PRO."
+            else -> "My name is $name. I'm your NEXT NAVI PRO navigation assistant."
+        }
+    }
+
     private fun jarvisButtonIdleLabel(): String = "🎙 " + jarvisAssistantName()
 
     private fun updateJarvisButtonLabel(listening: Boolean = jarvisListening) {
@@ -2289,7 +2302,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         when (val command = JarvisCommandParser.parse(transcript)) {
-            JarvisCommand.AssistantName -> speakJarvis("Mi chiamo " + jarvisAssistantName() + ". Sono il tuo assistente di navigazione NEXT NAVI PRO.")
+            JarvisCommand.AssistantName -> speakJarvis(jarvisIdentityReply())
             is JarvisCommand.PreviewRoute -> {
                 pendingJarvisPreview = true
                 destinationInput.setText(command.destination)
