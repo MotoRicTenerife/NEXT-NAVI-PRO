@@ -52,37 +52,43 @@ object WeatherService {
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
             }.orEmpty()
             if (status !in 200..299) throw IllegalStateException("Meteo non disponibile (HTTP $status)")
-            val root = JSONObject(body)
-            val current = root.optJSONObject("current") ?: throw IllegalStateException("Dati meteo attuali assenti")
-            val hourly = root.optJSONObject("hourly") ?: throw IllegalStateException("Previsioni orarie assenti")
-            val times = hourly.optJSONArray("time") ?: throw IllegalStateException("Orari meteo assenti")
-            val temperatures = hourly.optJSONArray("temperature_2m")
-            val rain = hourly.optJSONArray("precipitation_probability")
-            val codes = hourly.optJSONArray("weather_code")
-            val winds = hourly.optJSONArray("wind_speed_10m")
-            val gusts = hourly.optJSONArray("wind_gusts_10m")
-            val items = ArrayList<WeatherHour>()
-            for (i in 0 until times.length()) {
-                val time = times.optString(i)
-                val temp = temperatures?.optDouble(i, Double.NaN) ?: Double.NaN
-                val wind = winds?.optDouble(i, Double.NaN) ?: Double.NaN
-                val gust = gusts?.optDouble(i, Double.NaN) ?: Double.NaN
-                val code = codes?.optInt(i, -1) ?: -1
-                if (!time.contains("T") || time.length < 16 || !temp.isFinite() || !wind.isFinite() || !gust.isFinite() || code < 0) continue
-                items.add(WeatherHour(time, temp, rain?.optInt(i, 0)?.coerceIn(0, 100) ?: 0, wind, gust, code))
-            }
-            return WeatherSnapshot(
-                temperatureC = current.optDouble("temperature_2m", Double.NaN).also { require(it.isFinite()) },
-                windKmh = current.optDouble("wind_speed_10m", Double.NaN).also { require(it.isFinite()) },
-                gustKmh = current.optDouble("wind_gusts_10m", Double.NaN).also { require(it.isFinite()) },
-                windDirectionDegrees = current.optInt("wind_direction_10m", 0).mod(360),
-                weatherCode = current.optInt("weather_code", -1).also { require(it >= 0) },
-                currentTime = current.optString("time"),
-                hourly = items
-            )
+            return parseResponse(body)
         } finally {
             connection.disconnect()
         }
+    }
+
+
+    /** Parse and validate a response independently from the network for repeatable tests. */
+    internal fun parseResponse(body: String): WeatherSnapshot {
+        val root = JSONObject(body)
+        val current = root.optJSONObject("current") ?: throw IllegalStateException("Dati meteo attuali assenti")
+        val hourly = root.optJSONObject("hourly") ?: throw IllegalStateException("Previsioni orarie assenti")
+        val times = hourly.optJSONArray("time") ?: throw IllegalStateException("Orari meteo assenti")
+        val temperatures = hourly.optJSONArray("temperature_2m")
+        val rain = hourly.optJSONArray("precipitation_probability")
+        val codes = hourly.optJSONArray("weather_code")
+        val winds = hourly.optJSONArray("wind_speed_10m")
+        val gusts = hourly.optJSONArray("wind_gusts_10m")
+        val items = ArrayList<WeatherHour>()
+        for (i in 0 until times.length()) {
+            val time = times.optString(i)
+            val temp = temperatures?.optDouble(i, Double.NaN) ?: Double.NaN
+            val wind = winds?.optDouble(i, Double.NaN) ?: Double.NaN
+            val gust = gusts?.optDouble(i, Double.NaN) ?: Double.NaN
+            val code = codes?.optInt(i, -1) ?: -1
+            if (!time.contains("T") || time.length < 16 || !temp.isFinite() || !wind.isFinite() || !gust.isFinite() || code < 0) continue
+            items.add(WeatherHour(time, temp, rain?.optInt(i, 0)?.coerceIn(0, 100) ?: 0, wind, gust, code))
+        }
+        return WeatherSnapshot(
+            temperatureC = current.optDouble("temperature_2m", Double.NaN).also { require(it.isFinite()) },
+            windKmh = current.optDouble("wind_speed_10m", Double.NaN).also { require(it.isFinite()) },
+            gustKmh = current.optDouble("wind_gusts_10m", Double.NaN).also { require(it.isFinite()) },
+            windDirectionDegrees = current.optInt("wind_direction_10m", 0).mod(360),
+            weatherCode = current.optInt("weather_code", -1).also { require(it >= 0) },
+            currentTime = current.optString("time"),
+            hourly = items
+        )
     }
 
     fun description(code: Int): String = when (code) {
