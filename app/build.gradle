@@ -8,6 +8,7 @@ def stableSigningAlias = System.getenv('NEXT_NAVI_KEY_ALIAS')
 def stableSigningKeyPassword = System.getenv('NEXT_NAVI_KEY_PASSWORD')
 def stableSigningReady = stableSigningPath && stableSigningStorePassword && stableSigningAlias && stableSigningKeyPassword && file(stableSigningPath).isFile()
 def hereApiKey = System.getenv('NEXT_NAVI_HERE_API_KEY') ?: ''
+def jarvisAiEndpoint = (System.getenv('NEXT_NAVI_AI_ENDPOINT') ?: '').replace('\\', '\\\\').replace('"', '\\"')
 
 android {
     namespace 'com.nextnavipro.app'
