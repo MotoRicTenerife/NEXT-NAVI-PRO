@@ -184,10 +184,6 @@ async function handle(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("Jarvis configuration error: GEMINI_API_KEY is missing");
-    return send(res, 503, { error: "Provider not configured" });
-  }
 
   if (rateLimited(getClientIp(req), Date.now())) {
     console.warn("Jarvis rate limit reached");
@@ -224,13 +220,16 @@ async function handle(req, res) {
   }
 
   let liveContext = "";
+  let weatherResult = null;
+  let trafficResult = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima)\b/.test(normalizedMessage);
   const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
 
   if (asksWeather && location) {
     try {
-      liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(await fetchLiveWeather(location));
+      weatherResult = await fetchLiveWeather(location);
+      liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(weatherResult);
     } catch {
       liveContext += "\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
     }
@@ -240,7 +239,8 @@ async function handle(req, res) {
 
   if (asksTraffic && location) {
     try {
-      liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(await fetchDgtTraffic(location));
+      trafficResult = await fetchDgtTraffic(location);
+      liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(trafficResult);
     } catch {
       liveContext += "\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
     }
@@ -253,6 +253,48 @@ async function handle(req, res) {
     language +
     ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Use verified live context below when present, state its source and timestamp when available, and distinguish incidents from a full measure of traffic flow. If a source lookup failed or is not configured, say so clearly. Never pretend to browse or query Google Maps. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data." +
     liveContext;
+
+  if (!apiKey) {
+    const fallbackReplies = [];
+    if (asksWeather) {
+      if (weatherResult) {
+        const descriptions = {
+          0: "sereno", 1: "prevalentemente sereno", 2: "parzialmente nuvoloso", 3: "coperto",
+          45: "nebbia", 48: "nebbia con brina", 51: "pioviggine leggera", 53: "pioviggine",
+          55: "pioviggine intensa", 61: "pioggia leggera", 63: "pioggia", 65: "pioggia intensa",
+          71: "neve leggera", 73: "neve", 75: "neve intensa", 80: "rovesci leggeri",
+          81: "rovesci", 82: "rovesci intensi", 95: "temporale", 96: "temporale con grandine"
+        };
+        const description = descriptions[weatherResult.weatherCode] || "condizioni meteo variabili";
+        fallbackReplies.push("Meteo attuale da Open-Meteo: " + description + ", " +
+          weatherResult.temperatureC + " gradi, vento " + weatherResult.windKmh +
+          " km/h e raffiche fino a " + weatherResult.gustKmh + " km/h. Dato aggiornato alle " +
+          (weatherResult.validTime || "ora locale del servizio") + ".");
+      } else {
+        fallbackReplies.push("Non riesco a verificare il meteo attuale dai dati disponibili.");
+      }
+    }
+    if (asksTraffic) {
+      if (trafficResult) {
+        if (trafficResult.incidents.length) {
+          const summaries = trafficResult.incidents.slice(0, 3)
+            .map(item => [item.road, item.description].filter(Boolean).join(": "))
+            .filter(Boolean);
+          fallbackReplies.push("La DGT segnala " + trafficResult.incidents.length +
+            " incidenza/e geolocalizzata/e entro 30 km. " +
+            (summaries.length ? summaries.join(". ") + ". " : "") +
+            "Sono segnalazioni di incidenti, non una misura completa della velocità del traffico.");
+        } else {
+          fallbackReplies.push("Nel feed DGT non ho trovato incidenti geolocalizzati entro 30 km. Questo non significa che il traffico sia scorrevole.");
+        }
+      } else {
+        fallbackReplies.push("Non riesco a verificare il traffico in tempo reale. Puoi consultare la mappa ufficiale DGT su infocar.dgt.es/etraffic.");
+      }
+    }
+    if (fallbackReplies.length) return send(res, 200, { reply: fallbackReplies.join(" ") });
+    console.error("Jarvis configuration error: GEMINI_API_KEY is missing");
+    return send(res, 503, { error: "Provider not configured" });
+  }
 
   const model = (process.env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" +
