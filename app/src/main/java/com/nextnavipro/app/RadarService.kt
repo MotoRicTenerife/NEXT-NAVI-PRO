@@ -15,18 +15,22 @@ data class RadarCamera(
     val osmId: Long,
     val point: NavPoint,
     val kind: String,
-    val direction: String
+    val direction: String,
+    val maxSpeed: String = ""
 )
 
 object RadarService {
     // Public OSM Overpass endpoints: try a secondary instance if the primary is unavailable or rate-limited.
     private val ENDPOINTS = listOf(
         "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter"
     )
-    private const val RADIUS_METERS = 15000
-    private const val CONNECT_TIMEOUT_MS = 10000
-    private const val READ_TIMEOUT_MS = 20000
+    // A 10 km window keeps the response useful at road speed without requesting a
+    // needlessly large relation graph on every refresh.
+    private const val RADIUS_METERS = 10000
+    private const val CONNECT_TIMEOUT_MS = 8000
+    private const val READ_TIMEOUT_MS = 18000
 
     fun fetchNear(center: NavPoint): List<RadarCamera> {
         var lastError: Exception? = null
@@ -46,10 +50,12 @@ object RadarService {
         // Include standalone camera nodes and enforcement relations. The latter are
         // important for devices mapped beside the road, average-speed checks, and cameras
         // whose direction is encoded by relation members rather than node tags.
-        val query = "[out:json][timeout:20];(" +
+        val query = "[out:json][timeout:15];(" +
             "node[\"highway\"=\"speed_camera\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
-            "node[\"enforcement\"=\"maxspeed\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
-            "relation[\"type\"=\"enforcement\"][\"enforcement\"~\"^(maxspeed|average_speed)$\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
+            // Compatibility with occasional non-standard but real-world OSM tagging.
+            "node[\"man_made\"=\"speed_camera\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
+            "node[\"enforcement\"~\"^(maxspeed|average_speed|traffic_signals)$\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
+            "relation[\"type\"=\"enforcement\"][\"enforcement\"~\"^(maxspeed|average_speed|traffic_signals)$\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
             ");out body;>;out body qt;"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
@@ -75,39 +81,56 @@ object RadarService {
         }
     }
 
-    /** Parse tagged camera nodes plus the device members of OSM enforcement relations. */
+    /** Parse camera nodes and device members of OSM enforcement relations. */
     internal fun parseOverpassResponse(body: String): List<RadarCamera> {
-        val elements = JSONObject(body).optJSONArray("elements") ?: JSONArray()
+        val root = JSONObject(body)
+        // Overpass can return HTTP 200 with a JSON "remark" for a timed-out or
+        // otherwise failed query. Treating that as an empty result poisons the cache.
+        val remark = root.optString("remark").trim()
+        if (remark.isNotEmpty()) throw IllegalStateException("Overpass query failed: " + remark.take(300))
+        val elements = root.optJSONArray("elements")
+            ?: throw IllegalStateException("Risposta Overpass senza elenco elements")
         val nodes = LinkedHashMap<Long, JSONObject>()
         val deviceNodeIds = HashSet<Long>()
         val relationKinds = HashMap<Long, String>()
         val relationDirections = HashMap<Long, String>()
+        val relationMaxSpeeds = HashMap<Long, String>()
 
         for (i in 0 until elements.length()) {
             val item = elements.optJSONObject(i) ?: continue
             when (item.optString("type")) {
                 "node" -> {
                     val id = item.optLong("id", -1L)
-                    if (id >= 0L) nodes[id] = item
+                    if (id >= 0L) {
+                        val previous = nodes[id]
+                        val currentTags = item.optJSONObject("tags")
+                        val previousTags = previous?.optJSONObject("tags")
+                        // Recursion may return a node more than once. Preserve richer tags.
+                        nodes[id] = if (previousTags != null && previousTags.length() > (currentTags?.length() ?: 0)) previous else item
+                    }
                 }
                 "relation" -> {
                     val tags = item.optJSONObject("tags") ?: JSONObject()
                     val enforcement = tags.optString("enforcement")
                     if (tags.optString("type") != "enforcement" ||
-                        enforcement !in setOf("maxspeed", "average_speed")) continue
+                        enforcement !in setOf("maxspeed", "average_speed", "traffic_signals")) continue
                     val members = item.optJSONArray("members") ?: continue
-                    val kind = if (enforcement == "average_speed") "Controllo velocità media" else "Controllo velocità"
+                    val kind = when (enforcement) {
+                        "average_speed" -> "Controllo velocità media"
+                        "traffic_signals" -> "Controllo semaforo"
+                        else -> "Controllo velocità"
+                    }
                     for (j in 0 until members.length()) {
                         val member = members.optJSONObject(j) ?: continue
-                        if (member.optString("type") != "node") continue
+                        if (member.optString("type") != "node" || member.optString("role") != "device") continue
                         val nodeId = member.optLong("ref", -1L)
                         if (nodeId < 0L) continue
-                        if (member.optString("role") == "device") {
-                            deviceNodeIds.add(nodeId)
-                            relationKinds[nodeId] = kind
-                            val direction = tags.optString("direction")
-                            if (direction.isNotBlank()) relationDirections[nodeId] = direction
-                        }
+                        deviceNodeIds.add(nodeId)
+                        relationKinds[nodeId] = kind
+                        val direction = tags.optString("direction")
+                        if (direction.isNotBlank()) relationDirections[nodeId] = direction
+                        val maxSpeed = tags.optString("maxspeed")
+                        if (maxSpeed.isNotBlank()) relationMaxSpeeds[nodeId] = maxSpeed
                     }
                 }
             }
@@ -117,22 +140,25 @@ object RadarService {
         for ((id, item) in nodes) {
             val tags = item.optJSONObject("tags") ?: JSONObject()
             val isTaggedCamera = tags.optString("highway") == "speed_camera" ||
-                tags.optString("enforcement") == "maxspeed"
+                tags.optString("man_made") == "speed_camera" ||
+                tags.optString("enforcement") in setOf("maxspeed", "average_speed", "traffic_signals")
             if (!isTaggedCamera && id !in deviceNodeIds) continue
             val latitude = item.optDouble("lat", Double.NaN)
             val longitude = item.optDouble("lon", Double.NaN)
             if (!latitude.isFinite() || !longitude.isFinite() ||
                 latitude !in -90.0..90.0 || longitude !in -180.0..180.0) continue
-            val kind = relationKinds[id] ?: when {
-                tags.optString("enforcement") == "maxspeed" -> "Controllo velocità"
-                tags.optString("maxspeed:type").isNotBlank() -> "Autovelox"
+            val kind = relationKinds[id] ?: when (tags.optString("enforcement")) {
+                "average_speed" -> "Controllo velocità media"
+                "traffic_signals" -> "Controllo semaforo"
+                "maxspeed" -> "Controllo velocità"
                 else -> "Autovelox OSM"
             }
             result[id] = RadarCamera(
                 id,
                 NavPoint(latitude, longitude),
                 kind,
-                relationDirections[id] ?: tags.optString("direction")
+                relationDirections[id] ?: tags.optString("direction"),
+                relationMaxSpeeds[id] ?: tags.optString("maxspeed")
             )
         }
         return result.values.toList()
@@ -145,10 +171,10 @@ object RadarCache {
     private const val KEY_TIME = "radar_cache_timestamp"
     private const val KEY_LAT = "radar_cache_latitude"
     private const val KEY_LON = "radar_cache_longitude"
-    private const val REFRESH_MIN_INTERVAL_MS = 30L * 60L * 1000L
-    private const val MAX_CACHE_AGE_MS = 24L * 60L * 60L * 1000L
-    private const val REFRESH_DISTANCE_METERS = 8000f
-    private const val DISPLAY_CACHE_DISTANCE_METERS = 9000f
+    private const val REFRESH_MIN_INTERVAL_MS = 10L * 60L * 1000L
+    private const val MAX_CACHE_AGE_MS = 30L * 60L * 1000L
+    private const val REFRESH_DISTANCE_METERS = 4000f
+    private const val DISPLAY_CACHE_DISTANCE_METERS = 8000f
 
     fun loadNear(context: Context, location: NavPoint): List<RadarCamera> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -166,13 +192,18 @@ object RadarCache {
         val timestamp = prefs.getLong(KEY_TIME, 0L)
         if (timestamp == 0L) return true
         val age = (now - timestamp).coerceAtLeast(0L)
-        if (age < REFRESH_MIN_INTERVAL_MS) return false
-        if (age >= MAX_CACHE_AGE_MS) return true
         val centerLat = prefs.getFloat(KEY_LAT, Float.NaN).toDouble()
         val centerLon = prefs.getFloat(KEY_LON, Float.NaN).toDouble()
         if (!centerLat.isFinite() || !centerLon.isFinite()) return true
-        return distanceMeters(location.latitude, location.longitude, centerLat, centerLon) >= REFRESH_DISTANCE_METERS
+        // Movement takes priority over cache age; a new area must be queried promptly.
+        if (distanceMeters(location.latitude, location.longitude, centerLat, centerLon) >= REFRESH_DISTANCE_METERS) return true
+        if (age >= MAX_CACHE_AGE_MS) return true
+        if (age < REFRESH_MIN_INTERVAL_MS) return false
+        return false
     }
+
+    fun lastUpdatedAt(context: Context): Long =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_TIME, 0L)
 
     fun save(context: Context, location: NavPoint, cameras: List<RadarCamera>, now: Long = System.currentTimeMillis()) {
         val array = JSONArray()
@@ -182,7 +213,8 @@ object RadarCache {
                 .put("lat", camera.point.latitude)
                 .put("lon", camera.point.longitude)
                 .put("kind", camera.kind)
-                .put("direction", camera.direction))
+                .put("direction", camera.direction)
+                .put("maxSpeed", camera.maxSpeed))
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_JSON, array.toString())
@@ -206,7 +238,8 @@ object RadarCache {
                     result.add(RadarCamera(
                         id, NavPoint(lat, lon),
                         item.optString("kind", "Autovelox OSM"),
-                        item.optString("direction", "")
+                        item.optString("direction", ""),
+                        item.optString("maxSpeed", "")
                     ))
                 }
             }
