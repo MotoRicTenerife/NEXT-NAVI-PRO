@@ -24,7 +24,7 @@ object JarvisOnlineAiClient {
     fun isConfigured(): Boolean =
         endpoint.startsWith("https://", ignoreCase = true)
 
-    fun ask(message: String, callback: (Result<String>) -> Unit) {
+    fun ask(message: String, language: String = java.util.Locale.getDefault().toLanguageTag(), callback: (Result<String>) -> Unit) {
         val target = endpoint
         if (!target.startsWith("https://", ignoreCase = true)) {
             callback(Result.failure(IllegalStateException("AI online non configurata")))
@@ -49,7 +49,7 @@ object JarvisOnlineAiClient {
                 }
                 val payload = JSONObject()
                     .put("message", cleanMessage)
-                    .put("language", "it-IT")
+                    .put("language", language.ifBlank { java.util.Locale.getDefault().toLanguageTag() })
                     .put("app", "NEXT NAVI PRO")
                     .toString()
                 connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
