@@ -841,6 +841,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
+                ?: routePreviewResult?.let { drawRoute(it, false) }
         }
     }
 
