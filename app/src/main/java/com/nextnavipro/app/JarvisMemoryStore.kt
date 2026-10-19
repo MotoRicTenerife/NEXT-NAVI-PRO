@@ -104,8 +104,14 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
                 val values = ContentValues().apply { put("day", day); put("summary", merged) }
                 db.insertWithOnConflict("summaries", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             }
-            val lastKeptId = older.lastOrNull()?.id ?: 0L
-            db.delete("messages", "id<=?", arrayOf(lastKeptId.toString()))
+            if (older.isNotEmpty()) {
+                // Delete exactly the rows compacted above; timestamp ordering and
+                // insertion IDs need not be identical after a restored/imported record.
+                older.chunked(800).forEach { chunk ->
+                    val placeholders = chunk.joinToString(",") { "?" }
+                    db.delete("messages", "id IN ($placeholders)", chunk.map { it.id.toString() }.toTypedArray())
+                }
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -157,7 +163,7 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
         } finally {
             writableDatabase.endTransaction()
         }
-        writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+        writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { /* consume checkpoint result */ }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
