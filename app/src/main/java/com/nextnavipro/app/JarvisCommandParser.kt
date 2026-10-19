@@ -36,9 +36,10 @@ object JarvisCommandParser {
         val suffix = previewSuffixes.firstOrNull { normalized.endsWith(it) }
         if (suffix != null) {
             val cutAt = normalized.lastIndexOf(suffix).coerceAtLeast(0)
-            val destinationText = transcript.trim().let { original ->
-                original.take(cutAt).trim().trimEnd(',', '.', '!', '?', ' ')
-            }
+            // Collapse whitespace before slicing so offsets in the normalized text do
+            // not truncate the destination when speech recognition emits repeated spaces.
+            val original = transcript.trim().replace(Regex("\\s+"), " ")
+            val destinationText = original.take(cutAt).trim().trimEnd(',', '.', '!', '?', ' ')
             val normalizedDestination = normalize(destinationText)
             val prefixes = listOf(
                 "voglio andare a ", "vorrei andare a ", "voglio andare al ",
