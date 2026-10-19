@@ -4395,10 +4395,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     drawRadars()
                     updateRadarLabel()
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_RADAR", "OSM/Overpass radar refresh failed", error)
                 runOnUiThread {
+                    // A failed request must not block radar retries for another 15 minutes.
+                    // Keep a short backoff for public Overpass availability/rate-limit recovery.
+                    lastRadarAttemptMs = System.currentTimeMillis() - 14L * 60L * 1000L
                     updateRadarLabel()
-                    if (radarCameras.isEmpty()) radarText.text = "RADAR OSM • server non disponibile"
+                    if (radarCameras.isEmpty()) radarText.text = "RADAR OSM • errore rete/dati"
                 }
             }
         }, "osm-radar-refresh").start()
