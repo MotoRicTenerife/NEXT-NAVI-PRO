@@ -98,7 +98,7 @@ async function fetchLiveWeather(location) {
         throw new Error("Invalid Open-Meteo current weather fields");
       }
       return {
-        source: "Open-Meteo",
+        source: weatherResult?.source || "Open-Meteo / MET Norway",
         fetchedAt: new Date().toISOString(),
         validTime: current.time,
         temperatureC: current.temperature_2m,
@@ -273,7 +273,7 @@ async function handle(req, res) {
 
   if (asksWeather && location) {
     try {
-      weatherResult = await fetchLiveWeather(location);
+      try { weatherResult = await fetchLiveWeather(location); } catch (primaryError) { console.warn("Open-Meteo unavailable; trying MET Norway", { reason: primaryError instanceof Error ? primaryError.message : "unknown" }); weatherResult = await fetchMetNoWeather(location); }
       liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(weatherResult);
     } catch (error) {
       const reason = error instanceof Error ? error.message.slice(0, 180) : "unknown";
@@ -321,7 +321,7 @@ async function handle(req, res) {
           81: "rovesci", 82: "rovesci intensi", 95: "temporale", 96: "temporale con grandine"
         };
         const description = descriptions[weatherResult.weatherCode] || "condizioni meteo variabili";
-        fallbackReplies.push("Meteo attuale da Open-Meteo: " + description + ", " +
+        fallbackReplies.push("Meteo attuale da " + weatherResult.source + ": " + description + ", " +
           weatherResult.temperatureC + " gradi, vento " + weatherResult.windKmh +
           " km/h e raffiche fino a " + weatherResult.gustKmh + " km/h. Dato aggiornato alle " +
           (weatherResult.validTime || "ora locale del servizio") + ".");
