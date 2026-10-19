@@ -1419,7 +1419,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastWeatherUpdateMs = now
         weatherUsesApproximateLocation = true
         thread(name = "open-meteo-ip-fallback") {
-            val result = try { WeatherService.fetch(location.latitude, location.longitude) } catch (_: Exception) { null }
+            val result = try { WeatherService.fetch(location.latitude, location.longitude) } catch (error: Exception) { android.util.Log.w("NEXT_NAVI_WEATHER", "Approximate-location weather lookup failed", error); null }
             runOnUiThread {
                 // Do not let a slow IP/weather response overwrite a newer real GPS fix.
                 if (currentLocation != null || approximateLocation != location) return@runOnUiThread
@@ -2484,7 +2484,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         thread(name = "jarvis-live-weather") {
             val result = try {
                 WeatherService.fetch(latitude, longitude)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_WEATHER", "Jarvis live weather lookup failed", error)
                 null
             }
             runOnUiThread {
@@ -3625,7 +3626,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val latitude = location.latitude
         val longitude = location.longitude
         thread(name = "open-meteo-refresh") {
-            val result = try { WeatherService.fetch(latitude, longitude) } catch (_: Exception) { null }
+            val result = try { WeatherService.fetch(latitude, longitude) } catch (error: Exception) { android.util.Log.w("NEXT_NAVI_WEATHER", "GPS weather refresh failed", error); null }
             runOnUiThread {
                 if (result != null) {
                     weatherUsesApproximateLocation = false
