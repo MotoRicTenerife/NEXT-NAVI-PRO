@@ -278,11 +278,12 @@ async function handle(req, res) {
     } catch (error) {
       const reason = error instanceof Error ? error.message.slice(0, 180) : "unknown";
       const type = error instanceof Error ? error.name : "UnknownError";
-      const providerCode = reason.split("Open-Meteo HTTP ")[1]?.slice(0, 3);
-      weatherFailureCode = providerCode && /^\d{3}$/.test(providerCode) ? "http_" + providerCode
+      const providerCode = (reason.split("Open-Meteo HTTP ")[1] || reason.split("MET Norway HTTP ")[1] || "").slice(0, 3);
+      weatherFailureCode = providerCode.length === 3 && Number.isFinite(Number(providerCode)) ? "http_" + providerCode
         : type === "TimeoutError" ? "timeout"
         : type === "TypeError" ? "network"
-        : "invalid_response";
+        : reason.startsWith("Invalid MET Norway") ? "met_norway_invalid_response"
+        : "providers_unavailable";
       console.warn("Jarvis live weather lookup failed", { errorType: type, reason });
       liveContext += "\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
     }
