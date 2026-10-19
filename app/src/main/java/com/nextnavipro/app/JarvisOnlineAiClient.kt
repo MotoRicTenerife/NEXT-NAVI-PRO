@@ -31,6 +31,8 @@ object JarvisOnlineAiClient {
         language: String = java.util.Locale.getDefault().toLanguageTag(),
         assistantName: String = "Jarvis",
         location: LiveLocation? = null,
+        history: List<JarvisMemoryStore.Message> = emptyList(),
+        summary: String = "",
         callback: (Result<String>) -> Unit
     ) {
         val target = endpoint
@@ -60,6 +62,16 @@ object JarvisOnlineAiClient {
                     .put("language", language.ifBlank { java.util.Locale.getDefault().toLanguageTag() })
                     .put("assistantName", assistantName.trim().take(30).ifBlank { "Jarvis" })
                     .put("app", "NEXT NAVI PRO")
+                    .put("history", org.json.JSONArray().apply {
+                        history.takeLast(10).forEach { entry ->
+                            val role = entry.role.takeIf { it == "user" || it == "assistant" } ?: return@forEach
+                            val content = entry.content.trim().take(600)
+                            if (content.isNotBlank()) put(JSONObject()
+                                .put("role", role)
+                                .put("content", content))
+                        }
+                    })
+                    .put("summary", summary.trim().take(2500))
                     .apply {
                         if (location != null &&
                             location.latitude.isFinite() && location.latitude in -90.0..90.0 &&
