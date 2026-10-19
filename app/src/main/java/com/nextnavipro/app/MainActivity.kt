@@ -1119,9 +1119,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val store = JarvisMemoryStore(this)
         val stats = store.stats()
         val sizeKb = String.format(Locale.ROOT, "%.2f", stats.bytes / 1024.0)
-        val message = "Spazio occupato: ${stats.bytes} byte (${sizeKb} KB)\\n" +
-            "Messaggi conservati: ${stats.messages}\\n" +
-            "Riepilogo compatto: ${stats.summaryChars} caratteri\\n\\n" +
+        val message = "Spazio occupato: ${stats.bytes} byte (${sizeKb} KB)\n" +
+            "Messaggi conservati: ${stats.messages}\n" +
+            "Riepilogo compatto: ${stats.summaryChars} caratteri\n\n" +
             "Viene salvato solo il testo, non l'audio. La memoria resta sul telefono; per rispondere, il contesto selezionato viene inviato al backend Jarvis."
         val actions = arrayOf("Compatta la memoria", "Elimina conversazioni per data", "Cancella tutta la memoria", "Chiudi")
         AlertDialog.Builder(this).setTitle("Memoria Jarvis").setMessage(message)
