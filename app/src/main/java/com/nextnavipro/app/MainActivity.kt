@@ -2259,6 +2259,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun handleJarvisCommand(transcript: String) {
         val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
+        // Live weather requests take priority over any pending destination clarification.
+        if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
+            answerJarvisWeather()
+            return
+        }
         // When the rider explicitly asked to change destination, the next utterance
         // is treated as the requested destination unless it is another known command.
         if (jarvisAwaitingDestination) {
@@ -2424,10 +2429,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     "Non serve trasformare ogni rotonda in una scena d'azione."
             )
             JarvisCommand.ShowResults -> showJarvisPendingResults()
-            JarvisCommand.Unknown -> {
-                if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) answerJarvisWeather()
-                else askJarvisOnline(spokenTranscript)
-            }
+            JarvisCommand.Unknown -> askJarvisOnline(spokenTranscript)
         }
     }
 
