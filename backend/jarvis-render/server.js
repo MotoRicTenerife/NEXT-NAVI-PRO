@@ -253,7 +253,7 @@ async function handle(req, res) {
         !Number.isFinite(lon) || lon < -180 || lon > 180) {
       return send(res, 400, { error: "Valid lat and lon query parameters are required" });
     }
-    const query = '[out:json][timeout:10];way[highway][maxspeed](around:80,' +
+    const query = '[out:json][timeout:10];way[highway](around:80,' +
       lat + ',' + lon + ');out tags geom;';
     try {
       const upstream = await fetch("https://overpass-api.de/api/interpreter", {
@@ -292,7 +292,6 @@ async function handle(req, res) {
         const geometry = way?.geometry;
         if (!tags || !Array.isArray(geometry) || geometry.length < 2) continue;
         const limit = parseLimit(tags.maxspeed);
-        if (limit === null) continue;
         let distance = Infinity;
         for (let i = 0; i < geometry.length - 1; i++) {
           const a = geometry[i], b = geometry[i + 1];
