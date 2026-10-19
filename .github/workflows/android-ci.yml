@@ -35,7 +35,7 @@ jobs:
       # The production Jarvis endpoint is Render. The Cloudflare Worker is legacy code and is not used by this build.
       - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
         env:
-          JARVIS_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
+          JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
         run: |
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
@@ -180,7 +180,7 @@ jobs:
           fi
       - name: Build debug APK
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
@@ -198,7 +198,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
       - name: Run unit tests
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
