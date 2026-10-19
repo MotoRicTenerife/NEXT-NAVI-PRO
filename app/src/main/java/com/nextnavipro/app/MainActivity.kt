@@ -2258,14 +2258,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun handleJarvisCommand(transcript: String) {
+        val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
         // When the rider explicitly asked to change destination, the next utterance
         // is treated as the requested destination unless it is another known command.
         if (jarvisAwaitingDestination) {
-            val parsed = JarvisCommandParser.parse(transcript)
+            val parsed = JarvisCommandParser.parse(spokenTranscript)
             if (parsed !is JarvisCommand.Unknown && parsed !is JarvisCommand.Navigate) {
                 jarvisAwaitingDestination = false
             } else {
-                val rawDestination = if (parsed is JarvisCommand.Navigate) parsed.destination else transcript.trim()
+                val rawDestination = if (parsed is JarvisCommand.Navigate) parsed.destination else spokenTranscript.trim()
                 jarvisAwaitingDestination = false
                 pendingJarvisLocality = null
                 pendingJarvisAddressMode = false
@@ -2281,7 +2282,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // pretend it can change navigation state.
         val pendingLocality = pendingJarvisLocality
         if (!pendingLocality.isNullOrBlank()) {
-            val phrase = normalizeJarvisSpeech(transcript)
+            val phrase = normalizeJarvisSpeech(spokenTranscript)
             val addressPrompt = setOf("indirizzo", "un indirizzo", "indirizzo specifico", "civico", "una via")
             val centrePhrases = setOf("centro", "in centro", "centro citta", "centro della citta", "centro cittadino")
             val cancelPhrases = setOf("annulla", "lascia stare", "niente", "cancella")
@@ -2307,7 +2308,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 pendingJarvisAddressMode -> {
                     pendingJarvisLocality = null
                     pendingJarvisAddressMode = false
-                    destinationInput.setText(transcript.trim() + ", " + pendingLocality)
+                    destinationInput.setText(spokenTranscript.trim() + ", " + pendingLocality)
                     searchDestination(voiceCommand = true)
                     return
                 }
@@ -2317,11 +2318,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .any { phrase.contains(it) } -> {
                     pendingJarvisLocality = null
                     pendingJarvisAddressMode = false
-                    destinationInput.setText(transcript.trim() + " a " + pendingLocality)
+                    destinationInput.setText(spokenTranscript.trim() + " a " + pendingLocality)
                     searchDestination(voiceCommand = true)
                     return
                 }
-                JarvisCommandParser.parse(transcript) is JarvisCommand.Navigate -> {
+                JarvisCommandParser.parse(spokenTranscript) is JarvisCommand.Navigate -> {
                     // A new explicit destination replaces the previous clarification.
                     pendingJarvisLocality = null
                     pendingJarvisAddressMode = false
@@ -2332,7 +2333,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
         }
-        when (val command = JarvisCommandParser.parse(transcript)) {
+        when (val command = JarvisCommandParser.parse(spokenTranscript)) {
             JarvisCommand.CancelNavigation -> {
                 if (routeResult == null) {
                     speakJarvis("Non c'è una navigazione attiva da annullare.")
@@ -2423,9 +2424,71 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     "Non serve trasformare ogni rotonda in una scena d'azione."
             )
             JarvisCommand.ShowResults -> showJarvisPendingResults()
-            JarvisCommand.Unknown -> askJarvisOnline(transcript)
+            JarvisCommand.Unknown -> {
+                if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) answerJarvisWeather()
+                else askJarvisOnline(spokenTranscript)
+            }
         }
     }
+
+
+    /**
+     * Weather is a deterministic live-data query, not a free-form AI guess.
+     * Fetch it directly from Open-Meteo so a missing Gemini/Render backend cannot
+     * prevent Jarvis from answering a weather question.
+     */
+    private fun answerJarvisWeather() {
+        val now = System.currentTimeMillis()
+        val gps = currentLocation?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 100f && now - it.time in 0..120_000L
+        }
+        val approximate = if (gps == null) approximateLocation else null
+        if (gps == null && approximate == null) {
+            requestIpLocationFallback()
+            speakJarvis("Per verificare il meteo mi serve una posizione attendibile. Sto cercando una posizione approssimativa; se non arriva, attendi il GPS e riprova.")
+            return
+        }
+
+        val latitude = gps?.latitude ?: approximate!!.latitude
+        val longitude = gps?.longitude ?: approximate!!.longitude
+        val locationDescription = if (gps != null) {
+            "nella posizione GPS corrente"
+        } else {
+            "nella zona approssimativa " + approximate!!.areaLabel
+        }
+        val requestGeneration = jarvisResponseGeneration
+        jarvisStatusText.text = jarvisAssistantName() + " • verifica meteo Open-Meteo…"
+        thread(name = "jarvis-live-weather") {
+            val result = try {
+                WeatherService.fetch(latitude, longitude)
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread {
+                if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                if (result == null) {
+                    jarvisStatusText.text = jarvisAssistantName() + " • meteo non disponibile"
+                    speakJarvis("Non riesco a verificare il meteo attuale da Open-Meteo. Non voglio inventare temperatura o vento; riprova quando la connessione è disponibile.")
+                    return@runOnUiThread
+                }
+                latestWeather = result
+                weatherUsesApproximateLocation = gps == null
+                updateWeatherDisplay(result)
+                val time = result.currentTime.substringAfter("T", "").take(5).ifBlank { "ora locale del servizio" }
+                jarvisStatusText.text = jarvisAssistantName() + " • meteo verificato"
+                speakJarvis(
+                    "Meteo attuale verificato da Open-Meteo $locationDescription: " +
+                        WeatherService.description(result.weatherCode).lowercase(Locale.ITALIAN) + ", " +
+                        WeatherService.format(result.temperatureC) + " gradi, vento " +
+                        WeatherService.format(result.windKmh) + " chilometri orari da " +
+                        WeatherService.windDirection(result.windDirectionDegrees) +
+                        ", raffiche fino a " + WeatherService.format(result.gustKmh) +
+                        " chilometri orari. Dato valido alle $time."
+                )
+            }
+        }
+    }
+
 
     private fun askJarvisOnline(transcript: String) {
         // The online assistant answers conversational requests only. Navigation commands
