@@ -278,7 +278,7 @@ async function handle(req, res) {
         return Math.hypot(ax + t * dx, ay + t * dy);
       };
       const parseLimit = raw => {
-        const match = String(raw ?? "").trim().toLowerCase().match(/^(\\d{1,3})(?:\\s*(km\\/h|kmh|kph|mph))?$/);
+        const match = String(raw ?? "").trim().toLowerCase().match(/^(\d{1,3})(?:\s*(km\/h|kmh|kph|mph))?$/);
         if (!match) return null;
         const number = Number(match[1]);
         const kmh = match[2] === "mph" ? Math.round(number * 1.609344) : number;
