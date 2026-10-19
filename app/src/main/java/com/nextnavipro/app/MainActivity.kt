@@ -2118,7 +2118,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun startJarvisListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             jarvisStatusText.text = appText("Riconoscimento vocale non disponibile")
-            speakJarvis("Il riconoscimento vocale non è disponibile su questo dispositivo.")
+            speakJarvis(appText("Il riconoscimento vocale non è disponibile su questo dispositivo."))
             return
         }
         if (speechRecognizer == null) {
@@ -2158,7 +2158,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             if (transcript.isBlank()) {
                                 jarvisStatusText.text = appText("Non ho ricevuto parole • riprova")
                             } else {
-                                jarvisStatusText.text = "Hai detto: $transcript"
+                                jarvisStatusText.text = appText("Hai detto: ") + transcript
                                 handleJarvisCommand(transcript)
                             }
                         }
@@ -2178,14 +2178,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         try {
             jarvisListening = true
-            jarvisButton.text = "■ STOP"
-            jarvisStatusText.text = "Avvio microfono…"
+            jarvisButton.text = appText("■ STOP")
+            jarvisStatusText.text = appText("Avvio microfono…")
             speechRecognizer?.startListening(intent)
         } catch (_: Exception) {
             jarvisListening = false
             jarvisButton.text = "🎙 JARVIS"
-            jarvisStatusText.text = "Impossibile avviare il microfono"
-            speakJarvis("Non riesco ad avviare il microfono. Puoi riprovare.")
+            jarvisStatusText.text = appText("Impossibile avviare il microfono")
+            speakJarvis(appText("Non riesco ad avviare il microfono. Puoi riprovare."))
         }
     }
 
