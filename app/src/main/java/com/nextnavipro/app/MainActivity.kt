@@ -2129,24 +2129,44 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> {
-                        val before = jarvisMemory.stats()
-                        val after = jarvisMemory.compact()
-                        AlertDialog.Builder(this).setTitle("Compattazione completata")
-                            .setMessage("Messaggi prima: ${before.messages}\nMessaggi rimasti: ${after.messages}\nGiornate riassunte: ${after.summaryDays}\nSpazio attuale: ${formatMemoryBytes(after.bytes)}\n\nLe conversazioni meno recenti sono state sintetizzate localmente; gli ultimi 30 messaggi restano disponibili integralmente.")
-                            .setPositiveButton("OK", null).show()
+                        val progress = AlertDialog.Builder(this).setTitle("Compattazione memoria")
+                            .setMessage("Sto riassumendo le conversazioni più vecchie e recuperando lo spazio…")
+                            .create()
+                        progress.setCancelable(false)
+                        progress.show()
+                        thread(name = "jarvis-memory-compaction") {
+                            val before = jarvisMemory.stats()
+                            val after = jarvisMemory.compact()
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) {
+                                    progress.dismiss()
+                                    AlertDialog.Builder(this).setTitle("Compattazione completata")
+                                        .setMessage("Messaggi prima: ${before.messages}\nMessaggi rimasti: ${after.messages}\nGiornate riassunte: ${after.summaryDays}\nSpazio attuale: ${formatMemoryBytes(after.bytes)}\n\nLe conversazioni meno recenti sono state sintetizzate localmente; gli ultimi 30 messaggi restano disponibili integralmente.")
+                                        .setPositiveButton("OK", null).show()
+                                }
+                            }
+                        }
                     }
                     1 -> AlertDialog.Builder(this).setTitle("Nuova chat")
                         .setMessage("Vuoi iniziare una nuova conversazione? I messaggi recenti verranno eliminati, ma i riepiloghi compattati resteranno disponibili.")
                         .setPositiveButton("Nuova chat") { _, _ ->
-                            jarvisMemory.clearCurrentConversation()
-                            Toast.makeText(this, "Nuova chat pronta. I riepiloghi sono conservati.", Toast.LENGTH_LONG).show()
+                            thread(name = "jarvis-memory-new-chat") {
+                                jarvisMemory.clearCurrentConversation()
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) Toast.makeText(this, "Nuova chat pronta. I riepiloghi sono conservati.", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }.setNegativeButton("Annulla", null).show()
                     2 -> showJarvisMemoryDateRange()
                     3 -> AlertDialog.Builder(this).setTitle("Eliminare tutta la memoria?")
                         .setMessage("Verranno eliminati tutti i messaggi e tutti i riepiloghi locali. L'operazione non si può annullare.")
                         .setPositiveButton("ELIMINA TUTTO") { _, _ ->
-                            jarvisMemory.clearAll()
-                            Toast.makeText(this, "Memoria Jarvis eliminata.", Toast.LENGTH_LONG).show()
+                            thread(name = "jarvis-memory-clear-all") {
+                                jarvisMemory.clearAll()
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) Toast.makeText(this, "Memoria Jarvis eliminata.", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }.setNegativeButton("Annulla", null).show()
                     4 -> showJarvisMemorySettings()
                 }
@@ -2181,8 +2201,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 AlertDialog.Builder(this).setTitle("Conferma eliminazione")
                     .setMessage("Intervallo: $rangeText\nMessaggi da eliminare: $count\nSaranno rimossi anche i riepiloghi delle stesse giornate, per evitare che le informazioni cancellate restino nella memoria sintetica.")
                     .setPositiveButton("ELIMINA INTERVALLO") { _, _ ->
-                        val deleted = jarvisMemory.deleteRange(start.timeInMillis, endExclusive.timeInMillis)
-                        Toast.makeText(this, "Eliminati $deleted messaggi e i riepiloghi dell'intervallo.", Toast.LENGTH_LONG).show()
+                        thread(name = "jarvis-memory-delete-range") {
+                            val deleted = jarvisMemory.deleteRange(start.timeInMillis, endExclusive.timeInMillis)
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) Toast.makeText(this, "Eliminati $deleted messaggi e i riepiloghi dell'intervallo.", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }.setNegativeButton("Annulla", null).show()
             }, today.get(java.util.Calendar.YEAR), today.get(java.util.Calendar.MONTH), today.get(java.util.Calendar.DAY_OF_MONTH)).show()
         }, initialStart.get(java.util.Calendar.YEAR), initialStart.get(java.util.Calendar.MONTH), initialStart.get(java.util.Calendar.DAY_OF_MONTH)).show()
