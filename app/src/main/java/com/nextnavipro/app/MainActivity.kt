@@ -203,6 +203,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
+    private var radarFetchFailed = false
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
     private var lastSpeedLimitQueryLocation: Location? = null
@@ -4538,11 +4539,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         radarCameras = RadarCache.loadNear(this, center)
         drawRadars()
         val now = System.currentTimeMillis()
-        if (now - lastRadarAttemptMs < 15L * 60L * 1000L) {
+        if (!RadarCache.shouldRefresh(this, center, now)) {
             updateRadarLabel()
             return
         }
-        if (!RadarCache.shouldRefresh(this, center, now)) {
+        // A short request cooldown prevents duplicate calls while allowing a new
+        // area to be queried quickly during a ride.
+        if (now - lastRadarAttemptMs < 2L * 60L * 1000L) {
             updateRadarLabel()
             return
         }
@@ -4552,6 +4555,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             try {
                 val fresh = RadarService.fetchNear(center)
                 runOnUiThread {
+                    radarFetchFailed = false
                     radarCameras = fresh
                     RadarCache.save(this, center, fresh)
                     drawRadars()
@@ -4560,11 +4564,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_RADAR", "OSM/Overpass radar refresh failed", error)
                 runOnUiThread {
-                    // A failed request must not block radar retries for another 15 minutes.
-                    // Keep a short backoff for public Overpass availability/rate-limit recovery.
-                    lastRadarAttemptMs = System.currentTimeMillis() - 14L * 60L * 1000L
+                    // Do not cache failures as empty data. Retry after a short cooldown.
+                    lastRadarAttemptMs = System.currentTimeMillis()
+                    radarFetchFailed = true
                     updateRadarLabel()
-                    if (radarCameras.isEmpty()) radarText.text = "RADAR OSM • errore rete/dati"
                 }
             }
         }, "osm-radar-refresh").start()
@@ -4573,7 +4576,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateRadarLabel() {
         if (!::radarText.isInitialized) return
         radarText.text = if (radarCameras.isEmpty()) {
-            "RADAR OSM • nessun dato disponibile"
+            when {
+                radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
+                RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
+                else -> "RADAR OSM • ricerca dati…"
+            }
         } else {
             "RADAR OSM: " + radarCameras.size + " • dati comunitari"
         }
