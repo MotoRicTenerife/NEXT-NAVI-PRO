@@ -76,8 +76,10 @@ object JarvisCommandParser {
         }
 
         if (matchesAny(normalized,
-            "annulla navigazione", "annulla la navigazione", "termina navigazione", "termina la navigazione",
-            "ferma navigazione", "ferma la navigazione", "cancella percorso", "cancella il percorso",
+            "annulla navigazione", "annulla la navigazione", "annulla il percorso", "annulla percorso",
+            "termina navigazione", "termina la navigazione", "termina il percorso", "ferma navigazione",
+            "ferma la navigazione", "ferma il navigatore", "interrompi navigazione", "interrompi la navigazione",
+            "esci dalla navigazione", "smetti di navigare", "cancella percorso", "cancella il percorso",
             "stop navigazione", "stop navigation", "cancel navigation", "cancel the navigation",
             "end navigation", "stop navigation", "cancel route", "cancel the route",
             "cancela la navegacion", "deten la navegacion", "terminer la navigation",
@@ -85,7 +87,9 @@ object JarvisCommandParser {
             return JarvisCommand.CancelNavigation
         }
         val changeDestinationPrefixes = listOf(
-            "cambia destinazione a ", "cambia la destinazione a ", "imposta nuova destinazione ", 
+            "cambia destinazione a ", "cambia la destinazione a ", "cambia destinazione in ",
+            "cambia la destinazione in ", "cambia rotta per ", "portami invece a ", "vai invece a ",
+            "imposta nuova destinazione ", "imposta destinazione a ", "imposta la destinazione a ",
             "nuova destinazione ", "change destination to ", "change the destination to ",
             "set new destination to ", "cambia destino a ", "cambia la destinacion a ",
             "changer la destination pour ", "ziel andern zu ", "verander bestemming naar "
