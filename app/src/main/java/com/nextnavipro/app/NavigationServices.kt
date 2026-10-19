@@ -8,6 +8,7 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 import kotlin.math.roundToInt
 
 data class NavPoint(val latitude: Double, val longitude: Double, val timestampEpochMs: Long? = null)
@@ -39,7 +40,8 @@ object NavigationServices {
         val proximity = near?.let {
             "&lat=" + it.latitude + "&lon=" + it.longitude + "&zoom=14"
         }.orEmpty()
-        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20&lang=it" + proximity)
+        val language = Locale.getDefault().language.ifBlank { "en" }
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20&lang=" + URLEncoder.encode(language, "UTF-8") + proximity)
             .openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -90,7 +92,7 @@ object NavigationServices {
             "&viewbox=${it.longitude - 0.5},${it.latitude + 0.5},${it.longitude + 0.5},${it.latitude - 0.5}"
         }.orEmpty()
         val url = "https://nominatim.openstreetmap.org/search?q=" + encoded +
-            "&format=jsonv2&limit=20&addressdetails=1&countrycodes=es&accept-language=it" + viewbox
+            "&format=jsonv2&limit=20&addressdetails=1&countrycodes=es&accept-language=" + URLEncoder.encode(Locale.getDefault().toLanguageTag(), "UTF-8") + viewbox
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -132,7 +134,7 @@ object NavigationServices {
                 .put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
             .put("costing", if (motorcycle) "motorcycle" else "auto")
             .put("units", "kilometers")
-            .put("language", "it-IT")
+            .put("language", Locale.getDefault().toLanguageTag())
             .put("shape_format", "polyline6")
             .put("directions_options", JSONObject().put("units", "kilometers"))
         if (motorcycle) {
