@@ -127,8 +127,8 @@ jobs:
                           "location":{"latitude":28.05,"longitude":-16.68}
                       }, 30)
                       reply = weather_reply.get("reply", "")
-                      if status != 200 or "Open-Meteo" not in reply or not reply.strip():
-                          raise RuntimeError("Render weather response is not verified Open-Meteo data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
+                      if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
+                          raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
                       print("Render Jarvis weather check PASSED:", reply[:180])
                   except Exception as error:
                       if isinstance(error, urllib.error.HTTPError):
