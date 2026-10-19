@@ -2436,7 +2436,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     /**
      * Weather is a deterministic live-data query, not a free-form AI guess.
-     * Fetch it directly from Open-Meteo so a missing Gemini/Render backend cannot
+     * Fetch it directly from Open-Meteo so a missing Gemini backend cannot
      * prevent Jarvis from answering a weather question.
      */
     private fun answerJarvisWeather() {
@@ -2524,7 +2524,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     jarvisStatusText.text = jarvisAssistantName() + " AI • errore: " + detail.take(90)
                     val spoken = when {
                         detail.contains("HTTP_503") ->
-                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il servizio Render e il secret GEMINI_API_KEY."
+                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il secret GEMINI_API_KEY nelle impostazioni del Worker Cloudflare in ambiente Production."
                         detail.contains("provider HTTP 401") || detail.contains("provider HTTP 403") ->
                             "Il server Jarvis raggiunge Google, ma la chiave Gemini o i suoi permessi non sono validi."
                         detail.contains("provider HTTP 400") ->
