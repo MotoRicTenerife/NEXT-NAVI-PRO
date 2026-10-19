@@ -297,6 +297,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         currentLocation?.let { updateGpsStatus(it) }
         currentLocation?.let { updateMapForLocation(it, true) }
         routeResult?.let { drawRoute(it, false); updateTurnGuidance(currentLocation ?: return) }
+        if (routeResult == null) routePreviewResult?.let { drawRoute(it, false) }
         if (activityResumed) requestGps()
     }
 
@@ -2536,7 +2537,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
                         return@runOnUiThread
                     }
-                    if (voiceCommand) {
+                    if (voiceCommand && !pendingJarvisPreview) {
                         val locality = sortedResults.firstOrNull { isBroadLocalityMatch(it, query) }
                         if (locality != null) {
                             pendingJarvisPlaces = emptyList()
@@ -2584,8 +2585,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isSearching = false
                     searchButton.isEnabled = true
-                    routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
-                    if (voiceCommand) speakJarvis("La ricerca online non è disponibile in questo momento.")
+                    val cached = if (voiceCommand && pendingJarvisPreview) {
+                        val here = currentLocation?.let { NavPoint(it.latitude, it.longitude) }
+                        RouteInsightCache.loadForDestination(this, query, here)
+                    } else null
+                    if (cached != null) {
+                        pendingJarvisPreview = false
+                        val place = PlaceResult(cached.destinationName, cached.destination,
+                            "Destinazione e percorso dalla cache locale")
+                        destination = place
+                        destinationInput.setText(place.name)
+                        showCachedRoutePreview(place, cached)
+                    } else {
+                        routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
+                        if (voiceCommand) speakJarvis("La ricerca online non è disponibile e non ho una copia locale utilizzabile per questa destinazione.")
+                        pendingJarvisPreview = false
+                    }
                 }
             }
         }
@@ -2645,10 +2660,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      */
     private fun previewRouteForJarvis(place: PlaceResult) {
         val location = currentLocation
+        val anyOrigin = location?.let { NavPoint(it.latitude, it.longitude) }
         val origin = location?.takeIf { it.hasAccuracy() && it.accuracy <= 50f }
             ?.let { NavPoint(it.latitude, it.longitude) }
         if (origin == null) {
-            val cached = RouteInsightCache.loadForDestination(this, place.name, origin)
+            val cached = RouteInsightCache.loadForDestination(this, place.name, anyOrigin)
             if (cached != null) showCachedRoutePreview(place, cached)
             else speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
             return
@@ -2770,6 +2786,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    routePreviewResult = null
+                    routePreviewDestination = null
+                    routePreviewFetchedAt = 0L
+                    RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
@@ -2826,6 +2846,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         finishGpxRecording(save = true)
         stopAndSaveGpsDiagnosticRecording("percorso terminato")
         routeResult = null
+        routePreviewResult = null
+        routePreviewDestination = null
+        routePreviewFetchedAt = 0L
         resetRouteProgress()
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
         announcedManeuverIndex = -1
