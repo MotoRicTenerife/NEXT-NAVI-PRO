@@ -254,7 +254,8 @@ async function handle(req, res) {
     ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Use verified live context below when present, state its source and timestamp when available, and distinguish incidents from a full measure of traffic flow. If a source lookup failed or is not configured, say so clearly. Never pretend to browse or query Google Maps. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data." +
     liveContext;
 
-  if (!apiKey) {
+  // Live-data questions use verified provider results directly, so they still work if Gemini is unavailable or misconfigured.
+  if (!apiKey || asksWeather || asksTraffic) {
     const fallbackReplies = [];
     if (asksWeather) {
       if (weatherResult) {
