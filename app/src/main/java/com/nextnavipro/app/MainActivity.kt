@@ -173,6 +173,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var pendingJarvisLocality: String? = null
     private var pendingJarvisAddressMode = false
+    private var pendingJarvisPreview = false
+    private var routePreviewResult: RouteResult? = null
+    private var routePreviewDestination: PlaceResult? = null
+    private var routePreviewFetchedAt = 0L
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
@@ -2254,6 +2258,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         when (val command = JarvisCommandParser.parse(transcript)) {
+            is JarvisCommand.PreviewRoute -> {
+                pendingJarvisPreview = true
+                destinationInput.setText(command.destination)
+                searchDestination(voiceCommand = true)
+            }
+            JarvisCommand.BriefRoute -> {
+                val route = routeResult ?: routePreviewResult
+                if (route == null) {
+                    speakJarvis("Non ho ancora un percorso da analizzare. Puoi chiedermi: voglio andare a Guaza, cosa mi aspetta per la strada?")
+                } else {
+                    val name = if (routeResult != null) destination?.name ?: "destinazione attuale"
+                        else routePreviewDestination?.name ?: "destinazione in anteprima"
+                    speakRouteBriefing(name, route, routePreviewFetchedAt.takeIf { routeResult == null })
+                }
+            }
             is JarvisCommand.Navigate -> {
                 if (command.destination.equals("casa", ignoreCase = true)) {
                     if (getSharedPreferences(PREFS, MODE_PRIVATE).getString("home_name", null).isNullOrBlank()) {
@@ -2595,6 +2614,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
+        routePreviewResult = null
+        routePreviewDestination = null
+        routePreviewFetchedAt = 0L
         resetRouteProgress()
         routeMetricsText.text = "— km  •  ARRIVO —"
         val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
@@ -2604,8 +2626,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeButton.text = appText("AVVIA PERCORSO")
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
         if (autoStart) {
-            speakJarvis("Ho trovato " + place.name + ". Calcolo il percorso; verifica le indicazioni e la strada in sicurezza.")
-            calculateSelectedRoute()
+            if (pendingJarvisPreview) {
+                pendingJarvisPreview = false
+                speakJarvis("Ho trovato " + place.name + ". Preparo un'anteprima del percorso, senza avviare la navigazione.")
+                previewRouteForJarvis(place)
+            } else {
+                speakJarvis("Ho trovato " + place.name + ". Calcolo il percorso; verifica le indicazioni e la strada in sicurezza.")
+                calculateSelectedRoute()
+            }
         } else {
             speakJarvis("Destinazione selezionata: " + place.name + ". Controlla il percorso prima di partire.")
         }
