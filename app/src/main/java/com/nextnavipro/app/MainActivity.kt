@@ -2004,7 +2004,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
                 " I'm $assistantName, your NEXT NAVI PRO navigation assistant. I'm ready. Tell me where you'd like to go and I'll guide you."
         }
-        speakJarvis(greeting)
+        speakJarvis(greeting, remember = false)
         // Preserve first-run name setup, but do not make the startup greeting depend on it.
         if (savedName.isBlank() && !prefs.getBoolean("jarvis_user_name_prompted", false)) {
             prefs.edit().putBoolean("jarvis_user_name_prompted", true).apply()
@@ -2270,7 +2270,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun speakJarvis(message: String) {
+    private fun speakJarvis(message: String, remember: Boolean = true) {
+        if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
             pendingJarvisSpeech = message
             return
@@ -2377,6 +2378,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // is resumed automatically when a reliable GPS or approximate network location arrives.
         pendingJarvisWeather = false
         val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
+        if (spokenTranscript.isNotBlank()) jarvisMemory.addMessage("user", spokenTranscript)
         // Live weather requests take priority over any pending destination clarification.
         if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
             answerJarvisWeather()
@@ -2628,9 +2630,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else null
         // Read the prior turns before adding the current utterance, avoiding duplication
         // in Gemini's contents while preserving context across app restarts.
-        val history = jarvisMemory.recent(10)
+        val recentTurns = jarvisMemory.recent(11)
+        // The current utterance was recorded by handleJarvisCommand; send it only once.
+        val history = if (recentTurns.lastOrNull()?.let {
+                it.role == "user" && it.content == transcript
+            } == true) recentTurns.dropLast(1).takeLast(10) else recentTurns.takeLast(10)
         val summary = jarvisMemory.summary()
-        jarvisMemory.addMessage("user", transcript)
         JarvisOnlineAiClient.ask(
             message = transcript,
             assistantName = jarvisAssistantName(),
@@ -2643,7 +2648,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // has pressed Jarvis to interrupt or ask a newer question.
                 if (requestGeneration != jarvisResponseGeneration || jarvisListening) return@runOnUiThread
                 result.onSuccess { reply ->
-                    jarvisMemory.addMessage("assistant", reply)
                     jarvisStatusText.text = jarvisAssistantName() + " AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
                     speakJarvis(reply)
