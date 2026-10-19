@@ -2522,7 +2522,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     jarvisStatusText.text = jarvisAssistantName() + " AI • errore: " + detail.take(90)
                     val spoken = when {
                         detail.contains("HTTP_503") ->
-                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il secret Gemini nel Worker Cloudflare."
+                            "Il server Jarvis risponde, ma non è configurato correttamente. Controllare il servizio Render e il secret GEMINI_API_KEY."
                         detail.contains("provider HTTP 401") || detail.contains("provider HTTP 403") ->
                             "Il server Jarvis raggiunge Google, ma la chiave Gemini o i suoi permessi non sono validi."
                         detail.contains("provider HTTP 400") ->
