@@ -2202,7 +2202,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             seekBars[setting.key] = seek
             valueLabels[setting.key] = value
         }
-        settings.forEach(::addSetting)
+        settings.forEach { addSetting(it) }
 
         presetGroup.setOnCheckedChangeListener { group, checkedId ->
             val selected = group.findViewById<android.widget.RadioButton>(checkedId)?.tag as? String ?: return@setOnCheckedChangeListener
@@ -2253,6 +2253,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     else -> "Ciao! Sono qui, pronto ad aiutarti."
                 }
                 voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
+                voiceGuide?.setPitch(((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
                 if (voiceGuideReady) voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, "jarvis-personality-preview")
             }
         }
