@@ -126,6 +126,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var searchButton: Button
     private lateinit var routeButton: Button
     private lateinit var themeButton: Button
+    private lateinit var exitButton: Button
     private lateinit var menuButton: Button
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
@@ -740,10 +741,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        themeButton = makeButton(themeButtonLabel()) { toggleTheme() }
+        // Theme selection remains available in Settings; the dashboard control is now an explicit exit.
+        exitButton = makeButton("ESCI") { showExitConfirmation() }
         val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            controls.addView(exitButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
             controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
@@ -4755,6 +4757,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Microfono non autorizzato"
                 Toast.makeText(this, "Consenti il microfono per usare Jarvis. Nessun ascolto in background.", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    private fun showExitConfirmation() {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle(appText("Uscire da NEXT NAVI PRO?"))
+            .setMessage(appText("La navigazione verrà chiusa. Gli eventuali dati GPX/CSV in registrazione saranno salvati prima dell'uscita."))
+            .setNegativeButton(appText("Annulla"), null)
+            .setPositiveButton(appText("Sì, esci")) { dialog, _ ->
+                dialog.dismiss()
+                // Finalize paired recordings before finishing so no last samples are lost.
+                if (recordingGpx || gpsDiagnosticRecording) {
+                    finishGpxRecording(save = true, showResult = false)
+                }
+                finish()
+            }
+            .show()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        // Back exits the full-screen map first; a second Back asks before closing the app.
+        if (fullScreenMap) {
+            exitMapFullScreen()
+        } else {
+            showExitConfirmation()
         }
     }
 
