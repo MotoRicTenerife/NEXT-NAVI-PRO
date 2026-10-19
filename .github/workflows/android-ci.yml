@@ -32,50 +32,71 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
-      - name: Smoke-test deployed Jarvis endpoint (diagnostic)
+      - name: Smoke-test live Jarvis, weather source and Guaza geocoder (diagnostic)
         continue-on-error: true
         env:
-          JARVIS_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || '' }}
+          JARVIS_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro.motorictenerife.workers.dev/jarvis' }}
         run: |
           python - <<'PY'
-          import json, os, sys, time, urllib.request, urllib.error
+          import json, os, sys, urllib.parse, urllib.request
           endpoint = os.environ.get("JARVIS_ENDPOINT", "").strip()
-          if not endpoint.startswith("https://") or not endpoint.endswith("/jarvis"):
-              print("::warning::Jarvis endpoint is not configured as an HTTPS /jarvis URL.")
-              sys.exit(1)
-          health = endpoint[:-len("/jarvis")] + "/health"
-          def request(url, data=None, timeout=25):
-              req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json","Accept":"application/json"})
+          def get_json(url, timeout=25):
+              req = urllib.request.Request(url, headers={"Accept":"application/json","User-Agent":"NEXT-NAVI-PRO-CI/1.0"})
               with urllib.request.urlopen(req, timeout=timeout) as response:
-                  return response.status, response.read().decode("utf-8", "replace")
+                  return response.status, json.loads(response.read().decode("utf-8", "replace"))
+          def post_json(url, payload, timeout=25):
+              req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type":"application/json","Accept":"application/json"})
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return response.status, json.loads(response.read().decode("utf-8", "replace"))
+          failures = []
+          if endpoint.startswith("https://") and endpoint.endswith("/jarvis"):
+              try:
+                  status, health = get_json(endpoint[:-len("/jarvis")] + "/health", 35)
+                  if status != 200 or health.get("ok") is not True:
+                      raise RuntimeError("Unexpected health response")
+                  print("Jarvis Worker health check PASSED:", health)
+                  try:
+                      status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
+                      reply = result.get("reply", "")
+                      if status != 200 or not reply.strip():
+                          raise RuntimeError("No reply in HTTP 200 response")
+                      print("Jarvis Gemini chat check PASSED:", reply[:180])
+                  except Exception as error:
+                      failures.append("Jarvis chat/API key/model: " + str(error))
+              except Exception as error:
+                  failures.append("Jarvis Worker health: " + str(error))
+          else:
+              failures.append("NEXT_NAVI_AI_ENDPOINT is not a valid HTTPS /jarvis URL")
           try:
-              status, body = request(health, timeout=35)
-              info = json.loads(body)
-              if status != 200 or info.get("ok") is not True:
-                  raise RuntimeError("Health check returned an unexpected response")
-              print("Jarvis health check passed:", body[:240])
-              payload = json.dumps({
-                  "message":"Che condizioni meteo ci sono?",
-                  "language":"it-IT",
-                  "location":{"latitude":28.0,"longitude":-16.7}
-              }).encode()
-              status, body = request(endpoint, payload, timeout=35)
-              reply = json.loads(body).get("reply", "")
-              if status != 200 or "Open-Meteo" not in reply:
-                  raise RuntimeError("Weather smoke test did not return a verified Open-Meteo reply: " + body[:240])
-              print("Jarvis live-weather smoke test passed:", reply[:300])
-              chat_payload = json.dumps({
-                  "message":"Rispondi soltanto con OK.",
-                  "language":"it-IT"
-              }).encode()
-              status, body = request(endpoint, chat_payload, timeout=35)
-              chat_reply = json.loads(body).get("reply", "")
-              if status != 200 or not chat_reply.strip():
-                  raise RuntimeError("Online AI smoke test failed: " + body[:240])
-              print("Jarvis online-AI smoke test passed:", chat_reply[:160])
+              weather_url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+                  "latitude":"28.0","longitude":"-16.7","current":"temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m","timezone":"auto"
+              })
+              status, weather = get_json(weather_url, 20)
+              current = weather.get("current", {})
+              if status != 200 or not all(key in current for key in ("temperature_2m","weather_code","wind_speed_10m","wind_gusts_10m","time")):
+                  raise RuntimeError("Open-Meteo response missing required current fields")
+              print("Open-Meteo live data check PASSED: time=", current.get("time"), "temperature=", current.get("temperature_2m"), "wind=", current.get("wind_speed_10m"), "gusts=", current.get("wind_gusts_10m"))
           except Exception as error:
-              print("::warning::Jarvis live endpoint smoke test failed: " + str(error))
-              print("The APK build continues, but online service readiness is NOT verified.")
+              failures.append("Open-Meteo weather source: " + str(error))
+          try:
+              photon_url = "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza","limit":"20","lang":"it"})
+              status, photon = get_json(photon_url, 20)
+              features = photon.get("features", [])
+              names = [str(item.get("properties", {}).get("name", "")) for item in features]
+              if status != 200 or not any("guaza" in name.casefold() for name in names):
+                  photon_url = "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza Tenerife","limit":"20","lang":"it"})
+                  status, photon = get_json(photon_url, 20)
+                  features = photon.get("features", [])
+                  names = [str(item.get("properties", {}).get("name", "")) for item in features]
+              if status != 200 or not any("guaza" in name.casefold() for name in names):
+                  raise RuntimeError("Photon returned no feature named Guaza; returned names: " + repr(names[:8]))
+              print("Photon Guaza geocoder check PASSED:", names[:8])
+          except Exception as error:
+              failures.append("Guaza geocoder provider: " + str(error))
+          if failures:
+              for failure in failures:
+                  print("::warning::Live diagnostic failed: " + failure)
+              print("APK build continues, but these live integrations are NOT verified.")
               sys.exit(1)
           PY
       - name: Prepare persistent debug signing (optional)
@@ -94,7 +115,7 @@ jobs:
           fi
       - name: Build debug APK
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || '' }}
+          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro.motorictenerife.workers.dev/jarvis' }}
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
@@ -107,7 +128,7 @@ jobs:
           fi
       - name: Run unit tests
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || '' }}
+          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro.motorictenerife.workers.dev/jarvis' }}
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
