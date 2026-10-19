@@ -12,6 +12,7 @@ sealed class JarvisCommand {
     data class Navigate(val destination: String) : JarvisCommand()
     data class PreviewRoute(val destination: String) : JarvisCommand()
     object BriefRoute : JarvisCommand()
+    object AssistantName : JarvisCommand()
     object WhereAmI : JarvisCommand()
     object Remaining : JarvisCommand()
     object Repeat : JarvisCommand()
@@ -25,6 +26,10 @@ object JarvisCommandParser {
     fun parse(transcript: String): JarvisCommand {
         val normalized = normalize(transcript)
         if (normalized.isBlank()) return JarvisCommand.Unknown
+        if (matchesAny(normalized, "come ti chiami", "qual e il tuo nome", "come ti devo chiamare",
+            "chi sei", "what is your name", "what are you called", "who are you",
+            "como te llamas", "cual es tu nombre", "comment tu t appelles", "wie heisst du",
+            "como te chamas", "hoe heet je")) return JarvisCommand.AssistantName
 
         val previewSuffixes = listOf(
             "cosa mi aspetta per la strada", "cosa mi aspetta sulla strada",
