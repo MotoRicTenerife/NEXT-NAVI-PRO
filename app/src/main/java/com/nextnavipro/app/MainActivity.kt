@@ -2132,6 +2132,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateJarvisButtonLabel(listening: Boolean = jarvisListening) {
         if (!::jarvisButton.isInitialized) return
         jarvisButton.text = if (listening) appText("■ STOP") else jarvisButtonIdleLabel()
+        if (!listening) {
+            jarvisButton.layoutParams = jarvisButton.layoutParams.apply {
+                width = dp((72 + jarvisAssistantName().length * 8).coerceIn(116, 220))
+            }
+            jarvisButton.requestLayout()
+        }
     }
 
     private fun localizedJarvisPrompt(): String {
