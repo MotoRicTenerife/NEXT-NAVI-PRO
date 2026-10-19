@@ -245,9 +245,11 @@ async function handle(req, res) {
   if (url.pathname === "/speed-limit" && req.method === "GET") {
     // Diagnostic endpoint for a single point. It deliberately uses OSM/Overpass,
     // so it can be tested in a browser without HERE credentials or a GPS trace.
-    const lat = Number(url.searchParams.get("lat"));
-    const lon = Number(url.searchParams.get("lon"));
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90 ||
+    const latRaw = url.searchParams.get("lat");
+    const lonRaw = url.searchParams.get("lon");
+    const lat = Number(latRaw);
+    const lon = Number(lonRaw);
+    if (latRaw === null || lonRaw === null || !Number.isFinite(lat) || lat < -90 || lat > 90 ||
         !Number.isFinite(lon) || lon < -180 || lon > 180) {
       return send(res, 400, { error: "Valid lat and lon query parameters are required" });
     }
