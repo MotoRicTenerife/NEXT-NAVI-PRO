@@ -173,6 +173,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var jarvisStationaryConfirmationUntilMs = 0L
     private var pendingJarvisSpeech: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
+    private var pendingJarvisLocality: String? = null
+    private var pendingJarvisAddressMode = false
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
@@ -2062,6 +2064,62 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun handleJarvisCommand(transcript: String) {
+        // A broad locality is a conversation, not yet a precise navigation target.
+        // Interpret the rider's next spoken answer locally; never ask the online AI to
+        // pretend it can change navigation state.
+        val pendingLocality = pendingJarvisLocality
+        if (!pendingLocality.isNullOrBlank()) {
+            val phrase = normalizeJarvisSpeech(transcript)
+            val addressPrompt = setOf("indirizzo", "un indirizzo", "indirizzo specifico", "civico", "una via")
+            val centrePhrases = setOf("centro", "in centro", "centro citta", "centro della citta", "centro cittadino")
+            val cancelPhrases = setOf("annulla", "lascia stare", "niente", "cancella")
+            when {
+                phrase in cancelPhrases -> {
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                    speakJarvis("Va bene, annullo la scelta di destinazione.")
+                    return
+                }
+                phrase in centrePhrases -> {
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                    destinationInput.setText("centro di " + pendingLocality)
+                    searchDestination(voiceCommand = true)
+                    return
+                }
+                phrase in addressPrompt || phrase.contains("indirizzo specifico") || phrase == "una strada" -> {
+                    pendingJarvisAddressMode = true
+                    speakJarvis("Dimmi la via e, se lo conosci, il numero civico a " + pendingLocality + ".")
+                    return
+                }
+                pendingJarvisAddressMode -> {
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                    destinationInput.setText(transcript.trim() + ", " + pendingLocality)
+                    searchDestination(voiceCommand = true)
+                    return
+                }
+                listOf("negozio", "attivita", "punto di interesse", "ristorante", "farmacia", "supermercato",
+                    "mercadona", "bar", "hotel", "benzinaio", "officina", "parcheggio", "spiaggia",
+                    "museo", "bancomat", "ospedale", "stazione", "centro commerciale", "negozi", "ristoranti")
+                    .any { phrase.contains(it) } -> {
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                    destinationInput.setText(transcript.trim() + " a " + pendingLocality)
+                    searchDestination(voiceCommand = true)
+                    return
+                }
+                JarvisCommandParser.parse(transcript) is JarvisCommand.Navigate -> {
+                    // A new explicit destination replaces the previous clarification.
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                }
+                else -> {
+                    speakJarvis("Per " + pendingLocality + ", preferisci il centro, un indirizzo preciso, oppure un'attività o un punto di interesse? Puoi dirmi, per esempio, farmacia o Mercadona.")
+                    return
+                }
+            }
+        }
         when (val command = JarvisCommandParser.parse(transcript)) {
             is JarvisCommand.Navigate -> {
                 if (command.destination.equals("casa", ignoreCase = true)) {
@@ -2365,8 +2423,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     searchButton.isEnabled = true
                     if (sortedResults.isEmpty()) {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
-                        if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con il nome della località o della strada.")
+                        if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
                         return@runOnUiThread
+                    }
+                    if (voiceCommand) {
+                        val locality = sortedResults.firstOrNull { isBroadLocalityMatch(it, query) }
+                        if (locality != null) {
+                            pendingJarvisPlaces = emptyList()
+                            pendingJarvisLocality = locality.name
+                            pendingJarvisAddressMode = false
+                            routeText.text = "LOCALITÀ: ${locality.name}\nScegli una destinazione più precisa con Jarvis"
+                            jarvisStatusText.text = "Jarvis • attende il tipo di destinazione"
+                            speakJarvis("Ho trovato la località " + locality.name +
+                                ". Vuoi arrivare in centro, a un indirizzo preciso, oppure cerchi un'attività, un negozio o un punto di interesse?")
+                            return@runOnUiThread
+                        }
                     }
                     if (voiceCommand) {
                         pendingJarvisPlaces = sortedResults
@@ -2415,6 +2486,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
         }
+    }
+
+    private fun normalizeJarvisSpeech(value: String): String =
+        java.text.Normalizer.normalize(value.lowercase(Locale.ITALIAN), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9 ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun isBroadLocalityMatch(place: PlaceResult, query: String): Boolean {
+        val kind = place.kind.lowercase(Locale.ROOT)
+        val localityKinds = setOf("city", "town", "village", "hamlet", "municipality", "suburb",
+            "quarter", "neighbourhood", "neighborhood", "district", "locality", "borough")
+        val placeName = normalizeJarvisSpeech(place.name)
+        val spokenQuery = normalizeJarvisSpeech(query)
+        // Only ask a follow-up for an actual locality-type feature whose name matches
+        // the request. Do not misclassify a business or an unrelated nearby result.
+        return kind in localityKinds && (placeName == spokenQuery ||
+            spokenQuery.startsWith(placeName + " ") || placeName.startsWith(spokenQuery + " "))
     }
 
     private fun selectJarvisOrSearchDestination(place: PlaceResult, autoStart: Boolean = false) {
