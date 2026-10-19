@@ -64,6 +64,15 @@ jobs:
               if status != 200 or "Open-Meteo" not in reply:
                   raise RuntimeError("Weather smoke test did not return a verified Open-Meteo reply: " + body[:240])
               print("Jarvis live-weather smoke test passed:", reply[:300])
+              chat_payload = json.dumps({
+                  "message":"Rispondi soltanto con OK.",
+                  "language":"it-IT"
+              }).encode()
+              status, body = request(endpoint, chat_payload, timeout=35)
+              chat_reply = json.loads(body).get("reply", "")
+              if status != 200 or not chat_reply.strip():
+                  raise RuntimeError("Online AI smoke test failed: " + body[:240])
+              print("Jarvis online-AI smoke test passed:", chat_reply[:160])
           except Exception as error:
               print("::warning::Jarvis live endpoint smoke test failed: " + str(error))
               print("The APK build continues, but online service readiness is NOT verified.")
