@@ -2809,12 +2809,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 it.role == "user" && it.content == transcript
             } == true) recentTurns.dropLast(1).takeLast(10) else recentTurns.takeLast(10)
         val summary = jarvisMemory.summary()
+        val personalityPrefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val personality = JarvisOnlineAiClient.Personality(
+            preset = personalityPrefs.getString("jarvis_personality_preset", "jarvis") ?: "jarvis",
+            irony = personalityPrefs.getInt("jarvis_personality_irony", 45).coerceIn(0, 100),
+            warmth = personalityPrefs.getInt("jarvis_personality_warmth", 80).coerceIn(0, 100),
+            energy = personalityPrefs.getInt("jarvis_personality_energy", 55).coerceIn(0, 100),
+            concision = personalityPrefs.getInt("jarvis_personality_concision", 75).coerceIn(0, 100)
+        )
         JarvisOnlineAiClient.ask(
             message = transcript,
             assistantName = jarvisAssistantName(),
             location = liveLocation,
             history = history,
-            summary = summary
+            summary = summary,
+            personality = personality
         ) { result ->
             runOnUiThread {
                 // Never let a delayed online response restart speech after the rider
