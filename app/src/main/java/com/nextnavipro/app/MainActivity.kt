@@ -204,6 +204,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
     private var radarFetchFailed = false
+    private var radarCacheCoversCurrentArea = false
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
     private var lastSpeedLimitQueryLocation: Location? = null
@@ -4537,6 +4538,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshRadarsIfNeeded(location: Location) {
         val center = NavPoint(location.latitude, location.longitude)
         radarCameras = RadarCache.loadNear(this, center)
+        radarCacheCoversCurrentArea = RadarCache.isCacheNear(this, center)
         drawRadars()
         val now = System.currentTimeMillis()
         if (!RadarCache.shouldRefresh(this, center, now)) {
@@ -4558,6 +4560,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     radarFetchFailed = false
                     radarCameras = fresh
                     RadarCache.save(this, center, fresh)
+                    radarCacheCoversCurrentArea = true
                     drawRadars()
                     updateRadarLabel()
                 }
@@ -4578,7 +4581,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         radarText.text = if (radarCameras.isEmpty()) {
             when {
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
-                RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
+                radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
                 else -> "RADAR OSM • ricerca dati…"
             }
         } else {
