@@ -90,7 +90,61 @@ async function fetchLiveWeather(location) {
 
 function xmlText(block, names) {
   for (const name of names) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\async function readJson(req) {");
+    const match = block.match(new RegExp("<(?:[\\\\w.-]+:)?" + name + "\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/(?:[\\\\w.-]+:)?" + name + ">", "i"));
+    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim().slice(0, 220);
+  }
+  return "";
+}
+
+async function fetchDgtTraffic(location) {
+  const resourceId = "1d36ea74-593d-4e45-acfa-fb8db5a460bc";
+  const metadataResponse = await fetch("https://nap.dgt.es/api/3/action/resource_show?id=" + resourceId, {
+    signal: AbortSignal.timeout(7000),
+    headers: { "accept": "application/json" }
+  });
+  if (!metadataResponse.ok) throw new Error("DGT resource metadata HTTP " + metadataResponse.status);
+  const metadata = await metadataResponse.json();
+  const resourceUrl = metadata?.result?.url;
+  if (!metadata?.success || typeof resourceUrl !== "string" || !resourceUrl.startsWith("https://")) {
+    throw new Error("DGT resource URL unavailable");
+  }
+  const response = await fetch(resourceUrl, { signal: AbortSignal.timeout(9000), headers: { "accept": "application/xml,text/xml,*/*" } });
+  if (!response.ok) throw new Error("DGT feed HTTP " + response.status);
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (declaredLength > 5 * 1024 * 1024) throw new Error("DGT feed too large");
+  const xml = await response.text();
+  if (xml.length > 5 * 1024 * 1024) throw new Error("DGT feed too large");
+  const records = [];
+  const recordPattern = /<(?:[\w.-]+:)?situationRecord\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?situationRecord>/gi;
+  let match;
+  while ((match = recordPattern.exec(xml)) !== null) {
+    const block = match[1];
+    const lat = Number(xmlText(block, ["latitude"]));
+    const lon = Number(xmlText(block, ["longitude"]));
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) continue;
+    const distanceKm = haversineKm(location, { latitude: lat, longitude: lon });
+    if (distanceKm > 30) continue;
+    records.push({
+      distanceKm: Math.round(distanceKm * 10) / 10,
+      road: xmlText(block, ["roadNumber", "roadName", "descriptor"]),
+      description: xmlText(block, ["description", "value", "cause"]),
+      status: xmlText(block, ["validityStatus", "impactOnTraffic", "probabilityOfOccurrence"]),
+      startTime: xmlText(block, ["overallStartTime", "situationRecordCreationTime"])
+    });
+    if (records.length >= 12) break;
+  }
+  return {
+    source: "DGT / Punto de Acceso Nacional de Tráfico, incidencias DATEX2 v3.7",
+    fetchedAt: new Date().toISOString(),
+    coverageRadiusKm: 30,
+    incidents: records,
+    note: records.length
+      ? "Only geolocated incidents explicitly present in the feed; this is not a complete measure of traffic speed."
+      : "No geolocated DGT incidents found in the feed within 30 km. This does NOT prove traffic is flowing freely."
+  };
+}
+
+async function readJson(req) {");
     const match = block.match(new RegExp("<(?:[\\w.-]+:)?" + escaped + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + escaped + ">", "i"));
     if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim().slice(0, 220);
   }
@@ -208,7 +262,7 @@ async function handle(req, res) {
     ? input.language.trim().slice(0, 20) || "it-IT"
     : "it-IT";
   const assistantName = typeof input?.assistantName === "string"
-    ? input.assistantName.trim().replace(/[<>\\r\\n]/g, "").slice(0, 30) || "Jarvis"
+    ? input.assistantName.trim().replace(/[<>\r\n]/g, "").slice(0, 30) || "Jarvis"
     : "Jarvis";
   const location = input?.location &&
     Number.isFinite(input.location.latitude) && input.location.latitude >= -90 && input.location.latitude <= 90 &&
@@ -221,28 +275,28 @@ async function handle(req, res) {
   }
 
   let liveContext = "";
-  const normalizedMessage = message.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
-  const asksWeather = /\\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima)\\b/.test(normalizedMessage);
-  const asksTraffic = /\\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\\b/.test(normalizedMessage);
+  const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const asksWeather = /\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima)\b/.test(normalizedMessage);
+  const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
 
   if (asksWeather && location) {
     try {
-      liveContext += "\\nVERIFIED LIVE WEATHER: " + JSON.stringify(await fetchLiveWeather(location));
+      liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(await fetchLiveWeather(location));
     } catch {
-      liveContext += "\\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
+      liveContext += "\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
     }
   } else if (asksWeather) {
-    liveContext += "\\nNO GPS COORDINATES WERE PROVIDED: ask for a location or say local weather cannot be verified.";
+    liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask for a location or say local weather cannot be verified.";
   }
 
   if (asksTraffic && location) {
     try {
-      liveContext += "\\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(await fetchDgtTraffic(location));
+      liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(await fetchDgtTraffic(location));
     } catch {
-      liveContext += "\\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
+      liveContext += "\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
     }
   } else if (asksTraffic) {
-    liveContext += "\\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
+    liveContext += "\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
   }
 
   const instructions = "You are " + assistantName + ", the user-renamed spoken conversational assistant for NEXT NAVI PRO. Your name is exactly " +
