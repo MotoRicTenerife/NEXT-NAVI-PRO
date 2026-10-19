@@ -755,7 +755,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
         } else {
-            controls.addView(themeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            controls.addView(exitButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(2), dp(3), dp(2), dp(1))
             })
             controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
