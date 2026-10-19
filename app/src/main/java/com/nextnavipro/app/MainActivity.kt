@@ -2411,7 +2411,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         detail.contains("provider HTTP 401") || detail.contains("provider HTTP 403") ->
                             "Il server Jarvis raggiunge Google, ma la chiave Gemini o i suoi permessi non sono validi."
                         detail.contains("provider HTTP 400") ->
-                            "Google Gemini ha rifiutato la richiesta. Potrebbe essere necessario correggere il modello configurato nel Worker."
+                            "Google Gemini ha rifiutato la richiesta. Controllare la variabile GEMINI_MODEL nel servizio Render di Jarvis."
                         detail.contains("HTTP_429") || detail.contains("provider HTTP 429") ->
                             "È stato raggiunto un limite di richieste o la quota gratuita di Gemini. Riprova più tardi."
                         detail.contains("HTTP_404") ->
