@@ -11,7 +11,7 @@ import java.net.URLEncoder
 import kotlin.math.roundToInt
 
 data class NavPoint(val latitude: Double, val longitude: Double, val timestampEpochMs: Long? = null)
-data class PlaceResult(val name: String, val point: NavPoint, val description: String)
+data class PlaceResult(val name: String, val point: NavPoint, val description: String, val kind: String = "unknown")
 data class RouteManeuver(
     val pointIndex: Int,
     val instruction: String,
@@ -70,7 +70,9 @@ object NavigationServices {
                     properties.optString("state").takeIf { it.isNotBlank() },
                     properties.optString("country").takeIf { it.isNotBlank() }
                 ).filterNotNull()
-                results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", ")))
+                val kind = listOf(properties.optString("type"), properties.optString("osm_value"), properties.optString("osm_key"))
+                    .firstOrNull { it.isNotBlank() }?.lowercase() ?: "unknown"
+                results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", "), kind))
             }
             return results
         } catch (error: Exception) {
@@ -109,7 +111,9 @@ object NavigationServices {
                     ?: item.optString("display_name").substringBefore(",").takeIf { it.isNotBlank() }
                     ?: continue
                 val detail = item.optString("display_name").removePrefix(name).trim().trimStart(',')
-                results.add(PlaceResult(name, NavPoint(lat, lon), detail))
+                val kind = listOf(item.optString("type"), item.optString("class"), address.optString("city"), address.optString("town"), address.optString("village"))
+                    .firstOrNull { it.isNotBlank() }?.lowercase() ?: "unknown"
+                results.add(PlaceResult(name, NavPoint(lat, lon), detail, kind))
             }
             return results
         } finally {
