@@ -81,7 +81,9 @@ object NavigationServices {
             "&lat=" + it.latitude + "&lon=" + it.longitude + "&zoom=14"
         }.orEmpty()
         val language = Locale.getDefault().language.ifBlank { "en" }
-        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20&lang=" + URLEncoder.encode(language, "UTF-8") + proximity)
+        // Use Accept-Language instead of a lang query parameter. Photon documents both,
+        // but this avoids provider-side query validation rejecting an otherwise valid search.
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20" + proximity)
             .openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -89,6 +91,7 @@ object NavigationServices {
             connection.readTimeout = READ_TIMEOUT_MS
             connection.setRequestProperty("User-Agent", USER_AGENT)
             connection.setRequestProperty("Accept", "application/geo+json, application/json")
+            connection.setRequestProperty("Accept-Language", language)
             connection.setRequestProperty("Referer", "https://github.com/MotoRicTenerife/NEXT-NAVI-PRO")
             val body = readResponse(connection)
             val features = JSONObject(body).optJSONArray("features") ?: JSONArray()
