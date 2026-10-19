@@ -33,6 +33,53 @@ jobs:
         working-directory: backend/jarvis-render
         run: npm run check
       # The production Jarvis endpoint is Render. The Cloudflare Worker is legacy code and is not used by this build.
+      - name: Prepare persistent debug signing (optional)
+        env:
+          NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
+        run: |
+          if [ -n "$NEXT_NAVI_KEYSTORE_BASE64" ] && [ -n "$NEXT_NAVI_KEYSTORE_PASSWORD" ] && [ -n "$NEXT_NAVI_KEY_ALIAS" ] && [ -n "$NEXT_NAVI_KEY_PASSWORD" ]; then
+            echo "$NEXT_NAVI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/next-navi-pro.keystore"
+            echo "NEXT_NAVI_KEYSTORE_PATH=$RUNNER_TEMP/next-navi-pro.keystore" >> "$GITHUB_ENV"
+            echo "Persistent APK signing configured."
+          else
+            echo "::warning::Persistent APK signing secrets are not configured yet."
+          fi
+      - name: Build debug APK
+        env:
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon assembleDebug
+          if [ -z "$NEXT_NAVI_KEYSTORE_PATH" ]; then
+            echo "::warning::Stable APK signing is not configured. CI will use a temporary Android debug key."
+          else
+            echo "Stable APK signing is enabled."
+          fi
+      - name: Verify APK signature fingerprint
+        run: |
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+      - name: Run unit tests
+        env:
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
+          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
+          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
+        run: gradle --no-daemon testDebugUnitTest
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: next-navi-pro-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
@@ -164,49 +211,3 @@ jobs:
               print("APK build continues, but these live integrations are NOT verified.")
               sys.exit(1)
           PY
-      - name: Prepare persistent debug signing (optional)
-        env:
-          NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
-          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
-          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
-          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
-        run: |
-          if [ -n "$NEXT_NAVI_KEYSTORE_BASE64" ] && [ -n "$NEXT_NAVI_KEYSTORE_PASSWORD" ] && [ -n "$NEXT_NAVI_KEY_ALIAS" ] && [ -n "$NEXT_NAVI_KEY_PASSWORD" ]; then
-            echo "$NEXT_NAVI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/next-navi-pro.keystore"
-            echo "NEXT_NAVI_KEYSTORE_PATH=$RUNNER_TEMP/next-navi-pro.keystore" >> "$GITHUB_ENV"
-            echo "Persistent APK signing configured."
-          else
-            echo "::warning::Persistent APK signing secrets are not configured yet."
-          fi
-      - name: Build debug APK
-        env:
-          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
-          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
-          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
-          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
-        run: |
-          gradle --no-daemon assembleDebug
-          if [ -z "$NEXT_NAVI_KEYSTORE_PATH" ]; then
-            echo "::warning::Stable APK signing is not configured. CI will use a temporary Android debug key."
-          else
-            echo "Stable APK signing is enabled."
-          fi
-      - name: Verify APK signature fingerprint
-        run: |
-          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
-          test -n "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
-      - name: Run unit tests
-        env:
-          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
-          NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
-          NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
-          NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
-        run: gradle --no-daemon testDebugUnitTest
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v5
-        with:
-          name: next-navi-pro-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
