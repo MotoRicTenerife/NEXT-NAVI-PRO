@@ -60,11 +60,13 @@ object JarvisCommandParser {
             "vai a ", "vai al ", "vai alla ", "vai allo ", "vai verso ",
             "andiamo a ", "imposta destinazione ", "cerca ", "destinazione "
         )
-        val prefix = prefixes.firstOrNull { normalized.startsWith(it) }
+        // Match the longest grammatical prefix first (e.g. "portami allo " before "portami a ").
+        val orderedPrefixes = prefixes.sortedByDescending { it.length }
+        val prefix = orderedPrefixes.firstOrNull { normalized.startsWith(it) }
         if (prefix != null) {
             val destination = transcript.trim().let { original ->
                 val normalizedOriginal = normalize(original)
-                val matchedPrefix = prefixes.firstOrNull { normalizedOriginal.startsWith(it) } ?: prefix
+                val matchedPrefix = orderedPrefixes.firstOrNull { normalizedOriginal.startsWith(it) } ?: prefix
                 original.drop(matchedPrefix.length).trim().trim(',', '.', '!', '?', ' ')
             }
             if (destination.length >= 2 && normalize(destination) !in setOf("casa", "qui", "qua")) {
