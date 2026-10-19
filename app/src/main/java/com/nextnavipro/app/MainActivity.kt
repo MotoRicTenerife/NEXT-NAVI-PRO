@@ -169,6 +169,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
     private var jarvisListening = false
+    private var jarvisAwaitingDestination = false
+    private var jarvisResponseGeneration = 0
     private var pendingJarvisSpeech: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var pendingJarvisLocality: String? = null
@@ -2162,6 +2164,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun onJarvisButtonPressed() {
+        // A press is an interruption command: stop any current TTS immediately,
+        // discard queued speech and invalidate an in-flight online answer before listening.
+        jarvisResponseGeneration++
+        pendingJarvisSpeech = null
+        try { voiceGuide?.stop() } catch (_: Exception) { }
         if (jarvisListening) {
             speechRecognizer?.cancel()
             jarvisListening = false
@@ -2251,6 +2258,24 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun handleJarvisCommand(transcript: String) {
+        // When the rider explicitly asked to change destination, the next utterance
+        // is treated as the requested destination unless it is another known command.
+        if (jarvisAwaitingDestination) {
+            val parsed = JarvisCommandParser.parse(transcript)
+            if (parsed !is JarvisCommand.Unknown && parsed !is JarvisCommand.Navigate) {
+                jarvisAwaitingDestination = false
+            } else {
+                val rawDestination = if (parsed is JarvisCommand.Navigate) parsed.destination else transcript.trim()
+                jarvisAwaitingDestination = false
+                pendingJarvisLocality = null
+                pendingJarvisAddressMode = false
+                pendingJarvisPreview = false
+                destinationInput.setText(rawDestination)
+                speakJarvis("Cerco la nuova destinazione: $rawDestination.")
+                searchDestination(voiceCommand = true)
+                return
+            }
+        }
         // A broad locality is a conversation, not yet a precise navigation target.
         // Interpret the rider's next spoken answer locally; never ask the online AI to
         // pretend it can change navigation state.
@@ -2308,6 +2333,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         when (val command = JarvisCommandParser.parse(transcript)) {
+            JarvisCommand.CancelNavigation -> {
+                if (routeResult == null) {
+                    speakJarvis("Non c'è una navigazione attiva da annullare.")
+                } else {
+                    clearRoute()
+                    speakJarvis("Navigazione annullata. La registrazione del viaggio è stata salvata.")
+                }
+            }
+            is JarvisCommand.ChangeDestination -> {
+                val newDestination = command.destination
+                if (!newDestination.isNullOrBlank()) {
+                    jarvisAwaitingDestination = false
+                    pendingJarvisLocality = null
+                    pendingJarvisAddressMode = false
+                    pendingJarvisPreview = false
+                    destinationInput.setText(newDestination)
+                    speakJarvis("Cambio destinazione in $newDestination. Cerco il luogo.")
+                    searchDestination(voiceCommand = true)
+                } else {
+                    jarvisAwaitingDestination = true
+                    speakJarvis("Va bene. Dimmi la nuova destinazione.")
+                }
+            }
             JarvisCommand.AssistantName -> speakJarvis(jarvisIdentityReply())
             is JarvisCommand.PreviewRoute -> {
                 pendingJarvisPreview = true
@@ -2387,6 +2435,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         jarvisStatusText.text = jarvisAssistantName() + " AI • elaborazione online…"
+        val requestGeneration = jarvisResponseGeneration
         val liveQuestion = Regex("\\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(transcript)
         val liveLocation = if (liveQuestion) currentLocation?.let {
@@ -2398,6 +2447,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             location = liveLocation
         ) { result ->
             runOnUiThread {
+                // Never let a delayed online response restart speech after the rider
+                // has pressed Jarvis to interrupt or ask a newer question.
+                if (requestGeneration != jarvisResponseGeneration || jarvisListening) return@runOnUiThread
                 result.onSuccess { reply ->
                     jarvisStatusText.text = jarvisAssistantName() + " AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
