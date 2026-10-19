@@ -2387,7 +2387,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         jarvisStatusText.text = jarvisAssistantName() + " AI • elaborazione online…"
-        val liveQuestion = Regex("\\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
+        val liveQuestion = Regex("\\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(transcript)
         val liveLocation = if (liveQuestion) currentLocation?.let {
             JarvisOnlineAiClient.LiveLocation(it.latitude, it.longitude)
