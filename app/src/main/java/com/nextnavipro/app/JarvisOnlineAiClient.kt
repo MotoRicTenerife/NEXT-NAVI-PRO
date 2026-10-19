@@ -14,6 +14,8 @@ import kotlin.concurrent.thread
  * 200 {"reply":"..."}
  */
 object JarvisOnlineAiClient {
+    data class LiveLocation(val latitude: Double, val longitude: Double)
+
     private const val CONNECT_TIMEOUT_MS = 4000
     private const val READ_TIMEOUT_MS = 7000
     private const val MAX_REPLY_CHARS = 800
@@ -24,7 +26,13 @@ object JarvisOnlineAiClient {
     fun isConfigured(): Boolean =
         endpoint.startsWith("https://", ignoreCase = true)
 
-    fun ask(message: String, language: String = java.util.Locale.getDefault().toLanguageTag(), callback: (Result<String>) -> Unit) {
+    fun ask(
+        message: String,
+        language: String = java.util.Locale.getDefault().toLanguageTag(),
+        assistantName: String = "Jarvis",
+        location: LiveLocation? = null,
+        callback: (Result<String>) -> Unit
+    ) {
         val target = endpoint
         if (!target.startsWith("https://", ignoreCase = true)) {
             callback(Result.failure(IllegalStateException("AI online non configurata")))
@@ -50,7 +58,17 @@ object JarvisOnlineAiClient {
                 val payload = JSONObject()
                     .put("message", cleanMessage)
                     .put("language", language.ifBlank { java.util.Locale.getDefault().toLanguageTag() })
+                    .put("assistantName", assistantName.trim().take(30).ifBlank { "Jarvis" })
                     .put("app", "NEXT NAVI PRO")
+                    .apply {
+                        if (location != null &&
+                            location.latitude.isFinite() && location.latitude in -90.0..90.0 &&
+                            location.longitude.isFinite() && location.longitude in -180.0..180.0) {
+                            put("location", JSONObject()
+                                .put("latitude", location.latitude)
+                                .put("longitude", location.longitude))
+                        }
+                    }
                     .toString()
                 connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val status = connection.responseCode
