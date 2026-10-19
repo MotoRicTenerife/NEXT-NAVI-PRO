@@ -457,7 +457,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        jarvisButton = makeButton(appText("🎙 JARVIS")) { onJarvisButtonPressed() }
+        jarvisButton = makeButton(jarvisButtonIdleLabel()) { onJarvisButtonPressed() }
         jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp(116), dp(38)).apply {
             setMargins(dp(2), 0, dp(8), 0)
         })
@@ -2096,11 +2096,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setPositiveButton(appText("Salva")) { _, _ ->
                 val name = nameInput.text.toString().trim().take(30).ifBlank { "Jarvis" }
                 prefs.edit().putString("jarvis_assistant_name", name).apply()
+                updateJarvisButtonLabel(false)
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name • " + appText("pronto • premi per parlare")
                 Toast.makeText(this, appText("Assistente rinominato in ") + name, Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton(appText("Ripristina Jarvis")) { _, _ ->
                 prefs.edit().putString("jarvis_assistant_name", "Jarvis").apply()
+                updateJarvisButtonLabel(false)
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis • " + appText("pronto • premi per parlare")
                 Toast.makeText(this, appText("Nome ripristinato: Jarvis"), Toast.LENGTH_SHORT).show()
             }
@@ -2108,14 +2110,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
-    private fun localizedJarvisPrompt(): String = when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
-        "it" -> "Parla con Jarvis"
-        "es" -> "Habla con Jarvis"
-        "fr" -> "Parlez avec Jarvis"
-        "de" -> "Sprich mit Jarvis"
-        "pt" -> "Fala com Jarvis"
-        "nl" -> "Praat met Jarvis"
-        else -> "Talk to Jarvis"
+    private fun jarvisAssistantName(): String =
+        getSharedPreferences(PREFS, MODE_PRIVATE).getString("jarvis_assistant_name", "Jarvis")
+            .orEmpty().trim().take(30).ifBlank { "Jarvis" }
+
+    private fun jarvisButtonIdleLabel(): String = "🎙 " + jarvisAssistantName()
+
+    private fun updateJarvisButtonLabel(listening: Boolean = jarvisListening) {
+        if (!::jarvisButton.isInitialized) return
+        jarvisButton.text = if (listening) appText("■ STOP") else jarvisButtonIdleLabel()
+    }
+
+    private fun localizedJarvisPrompt(): String {
+        val name = jarvisAssistantName()
+        return when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+            "it" -> "Parla con $name"
+            "es" -> "Habla con $name"
+            "fr" -> "Parlez avec $name"
+            "de" -> "Sprich mit $name"
+            "pt" -> "Fala con $name"
+            "nl" -> "Praat met $name"
+            else -> "Talk to $name"
+        }
     }
 
     private fun speakJarvis(message: String) {
@@ -2130,7 +2146,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (jarvisListening) {
             speechRecognizer?.cancel()
             jarvisListening = false
-            jarvisButton.text = "🎙 JARVIS"
+            jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Ascolto annullato")
             return
         }
@@ -2164,7 +2180,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     override fun onError(error: Int) {
                         runOnUiThread {
                             jarvisListening = false
-                            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+                            if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             if (::jarvisStatusText.isInitialized) {
                                 jarvisStatusText.text = when (error) {
                                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> appText("Non ho capito • riprova")
@@ -2178,7 +2194,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     override fun onResults(results: Bundle?) {
                         runOnUiThread {
                             jarvisListening = false
-                            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+                            if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull().orEmpty().trim()
                             if (transcript.isBlank()) {
@@ -2209,7 +2225,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer?.startListening(intent)
         } catch (_: Exception) {
             jarvisListening = false
-            jarvisButton.text = "🎙 JARVIS"
+            jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Impossibile avviare il microfono")
             speakJarvis(appText("Non riesco ad avviare il microfono. Puoi riprovare."))
         }
@@ -2273,6 +2289,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         when (val command = JarvisCommandParser.parse(transcript)) {
+            JarvisCommand.AssistantName -> speakJarvis("Mi chiamo " + jarvisAssistantName() + ". Sono il tuo assistente di navigazione NEXT NAVI PRO.")
             is JarvisCommand.PreviewRoute -> {
                 pendingJarvisPreview = true
                 destinationInput.setText(command.destination)
@@ -2351,7 +2368,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         jarvisStatusText.text = "Jarvis AI • elaborazione online…"
-        JarvisOnlineAiClient.ask(transcript) { result ->
+        val liveQuestion = Regex("\\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
+            .containsMatchIn(transcript)
+        val liveLocation = if (liveQuestion) currentLocation?.let {
+            JarvisOnlineAiClient.LiveLocation(it.latitude, it.longitude)
+        } else null
+        JarvisOnlineAiClient.ask(
+            message = transcript,
+            assistantName = jarvisAssistantName(),
+            location = liveLocation
+        ) { result ->
             runOnUiThread {
                 result.onSuccess { reply ->
                     jarvisStatusText.text = "Jarvis AI • risposta ricevuta"
@@ -4247,7 +4273,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (jarvisListening) {
             try { speechRecognizer?.cancel() } catch (_: Exception) { }
             jarvisListening = false
-            if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
+            if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
             if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Premi il microfono e parla")
         }
         // Restore immediately when another app/system surface takes over.
