@@ -420,15 +420,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dp(46), 1f))
-        searchButton = makeButton("CERCA") { searchDestination() }
+        searchButton = makeButton(appText("CERCA")) { searchDestination() }
         searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
-        val homeButton = makeButton("CASA") { showHomeOptions() }
+        val homeButton = makeButton(appText("CASA")) { showHomeOptions() }
         searchRow.addView(homeButton, LinearLayout.LayoutParams(dp(70), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
-        menuButton = makeButton("MENU") { showMainMenu() }
+        menuButton = makeButton(appText("MENU")) { showMainMenu() }
         searchRow.addView(menuButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
             setMargins(dp(4), 0, 0, 0)
         })
@@ -439,12 +439,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        jarvisButton = makeButton("🎙 JARVIS") { onJarvisButtonPressed() }
+        jarvisButton = makeButton(appText("🎙 JARVIS")) { onJarvisButtonPressed() }
         jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp(116), dp(38)).apply {
             setMargins(dp(2), 0, dp(8), 0)
         })
         jarvisStatusText = TextView(this).apply {
-            text = "Premi il microfono e parla"
+            text = appText("Premi il microfono e parla")
             textSize = 11f
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
@@ -484,7 +484,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         weatherText = TextView(this).apply {
-            text = "🌤️ METEO in attesa GPS"
+            text = appText("🌤️ METEO in attesa GPS")
             textSize = 12f
             gravity = Gravity.CENTER
             maxLines = 2
@@ -506,13 +506,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         infoColumn.addView(limitValue, params(dp(58), dp(58)))
         gpsText = TextView(this).apply {
-            text = "RICERCA GPS…"
+            text = appText("RICERCA GPS…")
             textSize = 10f
             gravity = Gravity.CENTER
         }
         infoColumn.addView(gpsText, params(-1, dp(38)))
         routeText = TextView(this).apply {
-            text = "Nessun percorso attivo"
+            text = appText("Nessun percorso attivo")
             textSize = 11f
             gravity = Gravity.CENTER
             setPadding(dp(3), dp(2), dp(3), dp(3))
@@ -520,7 +520,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         infoColumn.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
         radarText = TextView(this).apply {
-            text = "RADAR OSM"
+            text = appText("RADAR OSM")
             textSize = 10f
             gravity = Gravity.CENTER
         }
@@ -594,7 +594,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
-        routeButton = makeButton("AVVIA PERCORSO") {
+        routeButton = makeButton(appText("AVVIA PERCORSO")) {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
         // The route button is placed in the lower control row in landscape and
@@ -623,7 +623,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         newMapView.onCreate(savedState)
         mapColumn.addView(mapStatus, params(-1, dp(22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
-        val recenterButton = makeButton("⌖ POSIZIONE") { recenterMapToGps() }
+        val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             mapColumn.addView(recenterButton, params(-1, dp(36)))
         }
@@ -1732,7 +1732,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.text = "TRACCIA GPX\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
             routeText.textSize = 14f
         }
-        if (::routeButton.isInitialized) routeButton.text = "ANNULLA TRACCIA GPX"
+        if (::routeButton.isInitialized) routeButton.text = appText("ANNULLA TRACCIA GPX")
         announcedManeuverIndex = -1
         announcedStage = 0
         drawRoute(routeResult!!, true)
@@ -1764,7 +1764,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     if (::routeButton.isInitialized) {
                         routeButton.isEnabled = true
-                        routeButton.text = "ANNULLA PERCORSO GPX"
+                        routeButton.text = appText("ANNULLA PERCORSO GPX")
                     }
                     routeResult = result
                     resetRouteProgress()
@@ -1923,7 +1923,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val savedName = prefs.getString("jarvis_user_name", "").orEmpty().trim()
         val assistantName = prefs.getString("jarvis_assistant_name", "Jarvis").orEmpty().trim()
             .ifBlank { "Jarvis" }
-        jarvisStatusText.text = "$assistantName pronto • premi per parlare"
+        jarvisStatusText.text = "$assistantName • " + appText("pronto • premi per parlare")
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val language = Locale.getDefault().language.lowercase(Locale.ROOT)
         val personalGreeting = if (savedName.isNotBlank()) savedName else ""
@@ -2063,12 +2063,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setPositiveButton(appText("Salva")) { _, _ ->
                 val name = nameInput.text.toString().trim().take(30).ifBlank { "Jarvis" }
                 prefs.edit().putString("jarvis_assistant_name", name).apply()
-                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name pronto • premi per parlare"
+                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name • " + appText("pronto • premi per parlare")
                 Toast.makeText(this, "Assistente rinominato in $name", Toast.LENGTH_SHORT).show()
             }
             .setNeutralButton(appText("Ripristina Jarvis")) { _, _ ->
                 prefs.edit().putString("jarvis_assistant_name", "Jarvis").apply()
-                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis pronto • premi per parlare"
+                if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis • " + appText("pronto • premi per parlare")
                 Toast.makeText(this, "Nome ripristinato: Jarvis", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(appText("Annulla"), null)
@@ -2576,8 +2576,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
         routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
         destinationInput.setText(place.name)
-        routeText.text = "DESTINAZIONE: " + place.name + "\nPremi AVVIA PERCORSO"
-        routeButton.text = "AVVIA PERCORSO"
+        routeText.text = appText("DESTINAZIONE: ") + place.name + "\n" + appText("Premi AVVIA PERCORSO")
+        routeButton.text = appText("AVVIA PERCORSO")
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
         if (autoStart) {
             speakJarvis("Ho trovato " + place.name + ". Calcolo il percorso; verifica le indicazioni e la strada in sicurezza.")
@@ -2630,7 +2630,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         result.distanceKm, durationMinutes, firstInstruction
                     )
                     updateTurnGuidance(currentLocation)
-                    routeButton.text = "ANNULLA PERCORSO"
+                    routeButton.text = appText("ANNULLA PERCORSO")
                     askToRecordGpx()
                 }
             } catch (error: Exception) {
@@ -2675,9 +2675,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (::maneuverIcon.isInitialized) maneuverIcon.text = "↑"
         destination = null
         refreshDestinationMarker()
-        if (::routeText.isInitialized) routeText.text = "Nessun percorso attivo"
+        if (::routeText.isInitialized) routeText.text = appText("Nessun percorso attivo")
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
-        if (::routeButton.isInitialized) routeButton.text = "AVVIA PERCORSO"
+        if (::routeButton.isInitialized) routeButton.text = appText("AVVIA PERCORSO")
         if (::destinationInput.isInitialized) destinationInput.text.clear()
         val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
         source?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
@@ -4015,7 +4015,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             try { speechRecognizer?.cancel() } catch (_: Exception) { }
             jarvisListening = false
             if (::jarvisButton.isInitialized) jarvisButton.text = "🎙 JARVIS"
-            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Premi il microfono e parla"
+            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Premi il microfono e parla")
         }
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
