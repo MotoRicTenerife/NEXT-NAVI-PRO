@@ -114,28 +114,44 @@ jobs:
               for provider_name, provider_url in attempts:
                   try:
                       status, payload = get_json(provider_url, 20)
+                      exact_tenerife_matches = []
                       if provider_name.startswith("Photon"):
                           features = payload.get("features", [])
                           names = [str(item.get("properties", {}).get("name", "")) for item in features]
+                          for item in features:
+                              props = item.get("properties", {})
+                              coords = item.get("geometry", {}).get("coordinates", [])
+                              name = str(props.get("name", "")).strip().casefold()
+                              if name == "guaza" and len(coords) >= 2 and -17.0 <= float(coords[0]) <= -16.0 and 27.5 <= float(coords[1]) <= 29.5:
+                                  exact_tenerife_matches.append({
+                                      "name": props.get("name"),
+                                      "city": props.get("city") or props.get("district"),
+                                      "state": props.get("state"),
+                                      "country": props.get("country"),
+                                      "coordinates": coords[:2]
+                                  })
                       else:
                           features = []
                           names = [str(item.get("name", "") or item.get("display_name", "").split(",")[0]) for item in payload if isinstance(item, dict)]
-                      if status == 200 and any("guaza" in name.casefold() for name in names):
-                          details = []
-                          for item in features[:8]:
-                              props = item.get("properties", {})
-                              coords = item.get("geometry", {}).get("coordinates", [])
-                              details.append({
-                                  "name": props.get("name"),
-                                  "city": props.get("city") or props.get("district"),
-                                  "state": props.get("state"),
-                                  "country": props.get("country"),
-                                  "coordinates": coords[:2]
-                              })
-                          print(provider_name + " geocoder check PASSED:", details if provider_name.startswith("Photon") else names[:8])
+                          for item in payload:
+                              if not isinstance(item, dict):
+                                  continue
+                              name = str(item.get("name", "") or item.get("display_name", "").split(",")[0]).strip().casefold()
+                              try:
+                                  lat, lon = float(item.get("lat")), float(item.get("lon"))
+                              except (TypeError, ValueError):
+                                  continue
+                              if name == "guaza" and -17.0 <= lon <= -16.0 and 27.5 <= lat <= 29.5:
+                                  exact_tenerife_matches.append({
+                                      "name": item.get("name"),
+                                      "display_name": item.get("display_name"),
+                                      "coordinates": [lon, lat]
+                                  })
+                      if status == 200 and exact_tenerife_matches:
+                          print(provider_name + " exact Guaza-in-Tenerife geocoder check PASSED:", exact_tenerife_matches[:8])
                           found = True
                           break
-                      provider_errors.append(provider_name + " returned no Guaza match: " + repr(names[:8]))
+                      provider_errors.append(provider_name + " returned no exact Guaza in Tenerife; candidates: " + repr(names[:8]))
                   except Exception as error:
                       if isinstance(error, urllib.error.HTTPError):
                           detail = error.read(300).decode("utf-8", "replace")
