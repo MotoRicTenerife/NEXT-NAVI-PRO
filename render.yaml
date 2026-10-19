@@ -3,6 +3,7 @@ services:
     name: next-navi-pro-jarvis
     runtime: node
     branch: fix/jarvis-render-backend
+    autoDeployTrigger: commit
     plan: free
     rootDir: backend/jarvis-render
     buildCommand: npm install
