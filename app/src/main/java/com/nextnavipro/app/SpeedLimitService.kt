@@ -38,7 +38,8 @@ object SpeedLimitService {
         "https://overpass.kumi.systems/api/interpreter"
     )
     private const val RADIUS_METERS = 80
-    private const val MAX_MATCH_DISTANCE_METERS = 28f
+    private const val BASE_MATCH_DISTANCE_METERS = 28f
+    private const val MAX_MATCH_DISTANCE_WITH_GPS_UNCERTAINTY_METERS = 45f
     private const val MAX_HEADING_DIFFERENCE_DEGREES = 50f
     private const val CONNECT_TIMEOUT_MS = 8000
     private const val READ_TIMEOUT_MS = 12000
@@ -48,12 +49,12 @@ object SpeedLimitService {
      * name/ref/maxspeed. This prevents borrowing a limit from a parallel road
      * or a nearby slip road simply because it is the only tagged candidate.
      */
-    fun findRoadNear(point: NavPoint, bearing: Float?): RoadMatch? {
+    fun findRoadNear(point: NavPoint, bearing: Float?, accuracyMeters: Float? = null): RoadMatch? {
         var lastError: Exception? = null
         var hadSuccessfulResponse = false
         for (endpoint in ENDPOINTS) {
             try {
-                val match = findRoadNearAtEndpoint(point, bearing, endpoint)
+                val match = findRoadNearAtEndpoint(point, bearing, accuracyMeters, endpoint)
                 if (match != null) return match
                 // An empty valid response from one mirror must not prevent trying
                 // the second mirror, whose replication/cache may differ.
@@ -66,7 +67,12 @@ object SpeedLimitService {
         return null
     }
 
-    private fun findRoadNearAtEndpoint(point: NavPoint, bearing: Float?, endpoint: String): RoadMatch? {
+    private fun findRoadNearAtEndpoint(
+        point: NavPoint,
+        bearing: Float?,
+        accuracyMeters: Float?,
+        endpoint: String
+    ): RoadMatch? {
         require(point.latitude.isFinite() && point.latitude in -90.0..90.0)
         require(point.longitude.isFinite() && point.longitude in -180.0..180.0)
         val lat = point.latitude.toString()
@@ -96,6 +102,13 @@ object SpeedLimitService {
                 throw IllegalStateException(if (remark.isNotBlank()) "Overpass: $remark" else "Overpass response missing elements")
             }
 
+            // A good GPS fix keeps the strict base radius. When Android reports a
+            // larger but still useful uncertainty, permit a bounded wider match;
+            // heading checks still reject many parallel/crossing-road false matches.
+            val allowedMatchDistance = maxOf(
+                BASE_MATCH_DISTANCE_METERS,
+                (accuracyMeters?.takeIf { it.isFinite() && it > 0f }?.times(0.9f) ?: 0f)
+            ).coerceAtMost(MAX_MATCH_DISTANCE_WITH_GPS_UNCERTAINTY_METERS)
             var best: RoadMatch? = null
             var bestScore = Float.MAX_VALUE
             for (i in 0 until elements.length()) {
@@ -122,7 +135,7 @@ object SpeedLimitService {
                         wayBestBearing = segmentBearing
                     }
                 }
-                if (wayBestDistance > MAX_MATCH_DISTANCE_METERS) continue
+                if (wayBestDistance > allowedMatchDistance) continue
                 val headingDelta = bearing?.let { headingAxisDifference(it, wayBestBearing) }
                 if (headingDelta != null && wayBestDistance > 8f &&
                     headingDelta > MAX_HEADING_DIFFERENCE_DEGREES) continue
