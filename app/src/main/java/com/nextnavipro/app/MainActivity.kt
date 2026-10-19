@@ -3,6 +3,7 @@ package com.nextnavipro.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
@@ -35,6 +36,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import android.speech.tts.TextToSpeech
@@ -2794,25 +2796,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         }
                     }
                     rememberSearch(query)
-                    val labels = sortedResults.map { place ->
-                        val distanceLabel = origin?.let { here ->
-                            val distance = FloatArray(1)
-                            Location.distanceBetween(here.latitude, here.longitude, place.point.latitude, place.point.longitude, distance)
-                            if (distance[0] < 1000f) {
-                                " • " + distance[0].roundToInt() + " m"
-                            } else {
-                                " • " + String.format(Locale.ITALY, "%.1f km", distance[0] / 1000f)
-                            }
-                        }.orEmpty()
-                        place.name + distanceLabel + if (place.description.isBlank()) "" else "\n" + place.description
-                    }.toTypedArray()
-                    AlertDialog.Builder(this)
-                        .setTitle("Scegli destinazione")
-                        .setItems(labels) { _, which ->
-                            selectJarvisOrSearchDestination(sortedResults[which], autoStart = pendingJarvisPreview)
-                        }
-                        .setNegativeButton(appText("Annulla"), null)
-                        .show()
+                    showDestinationPicker(sortedResults, origin, pendingJarvisPreview)
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -2856,6 +2840,158 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // the request. Do not misclassify a business or an unrelated nearby result.
         return kind in localityKinds && (placeName == spokenQuery ||
             spokenQuery.startsWith(placeName + " ") || placeName.startsWith(spokenQuery + " "))
+    }
+
+    /**
+     * Full-screen destination chooser. The live dashboard MapView is temporarily moved into
+     * this dialog so the rider can compare every candidate against the real map. Its parent,
+     * position and layout parameters are restored when the chooser closes.
+     */
+    private fun showDestinationPicker(
+        places: List<PlaceResult>,
+        origin: Location?,
+        previewOnly: Boolean
+    ) {
+        if (places.isEmpty()) return
+        val activityMapView = mapView ?: run {
+            // Defensive fallback if the dashboard map is not available.
+            val labels = places.map { it.name }.toTypedArray()
+            AlertDialog.Builder(this).setTitle("Scegli destinazione")
+                .setItems(labels) { _, which ->
+                    val chosen = places[which]
+                    selectJarvisOrSearchDestination(chosen)
+                }.setNegativeButton("Annulla", null).show()
+            return
+        }
+
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val oldDestination = destination
+        val oldFollowGps = followGps
+        val oldParent = activityMapView.parent as? android.view.ViewGroup
+        val oldIndex = oldParent?.indexOfChild(activityMapView) ?: -1
+        val oldParams = activityMapView.layoutParams
+        var accepted = false
+        var selectedIndex = 0
+
+        val dialog = Dialog(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            setBackgroundColor(if (negativeTheme) Color.rgb(15, 18, 21) else Color.rgb(235, 239, 241))
+        }
+        val heading = TextView(this).apply {
+            text = "SCEGLI LA LOCALITÀ • ${places.size} risultati"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        page.addView(heading, params(-1, dp(44)))
+
+        val chooserContent = LinearLayout(this).apply {
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
+        val labels = places.map { place ->
+            val distanceLabel = origin?.let { here ->
+                val distance = FloatArray(1)
+                Location.distanceBetween(here.latitude, here.longitude, place.point.latitude, place.point.longitude, distance)
+                if (distance[0] < 1000f) " • ${distance[0].roundToInt()} m"
+                else " • " + String.format(Locale.ITALY, "%.1f km", distance[0] / 1000f)
+            }.orEmpty()
+            place.name + distanceLabel +
+                (if (place.description.isBlank()) "" else "\n" + place.description) +
+                "\n" + String.format(Locale.ROOT, "%.5f, %.5f", place.point.latitude, place.point.longitude)
+        }
+        val resultList = ListView(this).apply {
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            adapter = android.widget.ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_list_item_activated_1,
+                labels
+            )
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 32, 36) else Color.WHITE)
+            setOnItemClickListener { _, _, which, _ ->
+                selectedIndex = which
+                setItemChecked(which, true)
+                val place = places[which]
+                destination = place
+                refreshDestinationMarker()
+                map?.animateCamera(
+                    CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 15.0),
+                    500
+                )
+            }
+        }
+
+        // Keep the existing MapLibre instance and style; no second map or duplicate map state.
+        oldParent?.removeView(activityMapView)
+        chooserContent.addView(resultList, if (landscape)
+            LinearLayout.LayoutParams(0, -1, 0.43f)
+        else LinearLayout.LayoutParams(-1, 0, 0.9f))
+        chooserContent.addView(activityMapView, if (landscape)
+            LinearLayout.LayoutParams(0, -1, 0.57f).apply { setMargins(dp(5), 0, 0, 0) }
+        else LinearLayout.LayoutParams(-1, 0, 1.1f).apply { setMargins(0, dp(5), 0, 0) })
+        page.addView(chooserContent, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val changeButton = makeButton("MODIFICA RICERCA") {
+            dialog.dismiss()
+            destinationInput.requestFocus()
+            destinationInput.setSelection(destinationInput.text.length)
+            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.showSoftInput(destinationInput, InputMethodManager.SHOW_IMPLICIT)
+        }
+        val goButton = makeButton(if (previewOnly) "ANTEPRIMA" else "NAVIGA QUI") {
+            val chosen = places.getOrNull(selectedIndex) ?: return@makeButton
+            accepted = true
+            dialog.dismiss()
+            selectJarvisOrSearchDestination(chosen, autoStart = previewOnly)
+            if (!previewOnly) calculateSelectedRoute()
+        }
+        val cancelButton = makeButton("ANNULLA") { dialog.dismiss() }
+        actions.addView(changeButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(goButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        page.addView(actions, params(-1, dp(54)))
+
+        dialog.setContentView(page)
+        dialog.setOnDismissListener {
+            // Return the map to the dashboard without recreating it or losing its current style.
+            (activityMapView.parent as? android.view.ViewGroup)?.removeView(activityMapView)
+            if (oldParent != null && activityMapView.parent == null) {
+                val restoreIndex = if (oldIndex < 0) oldParent.childCount else oldIndex.coerceAtMost(oldParent.childCount)
+                oldParent.addView(activityMapView, restoreIndex, oldParams)
+            }
+            if (!accepted) destination = oldDestination
+            refreshDestinationMarker()
+            followGps = oldFollowGps
+            if (followGps && !fullScreenMap) mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+        }
+        followGps = false
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        dialog.show()
+        dialog.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        resultList.setItemChecked(0, true)
+        destination = places.first()
+        refreshDestinationMarker()
+        map?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                LatLng(places.first().point.latitude, places.first().point.longitude), 15.0
+            ), 500
+        )
     }
 
     private fun selectJarvisOrSearchDestination(place: PlaceResult, autoStart: Boolean = false) {
