@@ -2639,6 +2639,112 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    /**
+     * Route preview is deliberately separate from active navigation. It does not
+     * start turn guidance, radar proximity alerts, or paired GPX/CSV recording.
+     */
+    private fun previewRouteForJarvis(place: PlaceResult) {
+        val location = currentLocation
+        val origin = location?.takeIf { it.hasAccuracy() && it.accuracy <= 50f }
+            ?.let { NavPoint(it.latitude, it.longitude) }
+        if (origin == null) {
+            val cached = RouteInsightCache.loadForDestination(this, place.name, origin)
+            if (cached != null) showCachedRoutePreview(place, cached)
+            else speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            return
+        }
+        if (isCalculatingRoute) return
+        isCalculatingRoute = true
+        routeButton.isEnabled = false
+        routeText.text = "CALCOLO ANTEPRIMA PERCORSO…"
+        Thread({
+            try {
+                val result = NavigationServices.calculateRoute(origin, place.point, motorcycle = motorcycleProfile)
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    routeButton.isEnabled = true
+                    routePreviewResult = result
+                    routePreviewDestination = place
+                    routePreviewFetchedAt = System.currentTimeMillis()
+                    RouteInsightCache.save(this, place.name, place.point, origin, result, routePreviewFetchedAt)
+                    drawRoute(result, true)
+                    val minutes = (result.durationSeconds / 60.0).roundToInt()
+                    routeText.text = String.format(Locale.ITALY,
+                        "ANTEPRIMA • %.1f km • circa %d min\\n%s",
+                        result.distanceKm, minutes, result.firstInstruction)
+                    routeButton.text = appText("AVVIA PERCORSO")
+                    speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    isCalculatingRoute = false
+                    routeButton.isEnabled = true
+                    val cached = RouteInsightCache.loadForDestination(this, place.name, origin)
+                    if (cached != null) showCachedRoutePreview(place, cached)
+                    else {
+                        routeText.text = "ANTEPRIMA NON DISPONIBILE • connessione necessaria"
+                        speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                    }
+                }
+            }
+        }, "jarvis-route-preview").start()
+    }
+
+    private fun showCachedRoutePreview(place: PlaceResult, cached: CachedRouteInsight) {
+        routePreviewResult = cached.route
+        routePreviewDestination = place
+        routePreviewFetchedAt = cached.fetchedAtEpochMs
+        drawRoute(cached.route, true)
+        val minutes = (cached.route.durationSeconds / 60.0).roundToInt()
+        val ageMinutes = cached.ageMs() / 60_000L
+        val freshness = if (cached.isFresh()) "cache " + ageMinutes + " min"
+            else "DATI VECCHI: " + ageMinutes + " min"
+        routeText.text = String.format(Locale.ITALY,
+            "ANTEPRIMA OFFLINE • %.1f km • circa %d min\\n%s",
+            cached.route.distanceKm, minutes, freshness)
+        routeButton.text = appText("AVVIA PERCORSO")
+        speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+    }
+
+    private fun speakRouteBriefing(destinationName: String, route: RouteResult, fetchedAt: Long?) {
+        val minutes = (route.durationSeconds / 60.0).roundToInt()
+        val mainManeuvers = route.maneuvers
+            .map { ManeuverIconResolver.correctedInstruction(it.type, it.instruction) }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(3)
+        val currentLimit = currentSpeedLimit
+        val roadName = currentRoadMatch?.displayName
+        val ageText = fetchedAt?.let {
+            val stamp = java.text.SimpleDateFormat("HH:mm dd/MM", Locale.getDefault())
+                .format(java.util.Date(it))
+            val ageMinutes = (System.currentTimeMillis() - it).coerceAtLeast(0L) / 60_000L
+            if (ageMinutes <= 30L) "calcolato alle " + stamp
+            else "copia del percorso aggiornata alle " + stamp + ", non necessariamente attuale"
+        }.orEmpty()
+        val briefing = buildString {
+            append("Anteprima per ").append(destinationName).append(". ")
+            append(String.format(Locale.ITALY, "%.1f chilometri, circa %d minuti. ", route.distanceKm, minutes))
+            if (mainManeuvers.isNotEmpty()) {
+                append("Tra le indicazioni principali: ")
+                append(mainManeuvers.joinToString("; ")).append(". ")
+            } else {
+                append("Il motore non ha restituito dettagli di svolta sufficienti per un riepilogo più preciso. ")
+            }
+            if (!roadName.isNullOrBlank()) append("Sulla strada attuale risulta ").append(roadName).append(". ")
+            if (currentLimit != null) {
+                append("Il limite mappato sulla strada attuale è ").append(currentLimit)
+                    .append(" chilometri orari; non significa che valga per tutto il percorso. ")
+            } else {
+                append("Non ho un limite di velocità verificato per la strada attuale. ")
+            }
+            if (ageText.isNotBlank()) append(ageText).append(". ")
+            append("Questa è un'anteprima: la navigazione non è stata avviata.")
+        }
+        speakJarvis(briefing)
+    }
+
     private fun calculateSelectedRoute() {
         val target = destination ?: run {
             searchDestination()
