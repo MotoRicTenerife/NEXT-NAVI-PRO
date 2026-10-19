@@ -32,6 +32,43 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
+      - name: Smoke-test deployed Jarvis endpoint (diagnostic)
+        continue-on-error: true
+        env:
+          JARVIS_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
+        run: |
+          python - <<'PY'
+          import json, os, sys, time, urllib.request, urllib.error
+          endpoint = os.environ.get("JARVIS_ENDPOINT", "").strip()
+          if not endpoint.startswith("https://") or not endpoint.endswith("/jarvis"):
+              print("::warning::Jarvis endpoint is not configured as an HTTPS /jarvis URL.")
+              sys.exit(1)
+          health = endpoint[:-len("/jarvis")] + "/health"
+          def request(url, data=None, timeout=25):
+              req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json","Accept":"application/json"})
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return response.status, response.read().decode("utf-8", "replace")
+          try:
+              status, body = request(health, timeout=35)
+              info = json.loads(body)
+              if status != 200 or info.get("ok") is not True:
+                  raise RuntimeError("Health check returned an unexpected response")
+              print("Jarvis health check passed:", body[:240])
+              payload = json.dumps({
+                  "message":"Che condizioni meteo ci sono?",
+                  "language":"it-IT",
+                  "location":{"latitude":28.0,"longitude":-16.7}
+              }).encode()
+              status, body = request(endpoint, payload, timeout=35)
+              reply = json.loads(body).get("reply", "")
+              if status != 200 or "Open-Meteo" not in reply:
+                  raise RuntimeError("Weather smoke test did not return a verified Open-Meteo reply: " + body[:240])
+              print("Jarvis live-weather smoke test passed:", reply[:300])
+          except Exception as error:
+              print("::warning::Jarvis live endpoint smoke test failed: " + str(error))
+              print("The APK build continues, but online service readiness is NOT verified.")
+              sys.exit(1)
+          PY
       - name: Prepare persistent debug signing (optional)
         env:
           NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
@@ -48,7 +85,7 @@ jobs:
           fi
       - name: Build debug APK
         env:
-          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
@@ -61,7 +98,7 @@ jobs:
           fi
       - name: Run unit tests
         env:
-          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT || 'https://next-navi-pro-jarvis.onrender.com/jarvis' }}
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
