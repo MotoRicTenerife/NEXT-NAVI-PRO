@@ -7,7 +7,6 @@ def stableSigningStorePassword = System.getenv('NEXT_NAVI_KEYSTORE_PASSWORD')
 def stableSigningAlias = System.getenv('NEXT_NAVI_KEY_ALIAS')
 def stableSigningKeyPassword = System.getenv('NEXT_NAVI_KEY_PASSWORD')
 def stableSigningReady = stableSigningPath && stableSigningStorePassword && stableSigningAlias && stableSigningKeyPassword && file(stableSigningPath).isFile()
-def hereApiKey = System.getenv('NEXT_NAVI_HERE_API_KEY') ?: ''
 def jarvisAiEndpoint = (System.getenv('NEXT_NAVI_AI_ENDPOINT') ?: '').replace('\\', '\\\\').replace('"', '\\"')
 
 android {
@@ -21,7 +20,6 @@ android {
         versionCode 5
         versionName '0.3.0-alpha06'
         buildConfigField 'String', 'JARVIS_AI_ENDPOINT', '"' + jarvisAiEndpoint + '"'
-        buildConfigField 'String', 'HERE_API_KEY', '"' + hereApiKey + '"'
     }
     signingConfigs {
         if (stableSigningReady) {
