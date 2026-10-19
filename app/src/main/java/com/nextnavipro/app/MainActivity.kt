@@ -149,6 +149,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var approximateLocation: ApproximateLocation? = null
     private var ipFallbackRequested = false
     private var weatherUsesApproximateLocation = false
+    private var pendingJarvisWeather = false
     private val ipFallbackHandler = Handler(Looper.getMainLooper())
     private var pendingGpxExportName = "Percorso NEXT NAVI PRO"
     private var gpsDiagnosticRecording = false
@@ -1390,7 +1391,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     gpsText.text = "POSIZIONE IP ≈ " + result.areaLabel
                     gpsText.setTextColor(Color.rgb(235, 165, 0))
                 }
-                refreshWeatherForApproximateLocation(result, true)
+                if (pendingJarvisWeather) {
+                    pendingJarvisWeather = false
+                    answerJarvisWeather()
+                } else {
+                    refreshWeatherForApproximateLocation(result, true)
+                }
             }
         }
     }
@@ -2258,6 +2264,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun handleJarvisCommand(transcript: String) {
+        // A newer utterance cancels a pending weather request; otherwise the request
+        // is resumed automatically when a reliable GPS or approximate network location arrives.
+        pendingJarvisWeather = false
         val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
         // Live weather requests take priority over any pending destination clarification.
         if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
@@ -2446,8 +2455,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val approximate = if (gps == null) approximateLocation else null
         if (gps == null && approximate == null) {
+            pendingJarvisWeather = true
             requestIpLocationFallback()
-            speakJarvis("Per verificare il meteo mi serve una posizione attendibile. Sto cercando una posizione approssimativa; se non arriva, attendi il GPS e riprova.")
+            speakJarvis("Non ho ancora una posizione attendibile. Cerco una zona approssimativa e riprovo automaticamente appena arriva il GPS o la posizione di rete.")
             return
         }
 
@@ -3404,6 +3414,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
+        if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
+            pendingJarvisWeather = false
+            answerJarvisWeather()
+        }
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
