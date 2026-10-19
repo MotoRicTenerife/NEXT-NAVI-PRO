@@ -15,6 +15,16 @@ class JarvisCommandParserTest {
         assertEquals(JarvisCommand.Navigate("casa"), JarvisCommandParser.parse("Vai a casa"))
     }
 
+    @Test fun parsesCommonNavigationCommandsInSeveralLanguages() {
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Llévame a Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Take me to Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Emmène-moi à Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Bring mich nach Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Breng me naar Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Leva-me a Adeje"))
+        assertEquals(JarvisCommand.Navigate("casa"), JarvisCommandParser.parse("Take me home"))
+    }
+
     @Test fun parsesOfflineStatusCommands() {
         assertEquals(JarvisCommand.WhereAmI, JarvisCommandParser.parse("Dove sono?"))
         assertEquals(JarvisCommand.Remaining, JarvisCommandParser.parse("Quanto manca all'arrivo?"))
