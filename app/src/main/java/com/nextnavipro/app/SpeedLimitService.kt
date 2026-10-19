@@ -50,14 +50,20 @@ object SpeedLimitService {
      */
     fun findRoadNear(point: NavPoint, bearing: Float?): RoadMatch? {
         var lastError: Exception? = null
+        var hadSuccessfulResponse = false
         for (endpoint in ENDPOINTS) {
             try {
-                return findRoadNearAtEndpoint(point, bearing, endpoint)
+                val match = findRoadNearAtEndpoint(point, bearing, endpoint)
+                if (match != null) return match
+                // An empty valid response from one mirror must not prevent trying
+                // the second mirror, whose replication/cache may differ.
+                hadSuccessfulResponse = true
             } catch (error: Exception) {
                 lastError = error
             }
         }
-        throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile")
+        if (!hadSuccessfulResponse) throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile")
+        return null
     }
 
     private fun findRoadNearAtEndpoint(point: NavPoint, bearing: Float?, endpoint: String): RoadMatch? {
@@ -84,7 +90,11 @@ object SpeedLimitService {
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
             }.orEmpty()
             if (status !in 200..299) throw IllegalStateException("Overpass HTTP $status")
-            val elements = JSONObject(body).optJSONArray("elements") ?: return null
+            val responseJson = JSONObject(body)
+            val elements = responseJson.optJSONArray("elements") ?: run {
+                val remark = responseJson.optString("remark").take(180)
+                throw IllegalStateException(if (remark.isNotBlank()) "Overpass: $remark" else "Overpass response missing elements")
+            }
 
             var best: RoadMatch? = null
             var bestScore = Float.MAX_VALUE
@@ -124,7 +134,13 @@ object SpeedLimitService {
                     best = RoadMatch(
                         name = tags.optString("name").takeIf { it.isNotBlank() && it != "null" },
                         ref = tags.optString("ref").takeIf { it.isNotBlank() && it != "null" },
-                        speedLimitKmh = parseLimit(tags.optString("maxspeed")),
+                        speedLimitKmh = selectLimit(
+                            tags.optString("maxspeed"),
+                            tags.optString("maxspeed:forward"),
+                            tags.optString("maxspeed:backward"),
+                            bearing,
+                            wayBestBearing
+                        ),
                         highwayType = tags.optString("highway").takeIf { it.isNotBlank() && it != "null" },
                         distanceMeters = wayBestDistance,
                         roadBearing = wayBestBearing
@@ -140,6 +156,38 @@ object SpeedLimitService {
     /** Backwards-compatible helper for callers interested only in a numeric limit. */
     fun findNear(point: NavPoint, bearing: Float?): Int? =
         findRoadNear(point, bearing)?.speedLimitKmh
+
+    /**
+     * Resolve generic or explicitly directional OSM limits without guessing direction.
+     * OSM's forward/backward refer to the digitized way geometry; when the vehicle
+     * heading is ambiguous, only a generic limit (or identical directional limits) is safe.
+     */
+    internal fun selectLimit(
+        genericRaw: String,
+        forwardRaw: String,
+        backwardRaw: String,
+        vehicleBearing: Float?,
+        wayBearing: Float?
+    ): Int? {
+        val generic = parseLimit(genericRaw)
+        val forward = parseLimit(forwardRaw)
+        val backward = parseLimit(backwardRaw)
+        if (vehicleBearing == null || wayBearing == null) {
+            return if (forward != null && forward == backward) forward else generic
+        }
+        val difference = directedHeadingDifference(vehicleBearing, wayBearing)
+        val directional = when {
+            difference <= 60f -> forward
+            difference >= 120f -> backward
+            else -> null
+        }
+        return directional ?: generic
+    }
+
+    internal fun directedHeadingDifference(vehicleBearing: Float, wayBearing: Float): Float {
+        val diff = abs((vehicleBearing - wayBearing + 540f) % 360f - 180f)
+        return diff.coerceIn(0f, 180f)
+    }
 
     /**
      * Accepts only explicit numeric OSM limits. Contextual/conditional values
