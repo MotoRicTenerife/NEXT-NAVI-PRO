@@ -985,7 +985,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         AlertDialog.Builder(this)
             .setTitle("Soglie tachimetro e avvisi")
             .setView(fields)
-            .setPositiveButton("Salva") { _, _ ->
+            .setPositiveButton(appText("Salva")) { _, _ ->
                 val green = greenInput.text.toString().toIntOrNull()
                 val yellow = yellowInput.text.toString().toIntOrNull()
                 val motorway = motorwayInput.text.toString().toIntOrNull()
@@ -1002,7 +1002,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 updateSpeedGaugeBorder(lastDisplayedSpeed)
                 updateSpeedingAlertState()
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(appText("Annulla"), null)
             .show()
     }
 
@@ -1013,7 +1013,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setSingleChoiceItems(modes, values.indexOf(themeMode).coerceAtLeast(0)) { dialog, which ->
                 setThemeMode(values[which])
                 dialog.dismiss()
-            }.setNegativeButton("Annulla", null).show()
+            }.setNegativeButton(appText("Annulla"), null).show()
     }
 
     private fun themeButtonLabel(): String = when {
@@ -1105,7 +1105,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Toast.makeText(this, "Profilo salvato: " + if (newValue) "MOTO" else "AUTO", Toast.LENGTH_SHORT).show()
                 if (changed && routeResult != null) Toast.makeText(this, "Il profilo scelto verrà usato al prossimo calcolo del percorso; il percorso attuale non è stato modificato.", Toast.LENGTH_LONG).show()
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(appText("Annulla"), null)
             .show()
     }
 
@@ -1172,7 +1172,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (latest == null) Toast.makeText(this, "Nessun CSV GPS salvato.", Toast.LENGTH_LONG).show()
             else AlertDialog.Builder(this).setTitle("Eliminare il CSV GPS?")
                 .setMessage("File: ${latest.name}\nSe è associato a un GPX, verrà eliminato solo il CSV; per eliminare entrambi usa l'archivio GPX.")
-                .setNegativeButton("Annulla", null)
+                .setNegativeButton(appText("Annulla"), null)
                 .setPositiveButton("Elimina") { _, _ ->
                     Toast.makeText(this, if (latest.delete()) "CSV eliminato." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
                     showGpsDiagnosticsMenu()
@@ -1183,7 +1183,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Toast.makeText(this, "Non ci sono CSV orfani da eliminare.", Toast.LENGTH_LONG).show()
             } else AlertDialog.Builder(this).setTitle("Pulire i CSV senza GPX?")
                 .setMessage("Saranno eliminati ${orphaned.size} file CSV non associati a un GPX. I GPX e i relativi CSV non verranno toccati.")
-                .setNegativeButton("Annulla", null)
+                .setNegativeButton(appText("Annulla"), null)
                 .setPositiveButton("Elimina") { _, _ ->
                     val deleted = orphaned.count { it.delete() }
                     Toast.makeText(this, "Eliminati $deleted CSV orfani.", Toast.LENGTH_LONG).show()
@@ -1266,7 +1266,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     0 -> exportSavedGpsDiagnostic(file)
                     1 -> AlertDialog.Builder(this).setTitle("Eliminare la registrazione?")
                         .setMessage("Il file verrà rimosso definitivamente dal dispositivo.")
-                        .setNegativeButton("Annulla", null)
+                        .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
                             val deleted = file.delete()
                             Toast.makeText(this, if (deleted) "Registrazione eliminata." else "Eliminazione non riuscita.", Toast.LENGTH_LONG).show()
@@ -1689,7 +1689,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
                     4 -> AlertDialog.Builder(this).setTitle("Eliminare solo il GPX?")
                         .setMessage("Verrà eliminato ${file.name}. Il CSV associato, se presente, resterà nella memoria.")
-                        .setNegativeButton("Annulla", null)
+                        .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina GPX") { _, _ ->
                             val deleted = file.delete()
                             Toast.makeText(this, if (deleted) "GPX eliminato." else "Impossibile eliminare il GPX.", Toast.LENGTH_LONG).show()
@@ -1697,7 +1697,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         }.show()
                     5 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
                         .setMessage("Verranno eliminati definitivamente ${file.name} e il CSV GPS con lo stesso nome, se presente.")
-                        .setNegativeButton("Annulla", null)
+                        .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina entrambi") { _, _ ->
                             val deleted = file.delete()
                             val csvDeleted = !pairedCsv.exists() || pairedCsv.delete()
@@ -1869,7 +1869,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val input = EditText(this).apply { setText(selected.name); hint = "Nome preferito" }
         AlertDialog.Builder(this).setTitle("Salva indirizzo preferito").setView(input)
-            .setPositiveButton("Salva") { _, _ ->
+            .setPositiveButton(appText("Salva")) { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotBlank()) {
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -1877,7 +1877,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .apply()
                     Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
                 }
-            }.setNegativeButton("Annulla", null).show()
+            }.setNegativeButton(appText("Annulla"), null).show()
     }
 
     private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> =
@@ -1915,7 +1915,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorites[which].first).apply()
                 Toast.makeText(this, "Preferito eliminato.", Toast.LENGTH_SHORT).show()
-            }.setNegativeButton("Annulla", null).show()
+            }.setNegativeButton(appText("Annulla"), null).show()
     }
 
     private fun initializeJarvis() {
@@ -1955,20 +1955,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (savedName.isBlank() && !prefs.getBoolean("jarvis_user_name_prompted", false)) {
             prefs.edit().putBoolean("jarvis_user_name_prompted", true).apply()
             val nameInput = EditText(this).apply {
-                hint = "Il tuo nome (facoltativo)"
+                hint = appText("Il tuo nome (facoltativo)")
                 setSingleLine(true)
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
                 setPadding(dp(16), dp(10), dp(16), dp(10))
             }
             AlertDialog.Builder(this)
-                .setTitle("Personalizza Jarvis")
-                .setMessage("Come vuoi che ti chiami? È facoltativo e puoi saltare.")
+                .setTitle(appText("Personalizza Jarvis"))
+                .setMessage(appText("Come vuoi che ti chiami? È facoltativo e puoi saltare."))
                 .setView(nameInput)
-                .setPositiveButton("Salva") { _, _ ->
+                .setPositiveButton(appText("Salva")) { _, _ ->
                     val name = nameInput.text.toString().trim().take(40)
                     if (name.isNotBlank()) prefs.edit().putString("jarvis_user_name", name).apply()
                 }
-                .setNegativeButton("Salta", null)
+                .setNegativeButton(appText("Salta"), null)
                 .show()
         }
     }
@@ -1980,8 +1980,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (available.isEmpty()) return
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val savedVoiceName = prefs.getString("jarvis_voice_name", "").orEmpty()
-        val exactVoice = available.firstOrNull { it.name == savedVoiceName }
         val mode = prefs.getString("jarvis_voice_style", "female").orEmpty()
+        if (mode == "auto") {
+            // Leave the TTS engine's own default voice selected, while keeping the system language.
+            tts.setLanguage(Locale.getDefault())
+            tts.setPitch(prefs.getFloat("jarvis_voice_pitch", 1.0f).coerceIn(0.7f, 1.4f))
+            return
+        }
+        val exactVoice = if (mode == "custom") available.firstOrNull { it.name == savedVoiceName } else null
         val voice = exactVoice ?: when (mode) {
             "male" -> available.firstOrNull { voice ->
                 val n = voice.name.lowercase(Locale.ROOT)
@@ -2045,27 +2051,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val nameInput = EditText(this).apply {
             setText(prefs.getString("jarvis_assistant_name", "Jarvis").orEmpty())
-            hint = "Nome dell'assistente"
+            hint = appText("Nome dell'assistente")
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             setPadding(dp(16), dp(10), dp(16), dp(10))
         }
         AlertDialog.Builder(this)
-            .setTitle("Nome dell'assistente vocale")
-            .setMessage("Scegli come vuoi chiamare l'assistente di navigazione.")
+            .setTitle(appText("Nome dell'assistente vocale"))
+            .setMessage(appText("Scegli come vuoi chiamare l'assistente di navigazione."))
             .setView(nameInput)
-            .setPositiveButton("Salva") { _, _ ->
+            .setPositiveButton(appText("Salva")) { _, _ ->
                 val name = nameInput.text.toString().trim().take(30).ifBlank { "Jarvis" }
                 prefs.edit().putString("jarvis_assistant_name", name).apply()
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "$name pronto • premi per parlare"
                 Toast.makeText(this, "Assistente rinominato in $name", Toast.LENGTH_SHORT).show()
             }
-            .setNeutralButton("Ripristina Jarvis") { _, _ ->
+            .setNeutralButton(appText("Ripristina Jarvis")) { _, _ ->
                 prefs.edit().putString("jarvis_assistant_name", "Jarvis").apply()
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Jarvis pronto • premi per parlare"
                 Toast.makeText(this, "Nome ripristinato: Jarvis", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(appText("Annulla"), null)
             .show()
     }
 
@@ -2338,7 +2344,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(results.map { it.name + if (it.description.isBlank()) "" else " • " + it.description }.toTypedArray()) { _, which ->
                 results.getOrNull(which)?.let { selectJarvisOrSearchDestination(it) }
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(appText("Annulla"), null)
             .show()
     }
 
@@ -2421,7 +2427,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                 }
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(appText("Annulla"), null)
             .show()
     }
 
@@ -2528,7 +2534,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setItems(labels) { _, which ->
                             selectJarvisOrSearchDestination(sortedResults[which])
                         }
-                        .setNegativeButton("Annulla", null)
+                        .setNegativeButton(appText("Annulla"), null)
                         .show()
                 }
             } catch (error: Exception) {
@@ -2791,7 +2797,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 } else {
                     AlertDialog.Builder(this).setTitle("Eliminare il luogo?")
                         .setMessage("«${poi.first}» verrà rimosso dai luoghi salvati.")
-                        .setNegativeButton("Annulla", null)
+                        .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
                             val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("poi_" + poi.first).commit()
                             refreshSavedPoiMarkers()
@@ -2814,7 +2820,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 } else {
                     val input = EditText(this).apply { hint = "Nome del luogo" }
                     AlertDialog.Builder(this).setTitle("Salva luogo di interesse").setView(input)
-                        .setPositiveButton("Salva") { _, _ ->
+                        .setPositiveButton(appText("Salva")) { _, _ ->
                             val name = input.text.toString().trim()
                             if (name.isNotBlank()) {
                                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -2822,9 +2828,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                 refreshSavedPoiMarkers()
                                 Toast.makeText(this, "Luogo salvato: " + name, Toast.LENGTH_SHORT).show()
                             }
-                        }.setNegativeButton("Annulla", null).show()
+                        }.setNegativeButton(appText("Annulla"), null).show()
                 }
-            }.setNegativeButton("Annulla", null).show()
+            }.setNegativeButton(appText("Annulla"), null).show()
     }
 
     private fun registerGnssDiagnostics() {
