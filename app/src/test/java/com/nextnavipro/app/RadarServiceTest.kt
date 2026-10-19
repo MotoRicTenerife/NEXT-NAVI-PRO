@@ -10,7 +10,7 @@ class RadarServiceTest {
             {
               "elements": [
                 {"type":"node","id":10,"lat":28.1001,"lon":-16.7001,"tags":{"highway":"speed_camera","direction":"90"}},
-                {"type":"relation","id":90,"tags":{"type":"enforcement","enforcement":"maxspeed","direction":"180"},
+                {"type":"relation","id":90,"tags":{"type":"enforcement","enforcement":"maxspeed","direction":"180","maxspeed":"50"},
                  "members":[
                    {"type":"node","ref":20,"role":"device"},
                    {"type":"node","ref":21,"role":"from"},
@@ -19,17 +19,20 @@ class RadarServiceTest {
                 {"type":"node","id":20,"lat":28.1002,"lon":-16.7002,"tags":{}},
                 {"type":"node","id":21,"lat":28.1003,"lon":-16.7003,"tags":{}},
                 {"type":"node","id":22,"lat":28.1004,"lon":-16.7004,"tags":{}},
-                {"type":"node","id":30,"lat":28.1005,"lon":-16.7005,"tags":{"amenity":"cafe"}}
+                {"type":"node","id":30,"lat":28.1005,"lon":-16.7005,"tags":{"amenity":"cafe"}},
+                {"type":"node","id":31,"lat":28.1006,"lon":-16.7006,"tags":{"man_made":"speed_camera","maxspeed":"60"}}
               ]
             }
         """.trimIndent()
 
         val cameras = RadarService.parseOverpassResponse(json)
 
-        assertEquals(setOf(10L, 20L), cameras.map { it.osmId }.toSet())
+        assertEquals(setOf(10L, 20L, 31L), cameras.map { it.osmId }.toSet())
         assertEquals("90", cameras.first { it.osmId == 10L }.direction)
         assertEquals("Controllo velocità", cameras.first { it.osmId == 20L }.kind)
         assertEquals("180", cameras.first { it.osmId == 20L }.direction)
+        assertEquals("50", cameras.first { it.osmId == 20L }.maxSpeed)
+        assertEquals("60", cameras.first { it.osmId == 31L }.maxSpeed)
     }
 
     @Test fun parsesAverageSpeedEnforcementAsSeparateDeviceType() {
@@ -49,4 +52,11 @@ class RadarServiceTest {
         assertEquals("Controllo velocità media", cameras.single().kind)
         assertTrue(cameras.single().point.latitude in 28.0..29.0)
     }
+    @Test(expected = IllegalStateException::class)
+    fun rejectsOverpassHttp200RemarkInsteadOfCachingItAsEmptyData() {
+        RadarService.parseOverpassResponse(
+            """{"remark":"runtime error: Query timed out.","elements":[]}"""
+        )
+    }
+
 }
