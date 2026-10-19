@@ -43,10 +43,14 @@ object RadarService {
     private fun fetchNearAtEndpoint(center: NavPoint, endpoint: String): List<RadarCamera> {
         val lat = center.latitude.toString()
         val lon = center.longitude.toString()
+        // Include standalone camera nodes and enforcement relations. The latter are
+        // important for devices mapped beside the road, average-speed checks, and cameras
+        // whose direction is encoded by relation members rather than node tags.
         val query = "[out:json][timeout:20];(" +
             "node[\"highway\"=\"speed_camera\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
             "node[\"enforcement\"=\"maxspeed\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
-            ");out body;"
+            "relation[\"type\"=\"enforcement\"][\"enforcement\"~\"^(maxspeed|average_speed)$\"](around:" + RADIUS_METERS + "," + lat + "," + lon + ");" +
+            ");out body;>;out body qt;"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
@@ -65,33 +69,75 @@ object RadarService {
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
             }.orEmpty()
             if (status !in 200..299) throw IllegalStateException("Overpass HTTP " + status)
-            val elements = JSONObject(body).optJSONArray("elements") ?: JSONArray()
-            val result = LinkedHashMap<Long, RadarCamera>()
-            for (i in 0 until elements.length()) {
-                val item = elements.optJSONObject(i) ?: continue
-                if (item.optString("type") != "node") continue
-                val id = item.optLong("id", -1L)
-                val latitude = item.optDouble("lat", Double.NaN)
-                val longitude = item.optDouble("lon", Double.NaN)
-                if (id < 0L || !latitude.isFinite() || !longitude.isFinite()) continue
-                if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) continue
-                val tags = item.optJSONObject("tags") ?: JSONObject()
-                val kind = when {
-                    tags.optString("enforcement") == "maxspeed" -> "Controllo velocità"
-                    tags.optString("maxspeed:type").isNotBlank() -> "Autovelox"
-                    else -> "Autovelox OSM"
-                }
-                result[id] = RadarCamera(
-                    id,
-                    NavPoint(latitude, longitude),
-                    kind,
-                    tags.optString("direction")
-                )
-            }
-            return result.values.toList()
+            return parseOverpassResponse(body)
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** Parse tagged camera nodes plus the device members of OSM enforcement relations. */
+    internal fun parseOverpassResponse(body: String): List<RadarCamera> {
+        val elements = JSONObject(body).optJSONArray("elements") ?: JSONArray()
+        val nodes = LinkedHashMap<Long, JSONObject>()
+        val deviceNodeIds = HashSet<Long>()
+        val relationKinds = HashMap<Long, String>()
+        val relationDirections = HashMap<Long, String>()
+
+        for (i in 0 until elements.length()) {
+            val item = elements.optJSONObject(i) ?: continue
+            when (item.optString("type")) {
+                "node" -> {
+                    val id = item.optLong("id", -1L)
+                    if (id >= 0L) nodes[id] = item
+                }
+                "relation" -> {
+                    val tags = item.optJSONObject("tags") ?: JSONObject()
+                    val enforcement = tags.optString("enforcement")
+                    if (tags.optString("type") != "enforcement" ||
+                        enforcement !in setOf("maxspeed", "average_speed")) continue
+                    val members = item.optJSONArray("members") ?: continue
+                    val relationId = item.optLong("id", -1L)
+                    val kind = if (enforcement == "average_speed") "Controllo velocità media" else "Controllo velocità"
+                    for (j in 0 until members.length()) {
+                        val member = members.optJSONObject(j) ?: continue
+                        if (member.optString("type") != "node") continue
+                        val nodeId = member.optLong("ref", -1L)
+                        if (nodeId < 0L) continue
+                        if (member.optString("role") == "device") {
+                            deviceNodeIds.add(nodeId)
+                            relationKinds[nodeId] = kind
+                            val direction = tags.optString("direction")
+                            if (direction.isNotBlank()) relationDirections[nodeId] = direction
+                        }
+                    }
+                    if (relationId >= 0L && members.length() == 0) continue
+                }
+            }
+        }
+
+        val result = LinkedHashMap<Long, RadarCamera>()
+        for ((id, item) in nodes) {
+            val tags = item.optJSONObject("tags") ?: JSONObject()
+            val isTaggedCamera = tags.optString("highway") == "speed_camera" ||
+                tags.optString("enforcement") == "maxspeed"
+            if (!isTaggedCamera && id !in deviceNodeIds) continue
+            val latitude = item.optDouble("lat", Double.NaN)
+            val longitude = item.optDouble("lon", Double.NaN)
+            if (!latitude.isFinite() || !longitude.isFinite() ||
+                latitude !in -90.0..90.0 || longitude !in -180.0..180.0) continue
+            val kind = relationKinds[id] ?: when {
+                tags.optString("enforcement") == "maxspeed" -> "Controllo velocità"
+                tags.optString("maxspeed:type").isNotBlank() -> "Autovelox"
+                else -> "Autovelox OSM"
+            }
+            result[id] = RadarCamera(
+                id,
+                NavPoint(latitude, longitude),
+                kind,
+                relationDirections[id] ?: tags.optString("direction")
+            )
+        }
+        return result.values.toList()
     }
 }
 
