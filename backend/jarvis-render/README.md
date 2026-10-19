@@ -1,6 +1,6 @@
 # NEXT NAVI PRO — Jarvis proxy for Render
 
-This is a Render-compatible Node.js deployment of the existing Jarvis proxy contract. It is kept separate from `backend/jarvis-cloudflare`; the Cloudflare Worker and current Android endpoint are not changed by adding these files.
+This is the production Node.js backend for Jarvis, deployed on Render. The legacy `backend/jarvis-cloudflare` Worker is not the production endpoint.
 
 ## Deploy with Render Blueprint
 
@@ -10,7 +10,7 @@ This is a Render-compatible Node.js deployment of the existing Jarvis proxy cont
 4. When prompted, enter the existing Gemini API key as the value of the secret environment variable `GEMINI_API_KEY`. Do not put the key in GitHub files, commits, APK configuration, or chat.
 5. Wait for the first deployment to finish. Open the service URL plus `/health`. Expected JSON:
    `{"ok":true,"service":"NEXT NAVI PRO Jarvis proxy"}`
-6. The app endpoint, after testing, will be the service URL plus `/jarvis`.
+6. The production app endpoint is `https://next-navi-pro-jarvis.onrender.com/jarvis`. Verify `/health` and `/jarvis` before releasing a new APK.
 
 ## API contract
 
@@ -24,4 +24,4 @@ This is a Render-compatible Node.js deployment of the existing Jarvis proxy cont
 
 The Render free web service can sleep after inactivity, causing a cold start delay. Test response time before relying on online Jarvis while riding. The offline app features remain separate.
 
-Do not change GitHub Actions variable `NEXT_NAVI_AI_ENDPOINT` until `/health` is reachable from the phone and the `/jarvis` endpoint has been tested. Keep the existing APK signing secrets and signing configuration unchanged.
+GitHub Actions defaults `NEXT_NAVI_AI_ENDPOINT` to the Render URL above. If the repository variable is set, it must also point to this Render service. Keep the existing APK signing secrets and signing configuration unchanged.
