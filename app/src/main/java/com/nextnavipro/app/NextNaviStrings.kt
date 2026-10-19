@@ -161,10 +161,71 @@ object NextNaviStrings {
         )
     )
 
+
+    private val coreTranslations: Map<String, Map<String, String>> = mapOf(
+        "es" to mapOf(
+            "CERCA" to "BUSCAR", "CASA" to "CASA", "MENU" to "MENÚ", "Premi il microfono e parla" to "Pulsa el micrófono y habla",
+            "🌤️ METEO in attesa GPS" to "🌤️ METEO esperando GPS", "RICERCA GPS…" to "BUSCANDO GPS…",
+            "Nessun percorso attivo" to "Sin ruta activa", "RADAR OSM" to "RADARES OSM",
+            "AVVIA PERCORSO" to "INICIAR RUTA", "⌖ POSIZIONE" to "⌖ POSICIÓN",
+            "ANNULLA PERCORSO" to "CANCELAR RUTA", "ANNULLA TRACCIA GPX" to "CANCELAR TRAZA GPX",
+            "ANNULLA PERCORSO GPX" to "CANCELAR RUTA GPX", "DESTINAZIONE: " to "DESTINO: ",
+            "Premi AVVIA PERCORSO" to "Pulsa INICIAR RUTA", "pronto • premi per parlare" to "listo • pulsa para hablar"
+        ),
+        "en" to mapOf(
+            "CERCA" to "SEARCH", "CASA" to "HOME", "MENU" to "MENU", "Premi il microfono e parla" to "Tap the microphone and speak",
+            "🌤️ METEO in attesa GPS" to "🌤️ WEATHER waiting for GPS", "RICERCA GPS…" to "SEARCHING GPS…",
+            "Nessun percorso attivo" to "No active route", "RADAR OSM" to "OSM CAMERAS",
+            "AVVIA PERCORSO" to "START ROUTE", "⌖ POSIZIONE" to "⌖ RECENTER",
+            "ANNULLA PERCORSO" to "CANCEL ROUTE", "ANNULLA TRACCIA GPX" to "CANCEL GPX TRACK",
+            "ANNULLA PERCORSO GPX" to "CANCEL GPX ROUTE", "DESTINAZIONE: " to "DESTINATION: ",
+            "Premi AVVIA PERCORSO" to "Tap START ROUTE", "pronto • premi per parlare" to "ready • tap to speak"
+        ),
+        "fr" to mapOf(
+            "CERCA" to "CHERCHER", "CASA" to "MAISON", "MENU" to "MENU", "Premi il microfono e parla" to "Appuyez sur le micro et parlez",
+            "🌤️ METEO in attesa GPS" to "🌤️ MÉTÉO en attente du GPS", "RICERCA GPS…" to "RECHERCHE GPS…",
+            "Nessun percorso attivo" to "Aucun itinéraire actif", "RADAR OSM" to "RADARS OSM",
+            "AVVIA PERCORSO" to "DÉMARRER", "⌖ POSIZIONE" to "⌖ RECENTRER",
+            "ANNULLA PERCORSO" to "ANNULER", "ANNULLA TRACCIA GPX" to "ANNULER LA TRACE GPX",
+            "ANNULLA PERCORSO GPX" to "ANNULER L’ITINÉRAIRE GPX", "DESTINAZIONE: " to "DESTINATION : ",
+            "Premi AVVIA PERCORSO" to "Appuyez sur DÉMARRER", "pronto • premi per parlare" to "prêt • appuyez pour parler"
+        ),
+        "de" to mapOf(
+            "CERCA" to "SUCHEN", "CASA" to "ZUHAUSE", "MENU" to "MENÜ", "Premi il microfono e parla" to "Mikrofon antippen und sprechen",
+            "🌤️ METEO in attesa GPS" to "🌤️ WETTER wartet auf GPS", "RICERCA GPS…" to "GPS-SUCHE…",
+            "Nessun percorso attivo" to "Keine aktive Route", "RADAR OSM" to "OSM-BLITZER",
+            "AVVIA PERCORSO" to "ROUTE STARTEN", "⌖ POSIZIONE" to "⌖ ZENTRIEREN",
+            "ANNULLA PERCORSO" to "ROUTE ABBRECHEN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ABBRECHEN",
+            "ANNULLA PERCORSO GPX" to "GPX-ROUTE ABBRECHEN", "DESTINAZIONE: " to "ZIEL: ",
+            "Premi AVVIA PERCORSO" to "ROUTE STARTEN antippen", "pronto • premi per parlare" to "bereit • zum Sprechen tippen"
+        ),
+        "pt" to mapOf(
+            "CERCA" to "PESQUISAR", "CASA" to "CASA", "MENU" to "MENU", "Premi il microfono e parla" to "Toca no microfone e fala",
+            "🌤️ METEO in attesa GPS" to "🌤️ METEOROLOGIA à espera do GPS", "RICERCA GPS…" to "A PROCURAR GPS…",
+            "Nessun percorso attivo" to "Sem percurso ativo", "RADAR OSM" to "RADARES OSM",
+            "AVVIA PERCORSO" to "INICIAR PERCURSO", "⌖ POSIZIONE" to "⌖ RECENTRAR",
+            "ANNULLA PERCORSO" to "CANCELAR PERCURSO", "ANNULLA TRACCIA GPX" to "CANCELAR TRAJETO GPX",
+            "ANNULLA PERCORSO GPX" to "CANCELAR PERCURSO GPX", "DESTINAZIONE: " to "DESTINO: ",
+            "Premi AVVIA PERCORSO" to "Toca em INICIAR PERCURSO", "pronto • premi per parlare" to "pronto • toca para falar"
+        ),
+        "nl" to mapOf(
+            "CERCA" to "ZOEKEN", "CASA" to "THUIS", "MENU" to "MENU", "Premi il microfono e parla" to "Tik op de microfoon en spreek",
+            "🌤️ METEO in attesa GPS" to "🌤️ WEER wacht op GPS", "RICERCA GPS…" to "GPS ZOEKEN…",
+            "Nessun percorso attivo" to "Geen actieve route", "RADAR OSM" to "OSM-CAMERA’S",
+            "AVVIA PERCORSO" to "ROUTE STARTEN", "⌖ POSIZIONE" to "⌖ HER-CENTREREN",
+            "ANNULLA PERCORSO" to "ROUTE ANNULEREN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ANNULEREN",
+            "ANNULLA PERCORSO GPX" to "GPX-ROUTE ANNULEREN", "DESTINAZIONE: " to "BESTEMMING: ",
+            "Premi AVVIA PERCORSO" to "Tik op ROUTE STARTEN", "pronto • premi per parlare" to "klaar • tik om te spreken"
+        )
+    )
+
     fun translate(text: String, locale: Locale = Locale.getDefault()): String {
         if (locale.language.equals("it", ignoreCase = true)) return text
-        return translations[locale.language.lowercase(Locale.ROOT)]?.get(text)
+        val language = locale.language.lowercase(Locale.ROOT)
+        return translations[language]?.get(text)
+            ?: coreTranslations[language]?.get(text)
             ?: translations["en"]?.get(text)
+            ?: coreTranslations["en"]?.get(text)
             ?: text
     }
 }
