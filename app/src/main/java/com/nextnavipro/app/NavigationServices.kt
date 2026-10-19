@@ -32,7 +32,29 @@ object NavigationServices {
     private const val READ_TIMEOUT_MS = 15000
     private const val USER_AGENT = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)"
 
+    internal fun placeQueryVariants(query: String): List<String> {
+        val clean = query.trim().replace(Regex("\\s+"), " ")
+        if (clean.isBlank()) return emptyList()
+        val variants = linkedSetOf(clean)
+        // Speech recognition may double consonants in foreign proper names:
+        // Spanish "Guaza" can be transcribed as "Guazza".
+        val collapsed = clean.replace(Regex("(?i)([b-df-hj-np-tv-z])\\\\1+"), "$1")
+        if (collapsed != clean && collapsed.length >= 3) variants.add(collapsed)
+        val unaccented = java.text.Normalizer.normalize(clean, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+        if (unaccented != clean) variants.add(unaccented)
+        return variants.toList()
+    }
+
     fun searchPlaces(query: String, near: NavPoint? = null): List<PlaceResult> {
+        for (candidate in placeQueryVariants(query)) {
+            val results = searchPlacesSingle(candidate, near)
+            if (results.isNotEmpty()) return results
+        }
+        return emptyList()
+    }
+
+    private fun searchPlacesSingle(query: String, near: NavPoint?): List<PlaceResult> {
         val cleanQuery = query.trim().replace(Regex("\\s+"), " ")
         val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
         // Photon supports location-biased search. Supplying the current GPS fix helps
@@ -76,7 +98,9 @@ object NavigationServices {
                     .firstOrNull { it.isNotBlank() }?.lowercase() ?: "unknown"
                 results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", "), kind))
             }
-            return results
+            if (results.isNotEmpty()) return results
+            // A zero-result Photon response is also a reason to try the fallback geocoder.
+            return searchPlacesNominatim(cleanQuery, near)
         } catch (error: Exception) {
             // If Photon is unavailable, try Nominatim once as a fallback.
             // This is a search fallback only; it never fabricates a result.
@@ -92,7 +116,8 @@ object NavigationServices {
             "&viewbox=${it.longitude - 0.5},${it.latitude + 0.5},${it.longitude + 0.5},${it.latitude - 0.5}"
         }.orEmpty()
         val url = "https://nominatim.openstreetmap.org/search?q=" + encoded +
-            "&format=jsonv2&limit=20&addressdetails=1&countrycodes=es&accept-language=" + URLEncoder.encode(Locale.getDefault().toLanguageTag(), "UTF-8") + viewbox
+            "&format=jsonv2&limit=20&addressdetails=1&accept-language=" +
+            URLEncoder.encode(Locale.getDefault().toLanguageTag(), "UTF-8") + viewbox
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
