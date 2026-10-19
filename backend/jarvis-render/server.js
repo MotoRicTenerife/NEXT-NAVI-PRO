@@ -70,17 +70,18 @@ async function fetchLiveWeather(location) {
   }).toString();
 
   let lastError;
-  // Render instances can have a cold network path after sleeping. Retry once on
-  // transient transport/5xx failures; never substitute guessed weather values.
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  // Render's free instances can have transient outbound-network latency. Retry once
+  // for timeouts, rate limits and provider errors; never turn a failed lookup into
+  // invented weather data.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const response = await fetch(url, {
         signal: AbortSignal.timeout(12000),
-        headers: { "accept": "application/json" }
+        headers: { "accept": "application/json", "user-agent": "NEXT-NAVI-PRO/0.3 (Render weather lookup)" }
       });
       if (!response.ok) {
         const error = new Error("Open-Meteo HTTP " + response.status);
-        if (response.status >= 500 && attempt < 2) {
+        if (attempt === 0 && (response.status === 429 || response.status >= 500)) {
           lastError = error;
           continue;
         }
@@ -88,10 +89,13 @@ async function fetchLiveWeather(location) {
       }
       const data = await response.json();
       const current = data?.current;
-      if (!current || !Number.isFinite(current.temperature_2m) ||
-          !Number.isFinite(current.weather_code) || !Number.isFinite(current.wind_speed_10m) ||
-          !Number.isFinite(current.wind_gusts_10m) || typeof current.time !== "string") {
-        throw new Error("Invalid Open-Meteo response");
+      if (!current ||
+          !Number.isFinite(current.temperature_2m) ||
+          !Number.isFinite(current.weather_code) ||
+          !Number.isFinite(current.wind_speed_10m) ||
+          !Number.isFinite(current.wind_gusts_10m) ||
+          typeof current.time !== "string" || !current.time) {
+        throw new Error("Invalid Open-Meteo current weather fields");
       }
       return {
         source: "Open-Meteo",
@@ -108,13 +112,13 @@ async function fetchLiveWeather(location) {
       };
     } catch (error) {
       lastError = error;
-      if (attempt >= 2 || (error instanceof Error && /^Open-Meteo HTTP 4/.test(error.message))) {
-        throw error;
-      }
+      if (attempt === 1) break;
+      if (error instanceof Error && /^Open-Meteo HTTP 4(?!29)\\d+/.test(error.message)) break;
     }
   }
-  throw lastError || new Error("Open-Meteo lookup failed");
+  throw lastError || new Error("Open-Meteo weather unavailable");
 }
+
 function xmlText(block, names) {
   for (const name of names) {
     const pattern = "<(?:[\\w.-]+:)?" + name + "\\b[^>]*>([\\s\\S]*?)</(?:[\\w.-]+:)?" + name + ">";
