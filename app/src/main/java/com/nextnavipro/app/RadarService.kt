@@ -2,6 +2,7 @@ package com.nextnavipro.app
 
 import android.content.Context
 import android.location.Location
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -24,7 +25,7 @@ object RadarService {
     private val ENDPOINTS = listOf(
         "https://overpass-api.de/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter"
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
     )
     // A 10 km window keeps the response useful at road speed without requesting a
     // needlessly large relation graph on every refresh.
@@ -36,9 +37,12 @@ object RadarService {
         var lastError: Exception? = null
         for (endpoint in ENDPOINTS) {
             try {
-                return fetchNearAtEndpoint(center, endpoint)
+                val cameras = fetchNearAtEndpoint(center, endpoint)
+                Log.i("NEXT_NAVI_RADAR", "Overpass success endpoint=$endpoint cameras=${cameras.size}")
+                return cameras
             } catch (error: Exception) {
                 lastError = error
+                Log.w("NEXT_NAVI_RADAR", "Overpass endpoint failed: $endpoint", error)
             }
         }
         throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile per i radar")
@@ -74,7 +78,7 @@ object RadarService {
             val body = stream?.use { input ->
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
             }.orEmpty()
-            if (status !in 200..299) throw IllegalStateException("Overpass HTTP " + status)
+            if (status !in 200..299) throw IllegalStateException("Overpass HTTP " + status + " at " + endpoint + ": " + body.take(180))
             return parseOverpassResponse(body)
         } finally {
             connection.disconnect()
