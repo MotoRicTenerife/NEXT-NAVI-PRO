@@ -48,7 +48,12 @@ object NavigationServices {
 
     fun searchPlaces(query: String, near: NavPoint? = null): List<PlaceResult> {
         for (candidate in placeQueryVariants(query)) {
-            val results = searchPlacesSingle(candidate, near)
+            val results = try {
+                searchPlacesSingle(candidate, near)
+            } catch (_: Exception) {
+                // A failed fallback for one spelling must not prevent trying the next spelling.
+                emptyList()
+            }
             if (results.isNotEmpty()) return results
         }
         return emptyList()
