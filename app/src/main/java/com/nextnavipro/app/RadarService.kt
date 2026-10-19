@@ -209,6 +209,15 @@ object RadarCache {
     fun lastUpdatedAt(context: Context): Long =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_TIME, 0L)
 
+    /** True only when the cached query was centered close enough to cover this area. */
+    fun isCacheNear(context: Context, location: NavPoint): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val centerLat = prefs.getFloat(KEY_LAT, Float.NaN).toDouble()
+        val centerLon = prefs.getFloat(KEY_LON, Float.NaN).toDouble()
+        if (!centerLat.isFinite() || !centerLon.isFinite()) return false
+        return distanceMeters(location.latitude, location.longitude, centerLat, centerLon) <= REFRESH_DISTANCE_METERS
+    }
+
     fun save(context: Context, location: NavPoint, cameras: List<RadarCamera>, now: Long = System.currentTimeMillis()) {
         val array = JSONArray()
         cameras.forEach { camera ->
