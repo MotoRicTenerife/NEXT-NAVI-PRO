@@ -38,6 +38,7 @@ class JarvisCommandParserTest {
 
     @Test fun parsesAssistantNameQuestions() {
         assertEquals(JarvisCommand.AssistantName, JarvisCommandParser.parse("Come ti chiami?"))
+        assertEquals(JarvisCommand.AssistantName, JarvisCommandParser.parse("Tu come ti chiami?"))
         assertEquals(JarvisCommand.AssistantName, JarvisCommandParser.parse("Qual è il tuo nome"))
         assertEquals(JarvisCommand.AssistantName, JarvisCommandParser.parse("What is your name?"))
         assertEquals(JarvisCommand.AssistantName, JarvisCommandParser.parse("¿Cómo te llamas?"))
