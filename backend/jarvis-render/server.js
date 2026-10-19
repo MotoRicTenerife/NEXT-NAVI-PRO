@@ -119,8 +119,11 @@ async function fetchDgtTraffic(location) {
   let match;
   while ((match = recordPattern.exec(xml)) !== null) {
     const block = match[1];
-    const lat = Number(xmlText(block, ["latitude"]));
-    const lon = Number(xmlText(block, ["longitude"]));
+    const latText = xmlText(block, ["latitude"]);
+    const lonText = xmlText(block, ["longitude"]);
+    if (!latText || !lonText) continue;
+    const lat = Number(latText);
+    const lon = Number(lonText);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) continue;
     const distanceKm = haversineKm(location, { latitude: lat, longitude: lon });
     if (distanceKm > 30) continue;
