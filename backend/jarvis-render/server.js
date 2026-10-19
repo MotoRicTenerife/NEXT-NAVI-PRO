@@ -178,7 +178,7 @@ async function handle(req, res) {
   }
 
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
-    return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy" });
+    return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
   }
   if (url.pathname !== "/jarvis") return send(res, 404, { error: "Not found" });
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
@@ -230,7 +230,8 @@ async function handle(req, res) {
     try {
       weatherResult = await fetchLiveWeather(location);
       liveContext += "\nVERIFIED LIVE WEATHER: " + JSON.stringify(weatherResult);
-    } catch {
+    } catch (error) {
+      console.warn("Jarvis live weather lookup failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
       liveContext += "\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
     }
   } else if (asksWeather) {
