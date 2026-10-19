@@ -2,7 +2,7 @@ import http from "node:http";
 
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
-const MAX_BODY_BYTES = 16 * 1024;
+const MAX_BODY_BYTES = 32 * 1024;
 const MAX_REQUEST_CHARS = clampInt(process.env.MAX_REQUEST_CHARS, 500, 1, 4000);
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
@@ -258,6 +258,15 @@ async function handle(req, res) {
     Number.isFinite(input.location.longitude) && input.location.longitude >= -180 && input.location.longitude <= 180
     ? { latitude: input.location.latitude, longitude: input.location.longitude }
     : null;
+  const summary = typeof input?.summary === "string"
+    ? input.summary.slice(0, 2500)
+    : "";
+  const history = Array.isArray(input?.history)
+    ? input.history.slice(-16).filter(item =>
+        item && (item.role === "user" || item.role === "model") &&
+        typeof item.text === "string" && item.text.trim()
+      ).map(item => ({ role: item.role, parts: [{ text: item.text.trim().slice(0, 500) }] }))
+    : [];
   if (!message) {
     console.warn("Jarvis request rejected: missing message");
     return send(res, 400, { error: "Message is required" });
@@ -307,6 +316,7 @@ async function handle(req, res) {
     assistantName + ". If asked your name, answer with that exact name, never the default name Jarvis unless that is the configured name. Reply in " +
     language +
     ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Use verified live context below when present, state its source and timestamp when available, and distinguish incidents from a full measure of traffic flow. If a source lookup failed or is not configured, say so clearly. Never pretend to browse or query Google Maps. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data." +
+    (summary ? "\nCONVERSATION SUMMARY (historical context, not live facts): " + summary : "") +
     liveContext;
 
   // Live-data questions use verified provider results directly, so they still work if Gemini is unavailable or misconfigured.
@@ -373,7 +383,7 @@ async function handle(req, res) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: instructions }] },
-        contents: [{ role: "user", parts: [{ text: message }] }],
+        contents: [...history, { role: "user", parts: [{ text: message }] }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 300 }
       }),
       signal: AbortSignal.timeout(25000)
