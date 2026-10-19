@@ -27,7 +27,7 @@ data class CachedRouteInsight(
 
 object RouteInsightCache {
     private const val PREFS = "next_navi_route_insight_cache"
-    private const val KEY = "latest_route"
+    private const val KEY_PREFIX = "route_"
 
     fun save(
         context: Context,
@@ -56,7 +56,7 @@ object RouteInsightCache {
                 }
             })
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY, json.toString()).apply()
+            .putString(cacheKey(destinationName), json.toString()).apply()
     }
 
     fun loadForDestination(
@@ -66,7 +66,8 @@ object RouteInsightCache {
         now: Long = System.currentTimeMillis()
     ): CachedRouteInsight? {
         if (currentOrigin == null) return null
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null) ?: return null
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(cacheKey(name), null) ?: return null
         return try {
             val json = JSONObject(raw)
             if (!json.optString("destinationName").equals(name.trim(), ignoreCase = true)) return null
@@ -100,7 +101,17 @@ object RouteInsightCache {
     }
 
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(KEY_PREFIX) }.forEach { editor.remove(it) }
+        editor.apply()
+    }
+
+    private fun cacheKey(name: String): String {
+        val normalized = java.text.Normalizer.normalize(name.trim().lowercase(java.util.Locale.ROOT),
+            java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+        val slug = normalized.replace(Regex("[^a-z0-9]+"), "_").trim('_').take(60)
+        return KEY_PREFIX + if (slug.isBlank()) normalized.hashCode().toString() else slug
     }
 
     private fun pointJson(point: NavPoint) = JSONObject()
