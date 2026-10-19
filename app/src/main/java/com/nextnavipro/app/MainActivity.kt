@@ -345,7 +345,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 if (voiceGuideReady) {
                     applyJarvisVoicePreference()
-                    // A calm, slightly slower delivery suits spoken directions better.
+                    // Navigation announcements keep a steady, safety-oriented pace.
                     voiceGuide?.setSpeechRate(0.96f)
                     pendingJarvisSpeech?.let { pending ->
                         pendingJarvisSpeech = null
@@ -1109,7 +1109,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"), appText("Memoria Jarvis • spazio e pulizia"))
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"), appText("Personalità di Jarvis"), appText("Memoria Jarvis • spazio e pulizia"))
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1126,7 +1126,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     10 -> showVehicleProfileMenu()
                     11 -> showJarvisNameSettings()
                     12 -> showJarvisVoiceSettings()
-                    13 -> showJarvisMemorySettings()
+                    13 -> showJarvisPersonalitySettings()
+                    14 -> showJarvisMemorySettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -2114,6 +2115,150 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
+    private fun showJarvisPersonalitySettings() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val scroll = android.widget.ScrollView(this).apply {
+            isFillViewport = true
+            addView(layout)
+        }
+        val presetLabels = arrayOf(
+            "Jarvis — intelligente, ironico e discreto",
+            "Amichevole — caloroso e spontaneo",
+            "Ironico — umorismo più frequente",
+            "Professionale — preciso e formale",
+            "Discreto — poche parole"
+        )
+        val presetValues = arrayOf("jarvis", "friendly", "ironic", "professional", "discreet")
+        val currentPreset = prefs.getString("jarvis_personality_preset", "jarvis") ?: "jarvis"
+        val presetGroup = android.widget.RadioGroup(this).apply { orientation = android.widget.RadioGroup.VERTICAL }
+        presetLabels.forEachIndexed { index, label ->
+            val radio = android.widget.RadioButton(this).apply {
+                id = View.generateViewId()
+                text = label
+                tag = presetValues[index]
+                isChecked = presetValues[index] == currentPreset
+                textSize = 15f
+                setPadding(0, dp(5), 0, dp(5))
+            }
+            presetGroup.addView(radio)
+        }
+        layout.addView(TextView(this).apply {
+            text = "Stile di partenza"
+            textSize = 17f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(4))
+        })
+        layout.addView(presetGroup)
+
+        data class SliderSetting(val key: String, val label: String, val min: Int, val max: Int, val initial: Int, val suffix: String = "%")
+        val settings = listOf(
+            SliderSetting("jarvis_personality_irony", "Ironia", 0, 100, prefs.getInt("jarvis_personality_irony", 45)),
+            SliderSetting("jarvis_personality_warmth", "Calore e simpatia", 0, 100, prefs.getInt("jarvis_personality_warmth", 80)),
+            SliderSetting("jarvis_personality_energy", "Energia ed espressività", 0, 100, prefs.getInt("jarvis_personality_energy", 55)),
+            SliderSetting("jarvis_personality_concision", "Sintesi delle risposte", 0, 100, prefs.getInt("jarvis_personality_concision", 75)),
+            SliderSetting("jarvis_voice_rate", "Velocità della voce Jarvis", 70, 120, prefs.getInt("jarvis_voice_rate", 96), "%"),
+            SliderSetting("jarvis_voice_pitch", "Tono della voce", 70, 140, (prefs.getFloat("jarvis_voice_pitch", 1.0f) * 100).toInt().coerceIn(70, 140), "%")
+        )
+        val seekBars = mutableMapOf<String, android.widget.SeekBar>()
+        val valueLabels = mutableMapOf<String, TextView>()
+        fun addSetting(setting: SliderSetting) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(7), 0, dp(2))
+            }
+            val label = TextView(this).apply {
+                textSize = 14f
+                text = setting.label
+            }
+            val value = TextView(this).apply {
+                textSize = 12f
+                alpha = 0.8f
+                text = "${setting.initial}${setting.suffix}"
+            }
+            val heading = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(label, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(value)
+            }
+            val seek = android.widget.SeekBar(this).apply {
+                max = setting.max - setting.min
+                progress = (setting.initial.coerceIn(setting.min, setting.max) - setting.min)
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                        value.text = "${progress + setting.min}${setting.suffix}"
+                    }
+                    override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+                    override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) = Unit
+                })
+            }
+            row.addView(heading)
+            row.addView(seek)
+            layout.addView(row)
+            seekBars[setting.key] = seek
+            valueLabels[setting.key] = value
+        }
+        settings.forEach(::addSetting)
+
+        presetGroup.setOnCheckedChangeListener { group, checkedId ->
+            val selected = group.findViewById<android.widget.RadioButton>(checkedId)?.tag as? String ?: return@setOnCheckedChangeListener
+            val values = when (selected) {
+                "friendly" -> listOf(25, 95, 70, 65)
+                "ironic" -> listOf(85, 75, 70, 70)
+                "professional" -> listOf(10, 45, 35, 35)
+                "discreet" -> listOf(10, 55, 25, 95)
+                else -> listOf(45, 80, 55, 75)
+            }
+            listOf("jarvis_personality_irony", "jarvis_personality_warmth", "jarvis_personality_energy", "jarvis_personality_concision").forEachIndexed { index, key ->
+                seekBars[key]?.progress = values[index]
+            }
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Personalità di Jarvis")
+            .setMessage("Personalizza il modo in cui Jarvis conversa. Queste preferenze guidano le risposte AI online; gli avvisi stradali e le istruzioni di navigazione restano neutri e prioritari.")
+            .setView(scroll)
+            .setPositiveButton("Salva", null)
+            .setNeutralButton("Ascolta anteprima", null)
+            .setNegativeButton(appText("Annulla"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selected = presetGroup.findViewById<android.widget.RadioButton>(presetGroup.checkedRadioButtonId)?.tag as? String ?: "jarvis"
+                val edit = prefs.edit().putString("jarvis_personality_preset", selected)
+                settings.forEach { setting ->
+                    val value = (seekBars[setting.key]?.progress ?: (setting.initial - setting.min)) + setting.min
+                    edit.putInt(setting.key, value)
+                }
+                edit.putFloat("jarvis_voice_pitch", ((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
+                edit.apply()
+                applyJarvisVoicePreference()
+                voiceGuide?.setSpeechRate((prefs.getInt("jarvis_voice_rate", 96) / 100f).coerceIn(0.7f, 1.2f))
+                Toast.makeText(this, "Personalità di Jarvis salvata", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val selected = presetGroup.findViewById<android.widget.RadioButton>(presetGroup.checkedRadioButtonId)?.tag as? String ?: "jarvis"
+                val irony = seekBars["jarvis_personality_irony"]?.progress ?: 45
+                val warmth = seekBars["jarvis_personality_warmth"]?.progress ?: 80
+                val line = when {
+                    irony >= 70 && warmth >= 60 -> "Ecco, ci sono. Prometto di essere brillante, ma non al punto da distrarti dalla strada."
+                    warmth >= 75 -> "Sono qui con te. Dimmi pure, ti ascolto."
+                    selected == "professional" -> "Assistente pronto. Dimmi pure di cosa hai bisogno."
+                    selected == "discreet" -> "Sono qui. Dimmi."
+                    else -> "Ciao! Sono qui, pronto ad aiutarti."
+                }
+                voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
+                speakJarvis(line, remember = false)
+            }
+        }
+        dialog.show()
+    }
+
     private fun showJarvisMemorySettings() {
         val stats = jarvisMemory.stats()
         val summary = "Spazio occupato: ${formatMemoryBytes(stats.bytes)}\n" +
@@ -2302,6 +2447,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             pendingJarvisSpeech = message
             return
         }
+        val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
+        voiceGuide?.setSpeechRate(voiceRate)
         voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
     }
 
@@ -2731,6 +2878,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, appText("Voce non pronta o lingua TTS non disponibile."), Toast.LENGTH_LONG).show()
             return
         }
+        voiceGuide?.setSpeechRate(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f)
         voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, "voice-test")
     }
 
@@ -3340,7 +3488,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
-                    if (voiceGuideReady) voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start")
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start") }
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
@@ -4032,6 +4180,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (!speedingVoiceActive) {
                 speedingVoiceActive = true
                 if (voiceGuideReady) {
+                    voiceGuide?.setSpeechRate(0.96f)
                     voiceGuide?.speak(
                         "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari.",
                         TextToSpeech.QUEUE_ADD, null, "speed-limit-overspeed"
@@ -4115,10 +4264,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
         lastRadarAlertId = candidates.first.osmId
         lastRadarAlertMs = now
-        if (voiceGuideReady) voiceGuide?.speak(
+        if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak(
             "Attenzione, possibile autovelox tra circa " + candidates.second.toInt() + " metri",
             TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
-        )
+        ) }
         radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
     }
 
@@ -4158,7 +4307,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute")
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute") }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -4342,6 +4491,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> ""
             }
             if (spoken.isNotBlank() && voiceGuideReady) {
+                voiceGuide?.setSpeechRate(0.96f)
                 voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
             }
         }
