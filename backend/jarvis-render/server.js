@@ -303,7 +303,7 @@ async function handle(req, res) {
       return send(res, 400, { error: "At least three valid GPS points are required" });
     }
 
-    const csv = "LATITUDE,LONGITUDE\\n" + points.map(point => point.latitude + "," + point.longitude).join("\\n") + "\\n";
+    const csv = "LATITUDE,LONGITUDE\n" + points.map(point => point.latitude + "," + point.longitude).join("\n") + "\n";
     const query = new URLSearchParams({
       routeMatch: "1",
       mode: "fastest;car;traffic:disabled",
