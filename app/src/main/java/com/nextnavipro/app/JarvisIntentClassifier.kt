@@ -16,7 +16,7 @@ object JarvisIntentClassifier {
             "\\b(meteo|meteorolog\\w*|previsioni\\w*|pioggia|piove|piovera|piovendo|vento|ventoso|raffiche|temperatura|weather|forecast|rain|raining|wind|gusts|lluvia|llueve|viento|clima)\\b"
         )
         return weatherTerms.containsMatchIn(normalized) ||
-            normalized.contains("che tempo") ||
+            Regex("\\b(che|come|que|como)\\b.*\\b(tempo|tiempo)\\b").containsMatchIn(normalized) ||
             normalized.contains("come e il tempo") ||
             normalized.contains("fa caldo") ||
             normalized.contains("fa freddo") ||
