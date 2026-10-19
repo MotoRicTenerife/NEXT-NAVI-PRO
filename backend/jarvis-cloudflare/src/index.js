@@ -3,13 +3,13 @@ const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 
 function normalizeText(value) {
-  return String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 function isWeatherQuestion(message) {
   const text = normalizeText(message);
-  return /\\b(meteo|meteorolog\\w*|previsioni\\w*|pioggia|piove|piovera|vento|ventoso|raffiche|temperatura|weather|forecast|rain|wind|gusts|lluvia|llueve|viento|clima)\\b/.test(text) ||
-    /\\b(che|come|que|como)\\b.*\\b(tempo|tiempo)\\b/.test(text) ||
+  return /\b(meteo|meteorolog\w*|previsioni\w*|pioggia|piove|piovera|vento|ventoso|raffiche|temperatura|weather|forecast|rain|wind|gusts|lluvia|llueve|viento|clima)\b/.test(text) ||
+    /\b(che|come|que|como)\b.*\b(tempo|tiempo)\b/.test(text) ||
     text.includes("che condizioni meteo") || text.includes("come e il tempo") ||
     text.includes("fa caldo") || text.includes("fa freddo");
 }
