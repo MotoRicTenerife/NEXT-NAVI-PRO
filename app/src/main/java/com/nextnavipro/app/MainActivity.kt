@@ -1376,12 +1376,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun requestIpLocationFallback() {
-        if (ipFallbackRequested || currentLocation != null) return
+        val now = System.currentTimeMillis()
+        val reliableGps = currentLocation?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 100f && now - it.time in 0..120_000L
+        }
+        // A stale last-known GPS fix must not block approximate IP location forever.
+        if (ipFallbackRequested || reliableGps != null) return
         ipFallbackRequested = true
         thread(name = "ip-geolocation") {
             val result = try { IpLocationService.fetch() } catch (_: Exception) { null }
             runOnUiThread {
-                if (currentLocation != null) return@runOnUiThread
+                ipFallbackRequested = false
+                val latestNow = System.currentTimeMillis()
+                val latestReliableGps = currentLocation?.takeIf {
+                    it.hasAccuracy() && it.accuracy <= 100f && latestNow - it.time in 0..120_000L
+                }
+                // Prefer a fresh GPS fix if it arrived while IP geolocation was in flight.
+                if (latestReliableGps != null) return@runOnUiThread
                 if (result == null) {
                     if (::gpsText.isInitialized) gpsText.text = "GPS ASSENTE • POSIZIONE IP NON DISPONIBILE"
                     return@runOnUiThread
