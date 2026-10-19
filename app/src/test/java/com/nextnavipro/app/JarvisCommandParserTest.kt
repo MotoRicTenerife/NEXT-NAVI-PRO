@@ -4,6 +4,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class JarvisCommandParserTest {
+    @Test fun stripsAssistantNameBeforeParsingCommands() {
+        val withDefaultName = JarvisCommandParser.stripAssistantName("Jarvis, portami a Guazza")
+        assertEquals("portami a Guazza", withDefaultName)
+        assertEquals(JarvisCommand.Navigate("Guazza"), JarvisCommandParser.parse(withDefaultName))
+
+        val withCustomName = JarvisCommandParser.stripAssistantName("Alfred: annulla la navigazione", "Alfred")
+        assertEquals("annulla la navigazione", withCustomName)
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse(withCustomName))
+        assertEquals("portami a Guaza", JarvisCommandParser.stripAssistantName("portami a Guaza", "Alfred"))
+    }
+
     @Test fun placeSearchVariantsTolerateForeignPlaceNameSpeechSpelling() {
         assertEquals(listOf("Guazza", "Guaza"), NavigationServices.placeQueryVariants("Guazza"))
         assertEquals(listOf("Los Cristianos"), NavigationServices.placeQueryVariants("Los Cristianos"))
