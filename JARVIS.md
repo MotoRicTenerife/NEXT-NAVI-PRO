@@ -3,7 +3,7 @@
 ## Current implementation
 
 - Android-native Kotlin integration in the existing `MainActivity`; no project reset or new navigation engine.
-- First-run name prompt; name is stored only in local app preferences.
+- First-run name prompt; the chosen assistant name is stored in local app preferences and used by the microphone button, speech-recognition prompt, local identity answers, and online assistant system instructions.
 - Italian greeting on launch using the existing TextToSpeech engine.
 - User-initiated push-to-talk via the dashboard microphone button. There is no wake word and no background microphone service.
 - Offline-first command parser: destination search, saved home, GPS fix accuracy, repeat next instruction, remaining route metrics, silence/help, and showing pending search results.
