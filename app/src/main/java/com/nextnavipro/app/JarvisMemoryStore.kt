@@ -114,6 +114,15 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
     }
 
     @Synchronized
+    fun countRange(startInclusiveMs: Long, endExclusiveMs: Long): Int {
+        if (endExclusiveMs <= startInclusiveMs) return 0
+        return readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM messages WHERE timestamp>=? AND timestamp<?",
+            arrayOf(startInclusiveMs.toString(), endExclusiveMs.toString())
+        ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
+    @Synchronized
     fun deleteRange(startInclusiveMs: Long, endExclusiveMs: Long): Int {
         if (endExclusiveMs <= startInclusiveMs) return 0
         val db = writableDatabase
