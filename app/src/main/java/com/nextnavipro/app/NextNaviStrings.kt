@@ -277,15 +277,105 @@ object NextNaviStrings {
         )
     )
 
+
+    private val runtimeTranslations: Map<String, Map<String, String>> = mapOf(
+        "en" to mapOf(
+            "Voce di Jarvis" to "Jarvis voice",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Choose a name for your navigation assistant.",
+            "Nome dell'assistente" to "Assistant name",
+            "Ripristina Jarvis" to "Restore Jarvis",
+            "Assistente rinominato in " to "Assistant renamed to ",
+            "Nome ripristinato: Jarvis" to "Name restored: Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "Speech recognition is unavailable on this device.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "I can't start the microphone. Please try again.",
+            "Avvio microfono…" to "Starting microphone…",
+            "Impossibile avviare il microfono" to "Unable to start the microphone",
+            "Hai detto: " to "You said: ",
+            "■ STOP" to "■ STOP"
+        ),
+        "es" to mapOf(
+            "Voce di Jarvis" to "Voz de Jarvis",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Elige un nombre para tu asistente de navegación.",
+            "Nome dell'assistente" to "Nombre del asistente",
+            "Ripristina Jarvis" to "Restaurar Jarvis",
+            "Assistente rinominato in " to "Asistente renombrado a ",
+            "Nome ripristinato: Jarvis" to "Nombre restaurado: Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "El reconocimiento de voz no está disponible en este dispositivo.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "No puedo iniciar el micrófono. Inténtalo de nuevo.",
+            "Avvio microfono…" to "Iniciando micrófono…",
+            "Impossibile avviare il microfono" to "No se puede iniciar el micrófono",
+            "Hai detto: " to "Has dicho: ",
+            "■ STOP" to "■ PARAR"
+        ),
+        "fr" to mapOf(
+            "Voce di Jarvis" to "Voix de Jarvis",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Choisissez un nom pour votre assistant de navigation.",
+            "Nome dell'assistente" to "Nom de l’assistant",
+            "Ripristina Jarvis" to "Rétablir Jarvis",
+            "Assistente rinominato in " to "Assistant renommé en ",
+            "Nome ripristinato: Jarvis" to "Nom rétabli : Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "La reconnaissance vocale n’est pas disponible sur cet appareil.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "Impossible de démarrer le micro. Veuillez réessayer.",
+            "Avvio microfono…" to "Démarrage du micro…",
+            "Impossibile avviare il microfono" to "Impossible de démarrer le micro",
+            "Hai detto: " to "Vous avez dit : ",
+            "■ STOP" to "■ ARRÊTER"
+        ),
+        "de" to mapOf(
+            "Voce di Jarvis" to "Jarvis-Stimme",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Wähle einen Namen für deinen Navigationsassistenten.",
+            "Nome dell'assistente" to "Assistentenname",
+            "Ripristina Jarvis" to "Jarvis wiederherstellen",
+            "Assistente rinominato in " to "Assistent umbenannt in ",
+            "Nome ripristinato: Jarvis" to "Name zurückgesetzt: Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "Das Mikrofon kann nicht gestartet werden. Bitte erneut versuchen.",
+            "Avvio microfono…" to "Mikrofon wird gestartet…",
+            "Impossibile avviare il microfono" to "Mikrofon kann nicht gestartet werden",
+            "Hai detto: " to "Du hast gesagt: ",
+            "■ STOP" to "■ STOPP"
+        ),
+        "pt" to mapOf(
+            "Voce di Jarvis" to "Voz do Jarvis",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Escolhe um nome para o teu assistente de navegação.",
+            "Nome dell'assistente" to "Nome do assistente",
+            "Ripristina Jarvis" to "Restaurar Jarvis",
+            "Assistente rinominato in " to "Assistente renomeado para ",
+            "Nome ripristinato: Jarvis" to "Nome restaurado: Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "O reconhecimento de voz não está disponível neste dispositivo.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "Não consigo iniciar o microfone. Tenta novamente.",
+            "Avvio microfono…" to "A iniciar o microfone…",
+            "Impossibile avviare il microfono" to "Não foi possível iniciar o microfone",
+            "Hai detto: " to "Disseste: ",
+            "■ STOP" to "■ PARAR"
+        ),
+        "nl" to mapOf(
+            "Voce di Jarvis" to "Jarvis-stem",
+            "Scegli come vuoi chiamare l'assistente di navigazione." to "Kies een naam voor je navigatieassistent.",
+            "Nome dell'assistente" to "Naam van de assistent",
+            "Ripristina Jarvis" to "Jarvis herstellen",
+            "Assistente rinominato in " to "Assistent hernoemd naar ",
+            "Nome ripristinato: Jarvis" to "Naam hersteld: Jarvis",
+            "Il riconoscimento vocale non è disponibile su questo dispositivo." to "Spraakherkenning is niet beschikbaar op dit apparaat.",
+            "Non riesco ad avviare il microfono. Puoi riprovare." to "Ik kan de microfoon niet starten. Probeer het opnieuw.",
+            "Avvio microfono…" to "Microfoon starten…",
+            "Impossibile avviare il microfono" to "Kan de microfoon niet starten",
+            "Hai detto: " to "Je zei: ",
+            "■ STOP" to "■ STOPPEN"
+        )
+    )
+
     fun translate(text: String, locale: Locale = Locale.getDefault()): String {
         if (locale.language.equals("it", ignoreCase = true)) return text
         val language = locale.language.lowercase(Locale.ROOT)
         return translations[language]?.get(text)
             ?: coreTranslations[language]?.get(text)
             ?: statusTranslations[language]?.get(text)
+            ?: runtimeTranslations[language]?.get(text)
             ?: translations["en"]?.get(text)
             ?: coreTranslations["en"]?.get(text)
             ?: statusTranslations["en"]?.get(text)
+            ?: runtimeTranslations["en"]?.get(text)
             ?: text
     }
 }
