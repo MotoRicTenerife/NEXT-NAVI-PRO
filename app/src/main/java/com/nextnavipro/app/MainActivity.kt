@@ -2576,7 +2576,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     AlertDialog.Builder(this)
                         .setTitle("Scegli destinazione")
                         .setItems(labels) { _, which ->
-                            selectJarvisOrSearchDestination(sortedResults[which])
+                            selectJarvisOrSearchDestination(sortedResults[which], autoStart = pendingJarvisPreview)
                         }
                         .setNegativeButton(appText("Annulla"), null)
                         .show()
