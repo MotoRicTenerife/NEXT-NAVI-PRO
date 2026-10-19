@@ -47,6 +47,7 @@ object NavigationServices {
     }
 
     fun searchPlaces(query: String, near: NavPoint? = null): List<PlaceResult> {
+        val combined = LinkedHashMap<String, PlaceResult>()
         for (candidate in placeQueryVariants(query)) {
             val results = try {
                 searchPlacesSingle(candidate, near)
@@ -54,9 +55,21 @@ object NavigationServices {
                 // A failed fallback for one spelling must not prevent trying the next spelling.
                 emptyList()
             }
-            if (results.isNotEmpty()) return results
+            // Do not stop at the first non-empty spelling: speech recognition can produce
+            // a plausible but wrong result for "Guazza" while "Guaza" finds the real place.
+            // Merge real geocoder matches so the caller can show alternatives rather than
+            // automatically navigating to the first accidental match.
+            for (place in results) {
+                val normalizedName = java.text.Normalizer.normalize(place.name.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{Mn}+"), "")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                val key = normalizedName + "|" +
+                    String.format(Locale.ROOT, "%.5f,%.5f", place.point.latitude, place.point.longitude)
+                combined.putIfAbsent(key, place)
+            }
         }
-        return emptyList()
+        return combined.values.toList()
     }
 
     private fun searchPlacesSingle(query: String, near: NavPoint?): List<PlaceResult> {
