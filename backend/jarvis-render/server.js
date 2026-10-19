@@ -90,7 +90,8 @@ async function fetchLiveWeather(location) {
 
 function xmlText(block, names) {
   for (const name of names) {
-    const match = block.match(new RegExp("<(?:[\\\\w.-]+:)?" + name + "\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/(?:[\\\\w.-]+:)?" + name + ">", "i"));
+    const pattern = "<(?:[\\w.-]+:)?" + name + "\\b[^>]*>([\\s\\S]*?)</(?:[\\w.-]+:)?" + name + ">";
+    const match = block.match(new RegExp(pattern, "i"));
     if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim().slice(0, 220);
   }
   return "";
