@@ -15,6 +15,7 @@ import kotlin.concurrent.thread
  */
 object JarvisOnlineAiClient {
     data class LiveLocation(val latitude: Double, val longitude: Double)
+    data class Personality(val preset: String, val irony: Int, val warmth: Int, val energy: Int, val concision: Int)
 
     private const val CONNECT_TIMEOUT_MS = 4000
     private const val READ_TIMEOUT_MS = 50000
@@ -33,6 +34,7 @@ object JarvisOnlineAiClient {
         location: LiveLocation? = null,
         history: List<JarvisMemoryStore.Message> = emptyList(),
         summary: String = "",
+        personality: Personality = Personality("jarvis", 45, 80, 55, 75),
         callback: (Result<String>) -> Unit
     ) {
         val target = endpoint
@@ -72,6 +74,12 @@ object JarvisOnlineAiClient {
                         }
                     })
                     .put("summary", summary.trim().take(2500))
+                    .put("personality", JSONObject()
+                        .put("preset", personality.preset.take(24))
+                        .put("irony", personality.irony.coerceIn(0, 100))
+                        .put("warmth", personality.warmth.coerceIn(0, 100))
+                        .put("energy", personality.energy.coerceIn(0, 100))
+                        .put("concision", personality.concision.coerceIn(0, 100)))
                     .apply {
                         if (location != null &&
                             location.latitude.isFinite() && location.latitude in -90.0..90.0 &&
