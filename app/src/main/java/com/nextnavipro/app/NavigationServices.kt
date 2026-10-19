@@ -38,7 +38,7 @@ object NavigationServices {
         val variants = linkedSetOf(clean)
         // Speech recognition may double consonants in foreign proper names:
         // Spanish "Guaza" can be transcribed as "Guazza".
-        val collapsed = clean.replace(Regex("(?i)([b-df-hj-np-tv-z])\\\\1+"), "$1")
+        val collapsed = clean.replace(Regex("(?i)([b-df-hj-np-tv-z])\\1+"), "$1")
         if (collapsed != clean && collapsed.length >= 3) variants.add(collapsed)
         val unaccented = java.text.Normalizer.normalize(clean, java.text.Normalizer.Form.NFD)
             .replace(Regex("\\p{Mn}+"), "")
