@@ -2992,7 +2992,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val oldDestination = destination
-        val oldFollowGps = followGps
         val oldParent = activityMapView.parent as? android.view.ViewGroup
         val oldIndex = oldParent?.indexOfChild(activityMapView) ?: -1
         val oldParams = activityMapView.layoutParams
@@ -3095,8 +3094,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             if (!accepted) destination = oldDestination
             refreshDestinationMarker()
-            followGps = oldFollowGps
-            if (followGps && !fullScreenMap) mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+
+            // The chooser intentionally pans the shared MapView to candidate destinations.
+            // Always restore dashboard follow mode and recenter on the latest accepted GPS fix
+            // after the MapView has been reattached and laid out; never leave the camera on a POI.
+            followGps = true
+            lastCameraLocation = null
+            mapFollowHandler.removeCallbacks(mapFollowRunnable)
+            activityMapView.post {
+                if (dashboardStarted && !destinationPickerOpen && !fullScreenMap) {
+                    followGps = true
+                    lastCameraLocation = null
+                    val latestFix = currentLocation
+                    if (latestFix != null) {
+                        updateMapForLocation(latestFix, forceCenter = true)
+                    } else {
+                        requestGps()
+                    }
+                    mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+                }
+            }
         }
         destinationPickerOpen = true
         followGps = false
