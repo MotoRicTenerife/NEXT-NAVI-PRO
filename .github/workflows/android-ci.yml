@@ -101,6 +101,8 @@ jobs:
                   status, health = get_json(endpoint[:-len("/jarvis")] + "/health", 35)
                   if status != 200 or health.get("ok") is not True:
                       raise RuntimeError("Unexpected health response")
+                  if not health.get("revision") or health.get("revision") == "unknown":
+                      raise RuntimeError("Render is serving an older backend without deployment revision; sync render.yaml and deploy the latest branch commit")
                   print("Render Jarvis health check PASSED:", health)
                   try:
                       status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
