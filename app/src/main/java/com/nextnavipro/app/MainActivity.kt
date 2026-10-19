@@ -2702,7 +2702,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     drawRoute(result, true)
                     val minutes = (result.durationSeconds / 60.0).roundToInt()
                     routeText.text = String.format(Locale.ITALY,
-                        "ANTEPRIMA • %.1f km • circa %d min\\n%s",
+                        "ANTEPRIMA • %.1f km • circa %d min\n%s",
                         result.distanceKm, minutes, result.firstInstruction)
                     routeButton.text = appText("AVVIA PERCORSO")
                     if (announce) speakRouteBriefing(place.name, result, routePreviewFetchedAt)
@@ -2733,7 +2733,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val freshness = if (cached.isFresh()) "cache " + ageMinutes + " min"
             else "DATI VECCHI: " + ageMinutes + " min"
         routeText.text = String.format(Locale.ITALY,
-            "ANTEPRIMA OFFLINE • %.1f km • circa %d min\\n%s",
+            "ANTEPRIMA OFFLINE • %.1f km • circa %d min\n%s",
             cached.route.distanceKm, minutes, freshness)
         routeButton.text = appText("AVVIA PERCORSO")
         scheduleRoutePreviewRefresh()
