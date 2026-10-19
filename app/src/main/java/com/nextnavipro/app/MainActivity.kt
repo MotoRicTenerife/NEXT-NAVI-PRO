@@ -2281,7 +2281,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             JarvisCommand.BriefRoute -> {
                 val route = routeResult ?: routePreviewResult
                 if (route == null) {
-                    speakJarvis("Non ho ancora un percorso da analizzare. Puoi chiedermi: voglio andare a Guaza, cosa mi aspetta per la strada?")
+                    val selected = destination
+                    if (selected != null) {
+                        speakJarvis("Preparo un'anteprima per " + selected.name + ", senza avviare la navigazione.")
+                        previewRouteForJarvis(selected)
+                    } else {
+                        speakJarvis("Non ho ancora una destinazione o un percorso da analizzare. Puoi chiedermi: voglio andare a Guaza, cosa mi aspetta per la strada?")
+                    }
                 } else {
                     val name = if (routeResult != null) destination?.name ?: "destinazione attuale"
                         else routePreviewDestination?.name ?: "destinazione in anteprima"
