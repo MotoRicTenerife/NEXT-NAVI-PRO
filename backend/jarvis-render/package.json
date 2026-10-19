@@ -9,6 +9,6 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js && node --check here-speed-limit.js && node --test here-speed-limit.test.js"
   }
 }
