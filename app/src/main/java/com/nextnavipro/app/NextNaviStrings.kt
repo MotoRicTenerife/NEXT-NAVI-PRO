@@ -219,13 +219,73 @@ object NextNaviStrings {
         )
     )
 
+
+    private val statusTranslations: Map<String, Map<String, String>> = mapOf(
+        "es" to mapOf(
+            "Ascolto annullato" to "Escucha cancelada", "Ti ascolto…" to "Te escucho…", "Sto ascoltando…" to "Estoy escuchando…",
+            "Elaboro…" to "Procesando…", "Non ho capito • riprova" to "No te he entendido • inténtalo de nuevo",
+            "Permesso microfono mancante" to "Falta permiso del micrófono", "Rete non disponibile • riprova" to "Red no disponible • inténtalo de nuevo",
+            "Ascolto terminato • riprova" to "Escucha finalizada • inténtalo de nuevo",
+            "Non ho ricevuto parole • riprova" to "No he recibido palabras • inténtalo de nuevo",
+            "Riconoscimento vocale non disponibile" to "Reconocimiento de voz no disponible",
+            "Voce non pronta o lingua TTS non disponibile." to "La voz no está lista o el idioma TTS no está disponible."
+        ),
+        "en" to mapOf(
+            "Ascolto annullato" to "Listening cancelled", "Ti ascolto…" to "I'm listening…", "Sto ascoltando…" to "Listening…",
+            "Elaboro…" to "Processing…", "Non ho capito • riprova" to "I didn't understand • try again",
+            "Permesso microfono mancante" to "Microphone permission missing", "Rete non disponibile • riprova" to "Network unavailable • try again",
+            "Ascolto terminato • riprova" to "Listening ended • try again",
+            "Non ho ricevuto parole • riprova" to "I didn't receive any words • try again",
+            "Riconoscimento vocale non disponibile" to "Speech recognition unavailable",
+            "Voce non pronta o lingua TTS non disponibile." to "Voice not ready or system TTS language unavailable."
+        ),
+        "fr" to mapOf(
+            "Ascolto annullato" to "Écoute annulée", "Ti ascolto…" to "Je vous écoute…", "Sto ascoltando…" to "Écoute en cours…",
+            "Elaboro…" to "Traitement…", "Non ho capito • riprova" to "Je n’ai pas compris • réessayez",
+            "Permesso microfono mancante" to "Autorisation du micro manquante", "Rete non disponibile • riprova" to "Réseau indisponible • réessayez",
+            "Ascolto terminato • riprova" to "Écoute terminée • réessayez",
+            "Non ho ricevuto parole • riprova" to "Aucune parole reçue • réessayez",
+            "Riconoscimento vocale non disponibile" to "Reconnaissance vocale indisponible",
+            "Voce non pronta o lingua TTS non disponibile." to "Voix non prête ou langue TTS indisponible."
+        ),
+        "de" to mapOf(
+            "Ascolto annullato" to "Abhören abgebrochen", "Ti ascolto…" to "Ich höre zu…", "Sto ascoltando…" to "Ich höre zu…",
+            "Elaboro…" to "Verarbeitung…", "Non ho capito • riprova" to "Nicht verstanden • bitte erneut versuchen",
+            "Permesso microfono mancante" to "Mikrofonberechtigung fehlt", "Rete non disponibile • riprova" to "Netz nicht verfügbar • erneut versuchen",
+            "Ascolto terminato • riprova" to "Abhören beendet • erneut versuchen",
+            "Non ho ricevuto parole • riprova" to "Keine Sprache empfangen • erneut versuchen",
+            "Riconoscimento vocale non disponibile" to "Spracherkennung nicht verfügbar",
+            "Voce non pronta o lingua TTS non disponibile." to "Stimme nicht bereit oder TTS-Sprache nicht verfügbar."
+        ),
+        "pt" to mapOf(
+            "Ascolto annullato" to "Escuta cancelada", "Ti ascolto…" to "Estou a ouvir…", "Sto ascoltando…" to "A ouvir…",
+            "Elaboro…" to "A processar…", "Non ho capito • riprova" to "Não percebi • tenta novamente",
+            "Permesso microfono mancante" to "Falta a permissão do microfone", "Rete non disponibile • riprova" to "Rede indisponível • tenta novamente",
+            "Ascolto terminato • riprova" to "Escuta terminada • tenta novamente",
+            "Non ho ricevuto parole • riprova" to "Não recebi palavras • tenta novamente",
+            "Riconoscimento vocale non disponibile" to "Reconhecimento de voz indisponível",
+            "Voce non pronta o lingua TTS non disponibile." to "Voz não pronta ou idioma TTS indisponível."
+        ),
+        "nl" to mapOf(
+            "Ascolto annullato" to "Luisteren geannuleerd", "Ti ascolto…" to "Ik luister…", "Sto ascoltando…" to "Aan het luisteren…",
+            "Elaboro…" to "Verwerken…", "Non ho capito • riprova" to "Niet begrepen • probeer opnieuw",
+            "Permesso microfono mancante" to "Microfoontoestemming ontbreekt", "Rete non disponibile • riprova" to "Netwerk niet beschikbaar • probeer opnieuw",
+            "Ascolto terminato • riprova" to "Luisteren beëindigd • probeer opnieuw",
+            "Non ho ricevuto parole • riprova" to "Geen spraak ontvangen • probeer opnieuw",
+            "Riconoscimento vocale non disponibile" to "Spraakherkenning niet beschikbaar",
+            "Voce non pronta o lingua TTS non disponibile." to "Stem niet gereed of TTS-taal niet beschikbaar."
+        )
+    )
+
     fun translate(text: String, locale: Locale = Locale.getDefault()): String {
         if (locale.language.equals("it", ignoreCase = true)) return text
         val language = locale.language.lowercase(Locale.ROOT)
         return translations[language]?.get(text)
             ?: coreTranslations[language]?.get(text)
+            ?: statusTranslations[language]?.get(text)
             ?: translations["en"]?.get(text)
             ?: coreTranslations["en"]?.get(text)
+            ?: statusTranslations["en"]?.get(text)
             ?: text
     }
 }
