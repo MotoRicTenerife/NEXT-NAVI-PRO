@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
+import android.app.DatePickerDialog
 import android.content.Intent
 import android.animation.ValueAnimator
 import android.content.pm.PackageManager
@@ -119,6 +120,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var routeText: TextView
     private lateinit var maneuverIcon: TextView
     private lateinit var radarText: TextView
+    private val jarvisMemoryDelegate = lazy { JarvisMemoryStore(applicationContext) }
+    private val jarvisMemory by jarvisMemoryDelegate
     private lateinit var destinationInput: EditText
     private lateinit var searchButton: Button
     private lateinit var routeButton: Button
@@ -1094,7 +1097,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"))
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"), appText("Memoria Jarvis • spazio e pulizia"))
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1111,6 +1114,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     10 -> showVehicleProfileMenu()
                     11 -> showJarvisNameSettings()
                     12 -> showJarvisVoiceSettings()
+                    13 -> showJarvisMemorySettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -2098,6 +2102,88 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
+    private fun showJarvisMemorySettings() {
+        val stats = jarvisMemory.stats()
+        val summary = "Spazio occupato: ${formatMemoryBytes(stats.bytes)}\n" +
+            "Messaggi conservati: ${stats.messages}\n" +
+            "Giornate riassunte: ${stats.summaryDays}\n\n" +
+            "Jarvis conserva testo, non registrazioni audio. La memoria resta sul telefono."
+        val choices = arrayOf(
+            "Compatta la cronologia",
+            "Nuova chat (mantieni i riepiloghi)",
+            "Elimina per intervallo di date",
+            "Elimina tutta la memoria",
+            "Aggiorna spazio occupato"
+        )
+        AlertDialog.Builder(this).setTitle("Memoria di Jarvis").setMessage(summary)
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> {
+                        val before = jarvisMemory.stats()
+                        val after = jarvisMemory.compact()
+                        AlertDialog.Builder(this).setTitle("Compattazione completata")
+                            .setMessage("Messaggi prima: ${before.messages}\nMessaggi rimasti: ${after.messages}\nGiornate riassunte: ${after.summaryDays}\nSpazio attuale: ${formatMemoryBytes(after.bytes)}\n\nLe conversazioni meno recenti sono state sintetizzate localmente; gli ultimi 30 messaggi restano disponibili integralmente.")
+                            .setPositiveButton("OK", null).show()
+                    }
+                    1 -> AlertDialog.Builder(this).setTitle("Nuova chat")
+                        .setMessage("Vuoi iniziare una nuova conversazione? I messaggi recenti verranno eliminati, ma i riepiloghi compattati resteranno disponibili.")
+                        .setPositiveButton("Nuova chat") { _, _ ->
+                            jarvisMemory.clearCurrentConversation()
+                            Toast.makeText(this, "Nuova chat pronta. I riepiloghi sono conservati.", Toast.LENGTH_LONG).show()
+                        }.setNegativeButton("Annulla", null).show()
+                    2 -> showJarvisMemoryDateRange()
+                    3 -> AlertDialog.Builder(this).setTitle("Eliminare tutta la memoria?")
+                        .setMessage("Verranno eliminati tutti i messaggi e tutti i riepiloghi locali. L'operazione non si può annullare.")
+                        .setPositiveButton("ELIMINA TUTTO") { _, _ ->
+                            jarvisMemory.clearAll()
+                            Toast.makeText(this, "Memoria Jarvis eliminata.", Toast.LENGTH_LONG).show()
+                        }.setNegativeButton("Annulla", null).show()
+                    4 -> showJarvisMemorySettings()
+                }
+            }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showJarvisMemoryDateRange() {
+        val today = java.util.Calendar.getInstance()
+        val initialStart = (today.clone() as java.util.Calendar).apply {
+            add(java.util.Calendar.DAY_OF_YEAR, -30)
+        }
+        DatePickerDialog(this, { _, sy, sm, sd ->
+            val start = java.util.Calendar.getInstance().apply {
+                set(sy, sm, sd, 0, 0, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            DatePickerDialog(this, { _, ey, em, ed ->
+                val endDay = java.util.Calendar.getInstance().apply {
+                    set(ey, em, ed, 0, 0, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                if (endDay.timeInMillis < start.timeInMillis) {
+                    Toast.makeText(this, "La data finale precede quella iniziale.", Toast.LENGTH_LONG).show()
+                    return@DatePickerDialog
+                }
+                val endExclusive = (endDay.clone() as java.util.Calendar).apply {
+                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+                val count = jarvisMemory.countRange(start.timeInMillis, endExclusive.timeInMillis)
+                val dateFormat = java.text.SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val rangeText = dateFormat.format(start.time) + " – " + dateFormat.format(endDay.time)
+                AlertDialog.Builder(this).setTitle("Conferma eliminazione")
+                    .setMessage("Intervallo: $rangeText\nMessaggi da eliminare: $count\nSaranno rimossi anche i riepiloghi delle stesse giornate, per evitare che le informazioni cancellate restino nella memoria sintetica.")
+                    .setPositiveButton("ELIMINA INTERVALLO") { _, _ ->
+                        val deleted = jarvisMemory.deleteRange(start.timeInMillis, endExclusive.timeInMillis)
+                        Toast.makeText(this, "Eliminati $deleted messaggi e i riepiloghi dell'intervallo.", Toast.LENGTH_LONG).show()
+                    }.setNegativeButton("Annulla", null).show()
+            }, today.get(java.util.Calendar.YEAR), today.get(java.util.Calendar.MONTH), today.get(java.util.Calendar.DAY_OF_MONTH)).show()
+        }, initialStart.get(java.util.Calendar.YEAR), initialStart.get(java.util.Calendar.MONTH), initialStart.get(java.util.Calendar.DAY_OF_MONTH)).show()
+    }
+
+    private fun formatMemoryBytes(bytes: Long): String = when {
+        bytes < 1024L -> "$bytes B"
+        bytes < 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
+        else -> String.format(Locale.getDefault(), "%.2f MB", bytes / (1024.0 * 1024.0))
+    }
+
     private fun appText(italian: String): String =
         NextNaviStrings.translate(italian, Locale.getDefault())
 
@@ -2530,16 +2616,24 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val liveLocation = if (liveQuestion) currentLocation?.let {
             JarvisOnlineAiClient.LiveLocation(it.latitude, it.longitude)
         } else null
+        // Read the prior turns before adding the current utterance, avoiding duplication
+        // in Gemini's contents while preserving context across app restarts.
+        val history = jarvisMemory.recent(10)
+        val summary = jarvisMemory.summary()
+        jarvisMemory.addMessage("user", transcript)
         JarvisOnlineAiClient.ask(
             message = transcript,
             assistantName = jarvisAssistantName(),
-            location = liveLocation
+            location = liveLocation,
+            history = history,
+            summary = summary
         ) { result ->
             runOnUiThread {
                 // Never let a delayed online response restart speech after the rider
                 // has pressed Jarvis to interrupt or ask a newer question.
                 if (requestGeneration != jarvisResponseGeneration || jarvisListening) return@runOnUiThread
                 result.onSuccess { reply ->
+                    jarvisMemory.addMessage("assistant", reply)
                     jarvisStatusText.text = jarvisAssistantName() + " AI • risposta ricevuta"
                     // Online text is conversational only: it cannot change route, speed limit or GPS state.
                     speakJarvis(reply)
