@@ -80,6 +80,11 @@ class JarvisMemoryStore(context: Context) {
     }
 
     @Synchronized
+    fun clearConversationKeepSummary() {
+        prefs.edit().remove(messagesKey).apply()
+    }
+
+    @Synchronized
     fun clear() {
         prefs.edit().remove(messagesKey).remove(summaryKey).apply()
     }
