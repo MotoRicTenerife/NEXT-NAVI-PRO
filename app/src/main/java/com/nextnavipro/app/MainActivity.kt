@@ -594,7 +594,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
-        routeButton = makeButton(appText("AVVIA PERCORSO")) {
+        routeButton = makeButton(appText(if (routeResult != null) "TERMINA NAVIGAZIONE" else "AVVIA PERCORSO")) {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
         // The route button is placed in the lower control row in landscape and
@@ -2654,7 +2654,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         result.distanceKm, durationMinutes, firstInstruction
                     )
                     updateTurnGuidance(currentLocation)
-                    routeButton.text = appText("ANNULLA PERCORSO")
+                    routeButton.text = appText("TERMINA NAVIGAZIONE")
                     askToRecordGpx()
                 }
             } catch (error: Exception) {
