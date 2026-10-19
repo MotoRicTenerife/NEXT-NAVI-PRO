@@ -86,12 +86,12 @@ jobs:
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
             export EXPECTED_RENDER_REVISION="$HEAD_SHA"
-            echo "Backend files changed; checking that Render serves $EXPECTED_RENDER_REVISION."
+            echo "Backend files changed on a deployment branch; checking that Render serves $EXPECTED_RENDER_REVISION."
           else
             export EXPECTED_RENDER_REVISION=""
-            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+            echo "Checking live service health without requiring a deployment of unmerged pull-request code."
           fi
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
