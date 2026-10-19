@@ -2749,10 +2749,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun speakRouteBriefing(destinationName: String, route: RouteResult, fetchedAt: Long?) {
         val minutes = (route.durationSeconds / 60.0).roundToInt()
+        val cumulativeDistanceKm = DoubleArray(route.points.size)
+        for (index in 1 until route.points.size) {
+            val previous = route.points[index - 1]
+            val point = route.points[index]
+            val segmentMeters = FloatArray(1)
+            Location.distanceBetween(
+                previous.latitude, previous.longitude,
+                point.latitude, point.longitude, segmentMeters
+            )
+            cumulativeDistanceKm[index] = cumulativeDistanceKm[index - 1] +
+                segmentMeters[0].toDouble() / 1000.0
+        }
         val mainManeuvers = route.maneuvers
-            .map { ManeuverIconResolver.correctedInstruction(it.type, it.instruction) }
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+            .sortedBy { it.pointIndex }
+            .mapNotNull { maneuver ->
+                val instruction = ManeuverIconResolver
+                    .correctedInstruction(maneuver.type, maneuver.instruction).trim()
+                if (instruction.isBlank()) null else {
+                    val distanceKm = cumulativeDistanceKm.getOrElse(maneuver.pointIndex) { 0.0 }
+                    String.format(Locale.ITALY, "tra %.1f km: %s", distanceKm, instruction)
+                }
+            }
             .distinct()
             .take(3)
         val currentLimit = currentSpeedLimit
@@ -2781,6 +2799,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 append("Non ho un limite di velocità verificato per la strada attuale. ")
             }
             if (ageText.isNotBlank()) append(ageText).append(". ")
+            append("Attenzione: questa anteprima non contiene un controllo verificato di limiti, autovelox, traffico o meteo lungo tutto il percorso; l'assenza di queste informazioni non significa che non ci siano. ")
             append("Questa è un'anteprima: la navigazione non è stata avviata.")
         }
         speakJarvis(briefing)
