@@ -113,7 +113,7 @@ async function fetchLiveWeather(location) {
     } catch (error) {
       lastError = error;
       if (attempt === 1) break;
-      if (error instanceof Error && /^Open-Meteo HTTP 4(?!29)\\d+/.test(error.message)) break;
+      if (error instanceof Error && error.message.startsWith("Open-Meteo HTTP 4") && !error.message.startsWith("Open-Meteo HTTP 429")) break;
     }
   }
   throw lastError || new Error("Open-Meteo weather unavailable");
