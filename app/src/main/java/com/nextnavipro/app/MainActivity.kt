@@ -2021,7 +2021,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val savedStyle = prefs.getString("jarvis_voice_style", "female").orEmpty()
-        val selected = when (savedStyle) { "auto" -> 0; "female" -> 1; "male" -> 2; else -> 0 }
+        val selected = when (savedStyle) {
+            "auto" -> 0
+            "female" -> 1
+            "male" -> 2
+            "custom" -> (available.indexOfFirst { it.name == prefs.getString("jarvis_voice_name", "") } + 3).coerceAtLeast(0)
+            else -> 0
+        }
         available.forEach { labels.add(it.name + if (it.isNetworkConnectionRequired) " • online" else " • offline") }
         AlertDialog.Builder(this)
             .setTitle(appText("Voce di Jarvis") + " • " + Locale.getDefault().displayLanguage)
