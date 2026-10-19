@@ -59,7 +59,8 @@ internal object HereRouteMatchingService {
             }
             while (trace.size > MAX_TRACE_POINTS) trace.removeFirst()
 
-            if (!allowLookup) return@synchronized emptyList()\n            val distanceFromLastRequest = lastRequestPoint?.let {
+            if (!allowLookup) return@synchronized emptyList()
+            val distanceFromLastRequest = lastRequestPoint?.let {
                 GpxRouteService.distanceMeters(it, point)
             } ?: Double.POSITIVE_INFINITY
             if (trace.size < MIN_TRACE_POINTS ||
