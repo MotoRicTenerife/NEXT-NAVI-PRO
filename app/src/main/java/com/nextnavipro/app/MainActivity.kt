@@ -3969,7 +3969,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
         }
         thread(name = "osm-road-match") {
-            val match = try {
+            val osmMatch = try {
                 SpeedLimitService.findRoadNear(
                     point,
                     bearing,
@@ -3978,6 +3978,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass road lookup failed", error)
                 null
+            }
+            // Keep a short HERE trace in the background; call HERE only when OSM
+            // has no explicit usable limit. Missing/ambiguous provider data stays unknown.
+            val hereLimit = try {
+                HereRouteMatchingService.findLimit(
+                    queryLocation,
+                    allowLookup = osmMatch?.speedLimitKmh == null
+                )
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "HERE route matching failed; keeping OSM result", error)
+                null
+            }
+            val match = when {
+                hereLimit == null -> osmMatch
+                osmMatch != null -> osmMatch.copy(speedLimitKmh = hereLimit)
+                else -> RoadMatch(
+                    name = null,
+                    ref = null,
+                    speedLimitKmh = hereLimit,
+                    highwayType = null,
+                    distanceMeters = 0f,
+                    roadBearing = bearing ?: 0f
+                )
             }
             runOnUiThread {
                 // A slow Overpass response must not overwrite a newer road match.
