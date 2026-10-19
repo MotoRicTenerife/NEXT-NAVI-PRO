@@ -39,6 +39,10 @@ class JarvisCommandParserTest {
     @Test fun parsesRoutePreviewRequestsWithoutStartingNavigation() {
         assertEquals(JarvisCommand.PreviewRoute("Guaza"),
             JarvisCommandParser.parse("Voglio andare a Guaza, cosa mi aspetta per la strada?"))
+        assertEquals(JarvisCommand.PreviewRoute("Guaza"),
+            JarvisCommandParser.parse("Voglio andare a Guaza,   cosa mi aspetta per la strada?"))
+        assertEquals(JarvisCommand.PreviewRoute("Santa Cruz"),
+            JarvisCommandParser.parse("Vorrei andare a Santa Cruz, cosa mi aspetta sulla strada?"))
         assertEquals(JarvisCommand.PreviewRoute("Adeje"),
             JarvisCommandParser.parse("Vorrei andare a Adeje, fammi un briefing del percorso"))
         assertEquals(JarvisCommand.BriefRoute, JarvisCommandParser.parse("Cosa mi aspetta"))
