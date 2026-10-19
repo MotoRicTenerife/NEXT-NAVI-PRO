@@ -1123,11 +1123,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "Messaggi conservati: ${stats.messages}\n" +
             "Riepilogo compatto: ${stats.summaryChars} caratteri\n\n" +
             "Viene salvato solo il testo, non l'audio. La memoria resta sul telefono; per rispondere, il contesto selezionato viene inviato al backend Jarvis."
-        val actions = arrayOf("Compatta la memoria", "Elimina conversazioni per data", "Cancella tutta la memoria", "Chiudi")
+        val actions = arrayOf("Nuova chat (mantieni il riepilogo)", "Compatta la memoria", "Elimina conversazioni per data", "Cancella tutta la memoria", "Chiudi")
         AlertDialog.Builder(this).setTitle("Memoria Jarvis").setMessage(message)
             .setItems(actions) { _, which ->
                 when (which) {
-                    0 -> AlertDialog.Builder(this).setTitle("Compattare la memoria?")
+                    0 -> AlertDialog.Builder(this).setTitle("Iniziare una nuova chat?")
+                        .setMessage("Verranno cancellati i messaggi recenti, mantenendo il riepilogo compatto delle informazioni importanti.")
+                        .setNegativeButton("Annulla", null)
+                        .setPositiveButton("Nuova chat") { _, _ ->
+                            store.clearConversationKeepSummary()
+                            Toast.makeText(this, "Nuova chat avviata; riepilogo conservato.", Toast.LENGTH_SHORT).show()
+                            showJarvisMemorySettings()
+                        }.show()
+                    1 -> AlertDialog.Builder(this).setTitle("Compattare la memoria?")
                         .setMessage("Le conversazioni più vecchie verranno trasformate in un riepilogo sintetico. Gli ultimi 40 messaggi resteranno integri. Il riepilogo è estrattivo: conserva soprattutto decisioni, preferenze e problemi espliciti.")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Compatta") { _, _ ->
@@ -1135,8 +1143,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             Toast.makeText(this, "Memoria compattata: ${result.removed} messaggi sintetizzati.", Toast.LENGTH_LONG).show()
                             showJarvisMemorySettings()
                         }.show()
-                    1 -> showJarvisMemoryDeleteByDate(store)
-                    2 -> AlertDialog.Builder(this).setTitle("Cancellare tutta la memoria?")
+                    2 -> showJarvisMemoryDeleteByDate(store)
+                    3 -> AlertDialog.Builder(this).setTitle("Cancellare tutta la memoria?")
                         .setMessage("Cronologia e riepilogo locale verranno eliminati. L'operazione non è reversibile.")
                         .setNegativeButton("Annulla", null)
                         .setPositiveButton("Cancella tutto") { _, _ ->
