@@ -39,7 +39,7 @@ internal object HereRouteMatchingService {
     private var lastRequestPoint: NavPoint? = null
 
     /** Returns null when disabled, unavailable, ambiguous, or lacking explicit data. */
-    fun findLimit(location: Location): Int? {
+    fun findLimit(location: Location, allowLookup: Boolean = true): Int? {
         val apiKey = BuildConfig.HERE_API_KEY.trim()
         if (apiKey.isEmpty()) return null
         if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
@@ -48,7 +48,7 @@ internal object HereRouteMatchingService {
         val now = System.currentTimeMillis()
         val point = NavPoint(location.latitude, location.longitude)
         val snapshot = synchronized(lock) {
-            while (trace.isNotEmpty() && now - trace.first.timestampMs > MAX_TRACE_AGE_MS) {
+            while (trace.isNotEmpty() && now - trace.peekFirst().timestampMs > MAX_TRACE_AGE_MS) {
                 trace.removeFirst()
             }
             val last = trace.lastOrNull()
@@ -59,7 +59,7 @@ internal object HereRouteMatchingService {
             }
             while (trace.size > MAX_TRACE_POINTS) trace.removeFirst()
 
-            val distanceFromLastRequest = lastRequestPoint?.let {
+            if (!allowLookup) return@synchronized emptyList()\n            val distanceFromLastRequest = lastRequestPoint?.let {
                 GpxRouteService.distanceMeters(it, point)
             } ?: Double.POSITIVE_INFINITY
             if (trace.size < MIN_TRACE_POINTS ||
