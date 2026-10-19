@@ -2025,7 +2025,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "auto" -> 0
             "female" -> 1
             "male" -> 2
-            "custom" -> (available.indexOfFirst { it.name == prefs.getString("jarvis_voice_name", "") } + 3).coerceAtLeast(0)
+            "custom" -> available.indexOfFirst { it.name == prefs.getString("jarvis_voice_name", "") }
+                .let { if (it >= 0) it + 3 else 0 }
             else -> 0
         }
         available.forEach { labels.add(it.name + if (it.isNetworkConnectionRequired) " • online" else " • offline") }
