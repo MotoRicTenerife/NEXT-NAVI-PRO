@@ -99,7 +99,7 @@ class JarvisMemoryStore(context: Context) {
             val important = Regex("(?i)\\b(ricorda|ricordati|preferisco|preferenza|abbiamo deciso|decisione|importante|problema|errore|da fare|prossimo|non dimenticare|il mio|la mia|voglio|devo|progetto|NEXT NAVI PRO)\\b").containsMatchIn(clean)
             if (important) candidates.add((if (message.role == "user") "Utente: " else "Jarvis: ") + clean.take(220))
         }
-        return candidates.distinct().takeLast(18).joinToString("\\n").take(2500)
+        return candidates.distinct().takeLast(18).joinToString("\n").take(2500)
     }
 
     private fun readMessages(): List<Message> = try {
