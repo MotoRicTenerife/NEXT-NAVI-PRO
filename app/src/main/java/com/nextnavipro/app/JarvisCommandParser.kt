@@ -46,11 +46,19 @@ object JarvisCommandParser {
         val homePhrases = listOf("vai a casa", "portami a casa", "naviga verso casa", "andiamo a casa", "guidami a casa")
         if (homePhrases.any { normalized == it }) return JarvisCommand.Navigate("casa")
 
+        // Cover common spontaneous Italian speech variants. These are deterministic
+        // navigation intents; they must not fall through to the conversational AI.
         val prefixes = listOf(
-            "portami a ", "portami verso ", "naviga verso ", "naviga a ",
-            "guidami a ", "guidami verso ", "vai a ", "vai verso ",
-            "andiamo a ", "vorrei andare a ", "imposta destinazione ",
-            "cerca ", "destinazione "
+            "puoi portarmi a ", "puoi portarmi al ", "puoi portarmi alla ",
+            "mi porti a ", "mi porti al ", "mi porti alla ", "mi porti allo ",
+            "portami a ", "portami ad ", "portami al ", "portami alla ",
+            "portami allo ", "portami all ", "portami in ", "portami verso ",
+            "portami dal ", "portami dalla ",
+            "voglio andare a ", "voglio andare al ", "voglio andare alla ",
+            "vorrei andare a ", "vorrei raggiungere ", "raggiungimi a ",
+            "naviga verso ", "naviga a ", "guidami a ", "guidami verso ",
+            "vai a ", "vai al ", "vai alla ", "vai allo ", "vai verso ",
+            "andiamo a ", "imposta destinazione ", "cerca ", "destinazione "
         )
         val prefix = prefixes.firstOrNull { normalized.startsWith(it) }
         if (prefix != null) {
