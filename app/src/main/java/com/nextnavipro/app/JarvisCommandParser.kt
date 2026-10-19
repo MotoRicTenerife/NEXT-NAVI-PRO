@@ -10,6 +10,8 @@ import java.util.Locale
  */
 sealed class JarvisCommand {
     data class Navigate(val destination: String) : JarvisCommand()
+    data class PreviewRoute(val destination: String) : JarvisCommand()
+    object BriefRoute : JarvisCommand()
     object WhereAmI : JarvisCommand()
     object Remaining : JarvisCommand()
     object Repeat : JarvisCommand()
@@ -23,6 +25,36 @@ object JarvisCommandParser {
     fun parse(transcript: String): JarvisCommand {
         val normalized = normalize(transcript)
         if (normalized.isBlank()) return JarvisCommand.Unknown
+
+        val previewSuffixes = listOf(
+            "cosa mi aspetta per la strada", "cosa mi aspetta sulla strada",
+            "cosa mi aspetta lungo la strada", "cosa mi aspetta per il percorso",
+            "cosa trovo lungo la strada", "fammi un briefing del percorso", "analizza il percorso",
+            "what should i expect on the road", "what awaits me on the way",
+            "que me espera por el camino", "que me espera en la carretera"
+        )
+        val suffix = previewSuffixes.firstOrNull { normalized.endsWith(it) }
+        if (suffix != null) {
+            val cutAt = normalized.lastIndexOf(suffix).coerceAtLeast(0)
+            val destinationText = transcript.trim().let { original ->
+                original.take(cutAt).trim().trimEnd(',', '.', '!', '?', ' ')
+            }
+            val normalizedDestination = normalize(destinationText)
+            val prefixes = listOf(
+                "voglio andare a ", "vorrei andare a ", "voglio andare al ",
+                "voglio andare alla ", "voglio raggiungere ", "portami a ",
+                "portami al ", "portami alla ", "vai a ", "vai al ",
+                "vai alla ", "naviga verso ", "guidami a ", "take me to ",
+                "go to ", "navigate to "
+            ).sortedByDescending { it.length }
+            val prefix = prefixes.firstOrNull { normalizedDestination.startsWith(it) }
+            val actual = if (prefix != null) destinationText.drop(prefix.length).trim() else destinationText
+            if (actual.length >= 2) return JarvisCommand.PreviewRoute(actual.trim(',', '.', '!', '?', ' '))
+        }
+        if (matchesAny(normalized, "cosa mi aspetta", "analizza il percorso", "briefing del percorso",
+            "cosa c e lungo il percorso", "cosa trovo lungo la strada", "what should i expect on the road")) {
+            return JarvisCommand.BriefRoute
+        }
 
         if (matchesAny(normalized, "silenzio", "zitto", "basta parlare", "ferma la voce", "smetti di parlare", "stop voce",
             "silencio", "calla", "deja de hablar", "stop voice", "be quiet", "silence", "tais toi", "arrête de parler",
