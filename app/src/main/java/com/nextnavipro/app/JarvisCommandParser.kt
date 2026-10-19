@@ -53,7 +53,7 @@ object JarvisCommandParser {
 
         val homePhrases = listOf("vai a casa", "portami a casa", "naviga verso casa", "andiamo a casa", "guidami a casa",
             "llevame a casa", "llevame al domicilio", "take me home", "go home", "bring me home",
-            "emmenemoi a la maison", "bring mich nach hause", "breng me naar huis", "leva me para casa")
+            "emmene moi a la maison", "bring mich nach hause", "breng me naar huis", "leva me para casa")
         if (homePhrases.any { normalized == it }) return JarvisCommand.Navigate("casa")
 
         // Cover common spontaneous Italian speech variants. These are deterministic
