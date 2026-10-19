@@ -27,6 +27,15 @@ class JarvisCommandParserTest {
         assertEquals(JarvisCommand.Navigate("casa"), JarvisCommandParser.parse("Take me home"))
     }
 
+    @Test fun parsesNavigationCancellationAndDestinationChange() {
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Annulla la navigazione"))
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Ferma navigazione"))
+        assertEquals(JarvisCommand.CancelNavigation, JarvisCommandParser.parse("Cancel navigation"))
+        assertEquals(JarvisCommand.ChangeDestination(), JarvisCommandParser.parse("Cambia destinazione"))
+        assertEquals(JarvisCommand.ChangeDestination("Santa Cruz"), JarvisCommandParser.parse("Cambia destinazione a Santa Cruz"))
+        assertEquals(JarvisCommand.ChangeDestination("Adeje"), JarvisCommandParser.parse("Change destination to Adeje"))
+    }
+
     @Test fun parsesOfflineStatusCommands() {
         assertEquals(JarvisCommand.WhereAmI, JarvisCommandParser.parse("Dove sono?"))
         assertEquals(JarvisCommand.Remaining, JarvisCommandParser.parse("Quanto manca all'arrivo?"))
