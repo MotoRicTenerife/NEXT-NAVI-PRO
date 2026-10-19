@@ -51,6 +51,100 @@ function rateLimited(ip, now) {
   return false;
 }
 
+function haversineKm(a, b) {
+  const rad = value => value * Math.PI / 180;
+  const dLat = rad(b.latitude - a.latitude);
+  const dLon = rad(b.longitude - a.longitude);
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(Math.max(0, 1 - x)));
+}
+
+async function fetchLiveWeather(location) {
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.search = new URLSearchParams({
+    latitude: String(location.latitude),
+    longitude: String(location.longitude),
+    current: "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+    timezone: "auto"
+  }).toString();
+  const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
+  if (!response.ok) throw new Error("Open-Meteo HTTP " + response.status);
+  const data = await response.json();
+  const current = data?.current;
+  if (!current || !Number.isFinite(current.temperature_2m)) throw new Error("Invalid Open-Meteo response");
+  return {
+    source: "Open-Meteo",
+    fetchedAt: new Date().toISOString(),
+    validTime: current.time,
+    temperatureC: current.temperature_2m,
+    feelsLikeC: current.apparent_temperature,
+    humidityPercent: current.relative_humidity_2m,
+    precipitationMm: current.precipitation,
+    weatherCode: current.weather_code,
+    windKmh: current.wind_speed_10m,
+    windDirectionDegrees: current.wind_direction_10m,
+    gustKmh: current.wind_gusts_10m
+  };
+}
+
+function xmlText(block, names) {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\async function readJson(req) {");
+    const match = block.match(new RegExp("<(?:[\\w.-]+:)?" + escaped + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + escaped + ">", "i"));
+    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim().slice(0, 220);
+  }
+  return "";
+}
+
+async function fetchDgtTraffic(location) {
+  const resourceId = "1d36ea74-593d-4e45-acfa-fb8db5a460bc";
+  const metadataResponse = await fetch("https://nap.dgt.es/api/3/action/resource_show?id=" + resourceId, {
+    signal: AbortSignal.timeout(7000),
+    headers: { "accept": "application/json" }
+  });
+  if (!metadataResponse.ok) throw new Error("DGT resource metadata HTTP " + metadataResponse.status);
+  const metadata = await metadataResponse.json();
+  const resourceUrl = metadata?.result?.url;
+  if (!metadata?.success || typeof resourceUrl !== "string" || !resourceUrl.startsWith("https://")) {
+    throw new Error("DGT resource URL unavailable");
+  }
+  const response = await fetch(resourceUrl, { signal: AbortSignal.timeout(9000), headers: { "accept": "application/xml,text/xml,*/*" } });
+  if (!response.ok) throw new Error("DGT feed HTTP " + response.status);
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (declaredLength > 5 * 1024 * 1024) throw new Error("DGT feed too large");
+  const xml = await response.text();
+  if (xml.length > 5 * 1024 * 1024) throw new Error("DGT feed too large");
+  const records = [];
+  const recordPattern = /<(?:[\\w.-]+:)?situationRecord\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?situationRecord>/gi;
+  let match;
+  while ((match = recordPattern.exec(xml)) !== null) {
+    const block = match[1];
+    const lat = Number(xmlText(block, ["latitude"]));
+    const lon = Number(xmlText(block, ["longitude"]));
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) continue;
+    const distanceKm = haversineKm(location, { latitude: lat, longitude: lon });
+    if (distanceKm > 30) continue;
+    records.push({
+      distanceKm: Math.round(distanceKm * 10) / 10,
+      road: xmlText(block, ["roadNumber", "roadName", "descriptor"]),
+      description: xmlText(block, ["description", "value", "cause"]),
+      status: xmlText(block, ["validityStatus", "impactOnTraffic", "probabilityOfOccurrence"]),
+      startTime: xmlText(block, ["overallStartTime", "situationRecordCreationTime"])
+    });
+    if (records.length >= 12) break;
+  }
+  return {
+    source: "DGT / Punto de Acceso Nacional de Tráfico, incidencias DATEX2 v3.7",
+    fetchedAt: new Date().toISOString(),
+    coverageRadiusKm: 30,
+    incidents: records,
+    note: records.length
+      ? "Solo incidencias con coordinate geografiche esplicite nel feed; non è una misura completa della velocità del traffico."
+      : "Nessuna incidenza DGT geolocalizzata trovata nel feed entro 30 km. Questo NON prova che il traffico sia scorrevole."
+  };
+}
+
 async function readJson(req) {
   const chunks = [];
   let size = 0;
@@ -113,14 +207,49 @@ async function handle(req, res) {
   const language = typeof input?.language === "string"
     ? input.language.trim().slice(0, 20) || "it-IT"
     : "it-IT";
+  const assistantName = typeof input?.assistantName === "string"
+    ? input.assistantName.trim().replace(/[<>\\r\\n]/g, "").slice(0, 30) || "Jarvis"
+    : "Jarvis";
+  const location = input?.location &&
+    Number.isFinite(input.location.latitude) && input.location.latitude >= -90 && input.location.latitude <= 90 &&
+    Number.isFinite(input.location.longitude) && input.location.longitude >= -180 && input.location.longitude <= 180
+    ? { latitude: input.location.latitude, longitude: input.location.longitude }
+    : null;
   if (!message) {
     console.warn("Jarvis request rejected: missing message");
     return send(res, 400, { error: "Message is required" });
   }
 
-  const instructions = "You are Jarvis, a concise spoken conversational assistant for NEXT NAVI PRO. Reply in " +
+  let liveContext = "";
+  const normalizedMessage = message.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
+  const asksWeather = /\\b(meteo|tempo|pioggia|vento|weather|forecast|lluvia|clima)\\b/.test(normalizedMessage);
+  const asksTraffic = /\\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\\b/.test(normalizedMessage);
+
+  if (asksWeather && location) {
+    try {
+      liveContext += "\\nVERIFIED LIVE WEATHER: " + JSON.stringify(await fetchLiveWeather(location));
+    } catch {
+      liveContext += "\\nLIVE WEATHER LOOKUP FAILED: say current weather could not be verified; do not guess.";
+    }
+  } else if (asksWeather) {
+    liveContext += "\\nNO GPS COORDINATES WERE PROVIDED: ask for a location or say local weather cannot be verified.";
+  }
+
+  if (asksTraffic && location) {
+    try {
+      liveContext += "\\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(await fetchDgtTraffic(location));
+    } catch {
+      liveContext += "\\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
+    }
+  } else if (asksTraffic) {
+    liveContext += "\\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
+  }
+
+  const instructions = "You are " + assistantName + ", the user-renamed spoken conversational assistant for NEXT NAVI PRO. Your name is exactly " +
+    assistantName + ". If asked your name, answer with that exact name, never the default name Jarvis unless that is the configured name. Reply in " +
     language +
-    ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. If you cannot verify a live fact, say so. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data.";
+    ". Be friendly and brief. You are not the navigation engine. Never invent GPS position, road names, legal speed limits, cameras, weather, maneuvers, routes, arrival times or live facts. Use verified live context below when present, state its source and timestamp when available, and distinguish incidents from a full measure of traffic flow. If a source lookup failed or is not configured, say so clearly. Never pretend to browse or query Google Maps. Never tell the app to change navigation state, route, GPS, limits or alarms. Only deterministic app commands and verified app data can do that. Never encourage phone interaction while driving; tell the user to stop safely first. Do not ask for passwords, keys or unnecessary personal data." +
+    liveContext;
 
   const model = (process.env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" +
