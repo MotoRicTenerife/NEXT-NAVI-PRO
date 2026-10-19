@@ -316,17 +316,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val languageStatus = voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 if (voiceGuideReady) {
-                    // Android exposes no portable voice-gender flag. Prefer known feminine Italian voices when available.
-                    val feminineVoice = voiceGuide?.voices
-                        ?.filter { it.locale.language.equals(Locale.getDefault().language, ignoreCase = true) }
-                        ?.firstOrNull { voice ->
-                            val name = voice.name.lowercase(Locale.ROOT)
-                            listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara", "kda", "standard-a").any { name.contains(it) }
-                        }
-                    if (feminineVoice != null) voiceGuide?.voice = feminineVoice
+                    applyJarvisVoicePreference()
                     // A calm, slightly slower delivery suits spoken directions better.
                     voiceGuide?.setSpeechRate(0.96f)
-                    voiceGuide?.setPitch(1.03f)
                     pendingJarvisSpeech?.let { pending ->
                         pendingJarvisSpeech = null
                         speakJarvis(pending)
@@ -367,7 +359,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         splash.addView(logo, LinearLayout.LayoutParams(-1, 0, 1f))
         val start = Button(this).apply {
-            text = "Avvia Navigazione"
+            text = appText("Avvia Navigazione")
             textSize = 16f
             isAllCaps = false
             setTextColor(white)
@@ -412,7 +404,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         destinationInput = EditText(this).apply {
-            hint = "Cerca indirizzo o località"
+            hint = appText("Cerca indirizzo o località")
             textSize = 12f
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
@@ -1078,8 +1070,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf("Indirizzi preferiti", "Salva destinazione come preferita", "Elimina preferiti", "Prova voce navigatore", "Modalità schermo", "Ricerche recenti", "Soglie tachimetro e avvisi", "Previsioni meteo", "Percorsi GPX", "Debug • CSV GPS: esporta / elimina", "Profilo veicolo: " + if (motorcycleProfile) "MOTO" else "AUTO", "Nome assistente vocale")
-        AlertDialog.Builder(this).setTitle("NEXT NAVI PRO • Menu")
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"))
+        AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> showFavoriteAddresses()
@@ -1094,6 +1086,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     9 -> showGpsDiagnosticsMenu()
                     10 -> showVehicleProfileMenu()
                     11 -> showJarvisNameSettings()
+                    12 -> showJarvisVoiceSettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -1979,6 +1972,74 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .show()
         }
     }
+
+    private fun applyJarvisVoicePreference() {
+        val tts = voiceGuide ?: return
+        val language = Locale.getDefault().language
+        val available = tts.voices?.filter { it.locale.language.equals(language, ignoreCase = true) }.orEmpty()
+        if (available.isEmpty()) return
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val savedVoiceName = prefs.getString("jarvis_voice_name", "").orEmpty()
+        val exactVoice = available.firstOrNull { it.name == savedVoiceName }
+        val mode = prefs.getString("jarvis_voice_style", "female").orEmpty()
+        val voice = exactVoice ?: when (mode) {
+            "male" -> available.firstOrNull { voice ->
+                val n = voice.name.lowercase(Locale.ROOT)
+                listOf("male", "mascul", "man", "david", "daniel", "jorge", "thomas", "alex").any { n.contains(it) }
+            }
+            "female" -> available.firstOrNull { voice ->
+                val n = voice.name.lowercase(Locale.ROOT)
+                listOf("female", "fem", "woman", "alice", "lucia", "elsa", "paola", "sara", "chiara", "kda", "standard-a").any { n.contains(it) }
+            }
+            else -> null
+        } ?: available.firstOrNull { !it.isNetworkConnectionRequired } ?: available.first()
+        try {
+            tts.voice = voice
+            prefs.edit().putString("jarvis_voice_name", voice.name).apply()
+        } catch (_: Exception) {
+            // Keep the device's default voice if a vendor TTS engine rejects a voice.
+        }
+        val pitch = prefs.getFloat("jarvis_voice_pitch", 1.0f)
+        tts.setPitch(pitch.coerceIn(0.7f, 1.4f))
+    }
+
+    private fun showJarvisVoiceSettings() {
+        val tts = voiceGuide
+        val language = Locale.getDefault().language
+        val available = tts?.voices?.filter { it.locale.language.equals(language, ignoreCase = true) }
+            ?.sortedBy { it.name.lowercase(Locale.ROOT) }.orEmpty()
+        val labels = mutableListOf(
+            appText("Automatica (voce predefinita del dispositivo)"),
+            appText("Femminile"),
+            appText("Maschile")
+        )
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val savedStyle = prefs.getString("jarvis_voice_style", "female").orEmpty()
+        val selected = when (savedStyle) { "auto" -> 0; "female" -> 1; "male" -> 2; else -> 0 }
+        available.forEach { labels.add(it.name + if (it.isNetworkConnectionRequired) " • online" else " • offline") }
+        AlertDialog.Builder(this)
+            .setTitle(appText("Voce di Jarvis") + " • " + Locale.getDefault().displayLanguage)
+            .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
+                when (which) {
+                    0 -> prefs.edit().putString("jarvis_voice_style", "auto").remove("jarvis_voice_name").apply()
+                    1 -> prefs.edit().putString("jarvis_voice_style", "female").remove("jarvis_voice_name").apply()
+                    2 -> prefs.edit().putString("jarvis_voice_style", "male").remove("jarvis_voice_name").apply()
+                    else -> {
+                        val voice = available.getOrNull(which - 3)
+                        if (voice != null) prefs.edit().putString("jarvis_voice_style", "custom")
+                            .putString("jarvis_voice_name", voice.name).apply()
+                    }
+                }
+                applyJarvisVoicePreference()
+                dialog.dismiss()
+                speakJarvis(appText("Ciao! Questa è la voce selezionata per Jarvis."))
+            }
+            .setNegativeButton(appText("Chiudi"), null)
+            .show()
+    }
+
+    private fun appText(italian: String): String =
+        NextNaviStrings.translate(italian, Locale.getDefault())
 
     private fun showJarvisNameSettings() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
