@@ -94,8 +94,10 @@ jobs:
                   try:
                       status, payload = get_json(provider_url, 20)
                       if provider_name.startswith("Photon"):
-                          names = [str(item.get("properties", {}).get("name", "")) for item in payload.get("features", [])]
+                          features = payload.get("features", [])
+                          names = [str(item.get("properties", {}).get("name", "")) for item in features]
                       else:
+                          features = []
                           names = [str(item.get("name", "") or item.get("display_name", "").split(",")[0]) for item in payload if isinstance(item, dict)]
                       if status == 200 and any("guaza" in name.casefold() for name in names):
                           details = []
