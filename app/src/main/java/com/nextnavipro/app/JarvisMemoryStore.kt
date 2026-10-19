@@ -116,6 +116,7 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
         } finally {
             db.endTransaction()
         }
+        reclaimSpace(db)
         return stats()
     }
 
@@ -144,6 +145,7 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
         } finally {
             db.endTransaction()
         }
+        reclaimSpace(db)
         return deleted
     }
 
@@ -163,7 +165,14 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
         } finally {
             writableDatabase.endTransaction()
         }
-        writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { /* consume checkpoint result */ }
+        reclaimSpace(writableDatabase)
+    }
+
+    private fun reclaimSpace(db: SQLiteDatabase) {
+        // Run only after the transaction has ended. VACUUM physically returns
+        // unused pages to the app's filesystem instead of merely marking them free.
+        db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { /* consume checkpoint result */ }
+        db.execSQL("VACUUM")
     }
 
     override fun onCreate(db: SQLiteDatabase) {
