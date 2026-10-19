@@ -91,7 +91,7 @@ async function fetchLiveWeather(location) {
 function xmlText(block, names) {
   for (const name of names) {
     const match = block.match(new RegExp("<(?:[\\\\w.-]+:)?" + name + "\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/(?:[\\\\w.-]+:)?" + name + ">", "i"));
-    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim().slice(0, 220);
+    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim().slice(0, 220);
   }
   return "";
 }
@@ -141,61 +141,6 @@ async function fetchDgtTraffic(location) {
     note: records.length
       ? "Only geolocated incidents explicitly present in the feed; this is not a complete measure of traffic speed."
       : "No geolocated DGT incidents found in the feed within 30 km. This does NOT prove traffic is flowing freely."
-  };
-}
-
-async function readJson(req) {");
-    const match = block.match(new RegExp("<(?:[\\w.-]+:)?" + escaped + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + escaped + ">", "i"));
-    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\\s+/g, " ").trim().slice(0, 220);
-  }
-  return "";
-}
-
-async function fetchDgtTraffic(location) {
-  const resourceId = "1d36ea74-593d-4e45-acfa-fb8db5a460bc";
-  const metadataResponse = await fetch("https://nap.dgt.es/api/3/action/resource_show?id=" + resourceId, {
-    signal: AbortSignal.timeout(7000),
-    headers: { "accept": "application/json" }
-  });
-  if (!metadataResponse.ok) throw new Error("DGT resource metadata HTTP " + metadataResponse.status);
-  const metadata = await metadataResponse.json();
-  const resourceUrl = metadata?.result?.url;
-  if (!metadata?.success || typeof resourceUrl !== "string" || !resourceUrl.startsWith("https://")) {
-    throw new Error("DGT resource URL unavailable");
-  }
-  const response = await fetch(resourceUrl, { signal: AbortSignal.timeout(9000), headers: { "accept": "application/xml,text/xml,*/*" } });
-  if (!response.ok) throw new Error("DGT feed HTTP " + response.status);
-  const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > 5 * 1024 * 1024) throw new Error("DGT feed too large");
-  const xml = await response.text();
-  if (xml.length > 5 * 1024 * 1024) throw new Error("DGT feed too large");
-  const records = [];
-  const recordPattern = /<(?:[\\w.-]+:)?situationRecord\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?situationRecord>/gi;
-  let match;
-  while ((match = recordPattern.exec(xml)) !== null) {
-    const block = match[1];
-    const lat = Number(xmlText(block, ["latitude"]));
-    const lon = Number(xmlText(block, ["longitude"]));
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) continue;
-    const distanceKm = haversineKm(location, { latitude: lat, longitude: lon });
-    if (distanceKm > 30) continue;
-    records.push({
-      distanceKm: Math.round(distanceKm * 10) / 10,
-      road: xmlText(block, ["roadNumber", "roadName", "descriptor"]),
-      description: xmlText(block, ["description", "value", "cause"]),
-      status: xmlText(block, ["validityStatus", "impactOnTraffic", "probabilityOfOccurrence"]),
-      startTime: xmlText(block, ["overallStartTime", "situationRecordCreationTime"])
-    });
-    if (records.length >= 12) break;
-  }
-  return {
-    source: "DGT / Punto de Acceso Nacional de Tráfico, incidencias DATEX2 v3.7",
-    fetchedAt: new Date().toISOString(),
-    coverageRadiusKm: 30,
-    incidents: records,
-    note: records.length
-      ? "Solo incidencias con coordinate geografiche esplicite nel feed; non è una misura completa della velocità del traffico."
-      : "Nessuna incidenza DGT geolocalizzata trovata nel feed entro 30 km. Questo NON prova che il traffico sia scorrevole."
   };
 }
 
