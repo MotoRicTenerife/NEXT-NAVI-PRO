@@ -29,6 +29,9 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - name: Run offline GPS trace analysis tests
         run: python -m unittest discover -s roadtools -p 'test_*.py'
+      - name: Check Jarvis backend JavaScript syntax
+        working-directory: backend/jarvis-render
+        run: npm run check
       - name: Prepare persistent debug signing (optional)
         env:
           NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
