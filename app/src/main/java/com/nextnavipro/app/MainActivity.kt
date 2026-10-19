@@ -313,12 +313,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         voiceGuide = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val languageStatus = voiceGuide?.setLanguage(Locale("it", "IT")) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                val languageStatus = voiceGuide?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 if (voiceGuideReady) {
                     // Android exposes no portable voice-gender flag. Prefer known feminine Italian voices when available.
                     val feminineVoice = voiceGuide?.voices
-                        ?.filter { it.locale.language.equals("it", ignoreCase = true) }
+                        ?.filter { it.locale.language.equals(Locale.getDefault().language, ignoreCase = true) }
                         ?.firstOrNull { voice ->
                             val name = voice.name.lowercase(Locale.ROOT)
                             listOf("female", "fem", "alice", "lucia", "elsa", "paola", "sara", "chiara", "kda", "standard-a").any { name.contains(it) }
@@ -1932,13 +1932,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .ifBlank { "Jarvis" }
         jarvisStatusText.text = "$assistantName pronto • premi per parlare"
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        val greeting = when (hour) {
-            in 5..11 -> "Buongiorno"
-            in 12..17 -> "Buon pomeriggio"
-            else -> "Buonasera"
+        val language = Locale.getDefault().language.lowercase(Locale.ROOT)
+        val personalGreeting = if (savedName.isNotBlank()) savedName else ""
+        val greeting = when (language) {
+            "it" -> (if (hour in 5..11) "Buongiorno" else if (hour in 12..17) "Buon pomeriggio" else "Buonasera") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " sono $assistantName, il tuo assistente di navigazione NEXT NAVI PRO. Sono pronto. Dimmi dove vuoi andare e ti guiderò."
+            "es" -> (if (hour in 5..12) "Buenos días" else if (hour in 13..20) "Buenas tardes" else "Buenas noches") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " soy $assistantName, tu asistente de navegación de NEXT NAVI PRO. Estoy listo. Dime adónde quieres ir y te guiaré."
+            "fr" -> (if (hour in 5..17) "Bonjour" else "Bonsoir") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " je suis $assistantName, votre assistant de navigation NEXT NAVI PRO. Je suis prêt. Dites-moi où vous voulez aller et je vous guiderai."
+            "de" -> (if (hour in 5..10) "Guten Morgen" else if (hour in 11..17) "Guten Tag" else "Guten Abend") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " ich bin $assistantName, dein NEXT NAVI PRO Navigationsassistent. Ich bin bereit. Sag mir, wohin du möchtest, und ich führe dich."
+            "pt" -> (if (hour in 5..12) "Bom dia" else if (hour in 13..19) "Boa tarde" else "Boa noite") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " sou $assistantName, o teu assistente de navegação NEXT NAVI PRO. Estou pronto. Diz-me para onde queres ir e vou orientar-te."
+            "nl" -> (if (hour in 5..11) "Goedemorgen" else if (hour in 12..17) "Goedemiddag" else "Goedenavond") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " ik ben $assistantName, je NEXT NAVI PRO-navigatieassistent. Ik ben klaar. Vertel me waar je heen wilt, dan begeleid ik je."
+            else -> (if (hour in 5..11) "Good morning" else if (hour in 12..17) "Good afternoon" else "Good evening") +
+                (if (personalGreeting.isNotBlank()) " $personalGreeting," else "") +
+                " I'm $assistantName, your NEXT NAVI PRO navigation assistant. I'm ready. Tell me where you'd like to go and I'll guide you."
         }
-        val personalGreeting = if (savedName.isNotBlank()) " $savedName," else ""
-        speakJarvis("$greeting$personalGreeting sono $assistantName, il tuo assistente di navigazione NEXT NAVI PRO. Sono pronto. Dimmi dove vuoi andare e ti guiderò.")
+        speakJarvis(greeting)
         // Preserve first-run name setup, but do not make the startup greeting depend on it.
         if (savedName.isBlank() && !prefs.getBoolean("jarvis_user_name_prompted", false)) {
             prefs.edit().putBoolean("jarvis_user_name_prompted", true).apply()
@@ -1987,6 +2006,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             .setNegativeButton("Annulla", null)
             .show()
+    }
+
+    private fun localizedJarvisPrompt(): String = when (Locale.getDefault().language.lowercase(Locale.ROOT)) {
+        "it" -> "Parla con Jarvis"
+        "es" -> "Habla con Jarvis"
+        "fr" -> "Parlez avec Jarvis"
+        "de" -> "Sprich mit Jarvis"
+        "pt" -> "Fala com Jarvis"
+        "nl" -> "Praat met Jarvis"
+        else -> "Talk to Jarvis"
     }
 
     private fun speakJarvis(message: String) {
@@ -2067,11 +2096,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Parla con Jarvis")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, localizedJarvisPrompt())
         }
         try {
             jarvisListening = true
