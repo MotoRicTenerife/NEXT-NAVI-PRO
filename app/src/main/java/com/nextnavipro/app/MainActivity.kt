@@ -458,7 +458,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         jarvisButton = makeButton(jarvisButtonIdleLabel()) { onJarvisButtonPressed() }
-        jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp(116), dp(38)).apply {
+        jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp((72 + jarvisAssistantName().length * 8).coerceIn(116, 220)), dp(38)).apply {
             setMargins(dp(2), 0, dp(8), 0)
         })
         jarvisStatusText = TextView(this).apply {
