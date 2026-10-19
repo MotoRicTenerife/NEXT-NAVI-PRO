@@ -168,7 +168,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ METEO esperando GPS", "RICERCA GPS…" to "BUSCANDO GPS…",
             "Nessun percorso attivo" to "Sin ruta activa", "RADAR OSM" to "RADARES OSM",
             "AVVIA PERCORSO" to "INICIAR RUTA", "⌖ POSIZIONE" to "⌖ POSICIÓN",
-            "ANNULLA PERCORSO" to "CANCELAR RUTA", "ANNULLA TRACCIA GPX" to "CANCELAR TRAZA GPX",
+            "ANNULLA PERCORSO" to "CANCELAR RUTA", "TERMINA NAVIGAZIONE" to "TERMINAR NAVEGACIÓN", "ANNULLA TRACCIA GPX" to "CANCELAR TRAZA GPX",
             "ANNULLA PERCORSO GPX" to "CANCELAR RUTA GPX", "DESTINAZIONE: " to "DESTINO: ",
             "Premi AVVIA PERCORSO" to "Pulsa INICIAR RUTA", "pronto • premi per parlare" to "listo • pulsa para hablar"
         ),
@@ -177,7 +177,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ WEATHER waiting for GPS", "RICERCA GPS…" to "SEARCHING GPS…",
             "Nessun percorso attivo" to "No active route", "RADAR OSM" to "OSM CAMERAS",
             "AVVIA PERCORSO" to "START ROUTE", "⌖ POSIZIONE" to "⌖ RECENTER",
-            "ANNULLA PERCORSO" to "CANCEL ROUTE", "ANNULLA TRACCIA GPX" to "CANCEL GPX TRACK",
+            "ANNULLA PERCORSO" to "CANCEL ROUTE", "TERMINA NAVIGAZIONE" to "END NAVIGATION", "ANNULLA TRACCIA GPX" to "CANCEL GPX TRACK",
             "ANNULLA PERCORSO GPX" to "CANCEL GPX ROUTE", "DESTINAZIONE: " to "DESTINATION: ",
             "Premi AVVIA PERCORSO" to "Tap START ROUTE", "pronto • premi per parlare" to "ready • tap to speak"
         ),
@@ -186,7 +186,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ MÉTÉO en attente du GPS", "RICERCA GPS…" to "RECHERCHE GPS…",
             "Nessun percorso attivo" to "Aucun itinéraire actif", "RADAR OSM" to "RADARS OSM",
             "AVVIA PERCORSO" to "DÉMARRER", "⌖ POSIZIONE" to "⌖ RECENTRER",
-            "ANNULLA PERCORSO" to "ANNULER", "ANNULLA TRACCIA GPX" to "ANNULER LA TRACE GPX",
+            "ANNULLA PERCORSO" to "ANNULER", "TERMINA NAVIGAZIONE" to "TERMINER LA NAVIGATION", "ANNULLA TRACCIA GPX" to "ANNULER LA TRACE GPX",
             "ANNULLA PERCORSO GPX" to "ANNULER L’ITINÉRAIRE GPX", "DESTINAZIONE: " to "DESTINATION : ",
             "Premi AVVIA PERCORSO" to "Appuyez sur DÉMARRER", "pronto • premi per parlare" to "prêt • appuyez pour parler"
         ),
@@ -195,7 +195,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ WETTER wartet auf GPS", "RICERCA GPS…" to "GPS-SUCHE…",
             "Nessun percorso attivo" to "Keine aktive Route", "RADAR OSM" to "OSM-BLITZER",
             "AVVIA PERCORSO" to "ROUTE STARTEN", "⌖ POSIZIONE" to "⌖ ZENTRIEREN",
-            "ANNULLA PERCORSO" to "ROUTE ABBRECHEN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ABBRECHEN",
+            "ANNULLA PERCORSO" to "ROUTE ABBRECHEN", "TERMINA NAVIGAZIONE" to "NAVIGATION BEENDEN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ABBRECHEN",
             "ANNULLA PERCORSO GPX" to "GPX-ROUTE ABBRECHEN", "DESTINAZIONE: " to "ZIEL: ",
             "Premi AVVIA PERCORSO" to "ROUTE STARTEN antippen", "pronto • premi per parlare" to "bereit • zum Sprechen tippen"
         ),
@@ -204,7 +204,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ METEOROLOGIA à espera do GPS", "RICERCA GPS…" to "A PROCURAR GPS…",
             "Nessun percorso attivo" to "Sem percurso ativo", "RADAR OSM" to "RADARES OSM",
             "AVVIA PERCORSO" to "INICIAR PERCURSO", "⌖ POSIZIONE" to "⌖ RECENTRAR",
-            "ANNULLA PERCORSO" to "CANCELAR PERCURSO", "ANNULLA TRACCIA GPX" to "CANCELAR TRAJETO GPX",
+            "ANNULLA PERCORSO" to "CANCELAR PERCURSO", "TERMINA NAVIGAZIONE" to "TERMINAR NAVEGAÇÃO", "ANNULLA TRACCIA GPX" to "CANCELAR TRAJETO GPX",
             "ANNULLA PERCORSO GPX" to "CANCELAR PERCURSO GPX", "DESTINAZIONE: " to "DESTINO: ",
             "Premi AVVIA PERCORSO" to "Toca em INICIAR PERCURSO", "pronto • premi per parlare" to "pronto • toca para falar"
         ),
@@ -213,7 +213,7 @@ object NextNaviStrings {
             "🌤️ METEO in attesa GPS" to "🌤️ WEER wacht op GPS", "RICERCA GPS…" to "GPS ZOEKEN…",
             "Nessun percorso attivo" to "Geen actieve route", "RADAR OSM" to "OSM-CAMERA’S",
             "AVVIA PERCORSO" to "ROUTE STARTEN", "⌖ POSIZIONE" to "⌖ HER-CENTREREN",
-            "ANNULLA PERCORSO" to "ROUTE ANNULEREN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ANNULEREN",
+            "ANNULLA PERCORSO" to "ROUTE ANNULEREN", "TERMINA NAVIGAZIONE" to "NAVIGATIE BEËINDIGEN", "ANNULLA TRACCIA GPX" to "GPX-TRACK ANNULEREN",
             "ANNULLA PERCORSO GPX" to "GPX-ROUTE ANNULEREN", "DESTINAZIONE: " to "BESTEMMING: ",
             "Premi AVVIA PERCORSO" to "Tik op ROUTE STARTEN", "pronto • premi per parlare" to "klaar • tik om te spreken"
         )
