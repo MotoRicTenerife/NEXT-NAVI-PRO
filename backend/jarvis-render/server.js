@@ -98,7 +98,7 @@ async function fetchLiveWeather(location) {
         throw new Error("Invalid Open-Meteo current weather fields");
       }
       return {
-        source: weatherResult?.source || "Open-Meteo / MET Norway",
+        source: "Open-Meteo",
         fetchedAt: new Date().toISOString(),
         validTime: current.time,
         temperatureC: current.temperature_2m,
@@ -350,7 +350,7 @@ async function handle(req, res) {
       const response = { reply: fallbackReplies.join(" ") };
       if (asksWeather) {
         response.weatherDiagnostics = {
-          source: "Open-Meteo",
+          source: weatherResult?.source || "Open-Meteo / MET Norway",
           status: weatherResult ? "verified" : "unavailable",
           failureCode: weatherFailureCode
         };
