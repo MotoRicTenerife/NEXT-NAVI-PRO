@@ -1,7 +1,7 @@
 name: Android CI
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, fix/jarvis-render-backend ]
   pull_request:
   workflow_dispatch:
 permissions:
