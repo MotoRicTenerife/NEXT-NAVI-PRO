@@ -2412,18 +2412,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                     if (voiceCommand) {
                         pendingJarvisPlaces = sortedResults
-                        // One real geocoder result can be routed without a touch interaction.
-                        // If the search is ambiguous, require the rider to stop before choosing.
+                        // A single real result can be routed immediately. For multiple matches,
+                        // present the actual geocoder results instead of a flaky GPS-stop gate.
                         if (sortedResults.size == 1) {
                             rememberSearch(query)
                             selectJarvisOrSearchDestination(sortedResults.first(), autoStart = true)
-                            return@runOnUiThread
-                        }
-                        val safeToConfirm = isVehicleSafelyStopped()
-                        if (!safeToConfirm) {
-                            routeText.text = "DESTINAZIONE TROVATA • scelta necessaria da fermo"
-                            jarvisStatusText.text = "Risultati pronti: fermati e dì «mostra risultati»"
-                            speakJarvis("Ho trovato " + sortedResults.size + " possibili destinazioni. Per evitare di scegliere il posto sbagliato, fermati in sicurezza e dimmi «mostra risultati».")
                             return@runOnUiThread
                         }
                     }
