@@ -2,7 +2,7 @@ import http from "node:http";
 
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
-const MAX_BODY_BYTES = 16 * 1024;
+const MAX_BODY_BYTES = 48 * 1024;
 const MAX_REQUEST_CHARS = clampInt(process.env.MAX_REQUEST_CHARS, 500, 1, 4000);
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
