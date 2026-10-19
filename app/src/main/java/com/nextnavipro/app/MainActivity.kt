@@ -3808,7 +3808,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         thread(name = "osm-road-match") {
             val match = try {
-                SpeedLimitService.findRoadNear(point, bearing)
+                SpeedLimitService.findRoadNear(
+                    point,
+                    bearing,
+                    queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }
+                )
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass road lookup failed", error)
                 null
@@ -3826,6 +3830,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 currentRoadMatch = match
                 currentSpeedLimit = match?.speedLimitKmh
+                if (match == null) {
+                    android.util.Log.i(
+                        "NEXT_NAVI_SPEED_LIMIT",
+                        "No plausible OSM road match for current GPS fix; accuracy=" +
+                            (queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }?.toInt()?.toString() ?: "unknown") + "m"
+                    )
+                } else if (match.speedLimitKmh == null) {
+                    android.util.Log.i(
+                        "NEXT_NAVI_SPEED_LIMIT",
+                        "Road matched but OSM has no explicit usable maxspeed tag; road=" +
+                            (match.displayName ?: "unnamed") + ", distance=" + match.distanceMeters.toInt() + "m"
+                    )
+                } else {
+                    android.util.Log.d(
+                        "NEXT_NAVI_SPEED_LIMIT",
+                        "Matched road=" + (match.displayName ?: "unnamed") +
+                            ", limit=" + match.speedLimitKmh + " km/h, distance=" + match.distanceMeters.toInt() + "m"
+                    )
+                }
                 latest?.let { updateGpsStatus(it) }
                 updateSpeedLimitDisplay()
             }
