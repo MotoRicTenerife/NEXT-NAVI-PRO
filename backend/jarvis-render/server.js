@@ -122,7 +122,7 @@ async function fetchLiveWeather(location) {
 async function fetchMetNoWeather(location) {
   const url = new URL("https://api.met.no/weatherapi/locationforecast/2.0/compact");
   url.search = new URLSearchParams({ lat: String(location.latitude), lon: String(location.longitude) }).toString();
-  const response = await fetch(url, { signal: AbortSignal.timeout(12000), headers: { accept: "application/json", "user-agent": "NEXT-NAVI-PRO/0.3 contact: next-navi-pro" } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(12000), headers: { accept: "application/json", "user-agent": "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)" } });
   if (!response.ok) throw new Error("MET Norway HTTP " + response.status);
   const data = await response.json();
   const first = data?.properties?.timeseries?.[0];
@@ -130,7 +130,7 @@ async function fetchMetNoWeather(location) {
   if (!first || !details || !Number.isFinite(details.air_temperature) || !Number.isFinite(details.wind_speed) || !Number.isFinite(details.wind_speed_of_gust)) throw new Error("Invalid MET Norway current weather fields");
   const symbol = first.data.next_1_hours?.summary?.symbol_code || first.data.next_6_hours?.summary?.symbol_code || "";
   const codeMap = { clearsky_day: 0, clearsky_night: 0, fair_day: 1, fair_night: 1, partlycloudy_day: 2, partlycloudy_night: 2, cloudy: 3, fog: 45, lightrain: 61, rain: 63, heavyrain: 65, lightsleet: 71, sleet: 73, heavysleet: 75, lightrainshowers_day: 80, rainshowers_day: 81, heavyrainshowers_day: 82, thunderstorm: 95 };
-  return { source: "MET Norway", fetchedAt: new Date().toISOString(), validTime: first.time, temperatureC: details.air_temperature, feelsLikeC: details.air_temperature, humidityPercent: details.relative_humidity, precipitationMm: first.data.next_1_hours?.details?.precipitation_amount ?? first.data.next_6_hours?.details?.precipitation_amount ?? 0, weatherCode: codeMap[symbol] ?? 3, weatherSymbol: symbol, windKmh: Math.round(details.wind_speed * 36) / 10, windDirectionDegrees: details.wind_from_direction, gustKmh: Math.round(details.wind_speed_of_gust * 36) / 10 };
+  return { source: "MET Norway", fetchedAt: new Date().toISOString(), validTime: first.time, temperatureC: details.air_temperature, feelsLikeC: details.air_temperature, humidityPercent: details.relative_humidity, precipitationMm: first.data.next_1_hours?.details?.precipitation_amount ?? first.data.next_6_hours?.details?.precipitation_amount ?? 0, weatherCode: codeMap[symbol] ?? null, weatherSymbol: symbol, windKmh: Math.round(details.wind_speed * 36) / 10, windDirectionDegrees: details.wind_from_direction, gustKmh: Math.round(details.wind_speed_of_gust * 36) / 10 };
 }
 function xmlText(block, names) {
   for (const name of names) {
