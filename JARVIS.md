@@ -8,7 +8,7 @@
 - User-initiated push-to-talk via the dashboard microphone button. There is no wake word and no background microphone service.
 - Offline-first command parser: destination search, saved home, GPS fix accuracy, repeat next instruction, remaining route metrics, silence/help, and showing pending search results.
 - Destination search continues to use the app's existing geocoder and route engine. Jarvis does not invent coordinates, roads, speed limits, ETA, or maneuvers.
-- Voice destination results are not opened as a selection dialog while the app cannot confirm the vehicle is stopped. Free-form online AI requests are also blocked unless GPS reports speed at or below 2.5 m/s.
+- Spoken navigation commands are parsed locally and can search/select a destination, cancel an active route, or request a destination change. Online AI replies are conversational only and cannot alter navigation state. Ambiguous place results must be shown to the rider rather than silently selecting an unrelated destination.
 - The feminine Italian TTS voice is selected by known voice-name hints when the installed TTS engine exposes one. Android does not provide a portable voice-gender flag, so the actual voice still depends on installed Italian TTS voices.
 
 ## Optional online AI gateway
@@ -20,7 +20,7 @@ Set the GitHub Actions **repository variable** `NEXT_NAVI_AI_ENDPOINT` to an HTT
 - Request: `POST application/json` with `{"message":"...","language":"it-IT","app":"NEXT NAVI PRO"}`
 - Response: HTTP 2xx with `{"reply":"..."}`
 
-The app sends only the recognized text, not GPS coordinates, route geometry, saved home, or the user's name. It treats the reply as conversation only; it cannot change navigation state. Requests time out quickly and fall back to offline commands. If the variable is unset, no online request is made.
+The production Android CI build uses the Render service `https://next-navi-pro-jarvis.onrender.com/jarvis`. The app sends recognized text, language, and assistant name for conversational requests; it includes the current GPS coordinates only for live weather/traffic questions. It does not send route geometry or saved home. Replies are conversational only and cannot change navigation state. Local builds need `NEXT_NAVI_AI_ENDPOINT` set in the build environment to enable the online layer; offline navigation commands remain available without it.
 
 ## Persistent APK signing
 
