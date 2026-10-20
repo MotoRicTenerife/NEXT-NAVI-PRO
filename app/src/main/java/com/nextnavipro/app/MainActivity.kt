@@ -3893,6 +3893,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
+        // Build HERE's map-matching trace from accepted fixes continuously. Do not
+        // wait for the much slower Overpass speed-limit refresh to collect points.
+        HereRouteMatchingService.recordLocation(smoothed)
         if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
             pendingJarvisWeather = false
             answerJarvisWeather()
