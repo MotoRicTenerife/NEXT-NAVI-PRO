@@ -1,4 +1,8 @@
 name: Android CI
+
+concurrency:
+  group: android-ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [ main, master, fix/jarvis-render-backend ]
