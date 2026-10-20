@@ -29,8 +29,8 @@ object RenderSpeedLimitService {
         val connection = URL("$base/speed-limit?$query").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 23000
+            connection.connectTimeout = 2500
+            connection.readTimeout = 4500
             connection.setRequestProperty("User-Agent", "NEXT-NAVI-PRO/0.3")
             connection.setRequestProperty("Accept", "application/json")
             val status = connection.responseCode
