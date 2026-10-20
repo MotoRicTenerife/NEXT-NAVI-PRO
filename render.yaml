@@ -14,6 +14,8 @@ services:
         sync: false
       - key: HERE_API_KEY
         sync: false
+      - key: TOMTOM_API_KEY
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-3.5-flash-lite
       - key: MAX_REQUEST_CHARS
