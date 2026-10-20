@@ -253,6 +253,7 @@ jobs:
           if failures:
               for failure in failures:
                   print("::warning::Live diagnostic failed: " + failure)
-              print("APK build continues, but these live integrations are NOT verified.")
-              sys.exit(1)
+              print("Live third-party integrations are NOT fully verified. This is a warning, not a code-build failure; inspect Render configuration/provider availability separately.")
+          else:
+              print("All configured live integration diagnostics passed.")
           PY
