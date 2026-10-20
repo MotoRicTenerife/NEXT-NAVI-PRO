@@ -53,17 +53,22 @@ object SpeedLimitService {
     fun findRoadNear(point: NavPoint, bearing: Float?, accuracyMeters: Float? = null): RoadMatch? {
         var lastError: Exception? = null
         var hadSuccessfulResponse = false
+        var bestRoadWithoutLimit: RoadMatch? = null
         for (endpoint in ENDPOINTS) {
             try {
                 val match = findRoadNearAtEndpoint(point, bearing, accuracyMeters, endpoint)
-                if (match != null) return match
-                // An empty valid response from one mirror must not prevent trying
-                // the second mirror, whose replication/cache may differ.
+                // A road match without maxspeed is not a complete speed-limit result.
+                // Continue to independent mirrors before deciding the limit is unknown.
+                if (match?.speedLimitKmh != null) return match
+                if (match != null && bestRoadWithoutLimit == null) bestRoadWithoutLimit = match
+                // A valid empty response is not an outage; keep trying mirrors because
+                // their data replication/cache can differ slightly.
                 hadSuccessfulResponse = true
             } catch (error: Exception) {
                 lastError = error
             }
         }
+        if (bestRoadWithoutLimit != null) return bestRoadWithoutLimit
         if (!hadSuccessfulResponse) throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile")
         return null
     }
