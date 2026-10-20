@@ -4005,21 +4005,41 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass road lookup failed", error)
                 null
             }
-            // Keep a short HERE trace in the background; call HERE only when OSM
-            // has no explicit usable limit. Missing/ambiguous provider data stays unknown.
+            // Try a second independent OSM route (Render) if direct Overpass returned
+            // no explicit limit. This distinguishes device-side provider failures from
+            // genuinely missing map data; no limit is ever guessed.
+            val renderLimit = if (osmMatch?.speedLimitKmh == null) {
+                try {
+                    RenderSpeedLimitService.findLimit(queryLocation)
+                } catch (error: Exception) {
+                    android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Render OSM fallback failed", error)
+                    null
+                }
+            } else null
+            // Keep a short HERE trace in the background; use HERE only when neither OSM
+            // path has returned an explicit numeric limit.
             val hereLimit = try {
                 HereRouteMatchingService.findLimit(
                     queryLocation,
-                    allowLookup = osmMatch?.speedLimitKmh == null
+                    allowLookup = osmMatch?.speedLimitKmh == null && renderLimit == null
                 )
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "HERE route matching failed; keeping OSM result", error)
                 null
             }
             val match = when {
-                hereLimit == null -> osmMatch
-                osmMatch != null -> osmMatch.copy(speedLimitKmh = hereLimit)
-                else -> RoadMatch(
+                osmMatch?.speedLimitKmh != null -> osmMatch
+                renderLimit != null && osmMatch != null -> osmMatch.copy(speedLimitKmh = renderLimit)
+                renderLimit != null -> RoadMatch(
+                    name = null,
+                    ref = null,
+                    speedLimitKmh = renderLimit,
+                    highwayType = null,
+                    distanceMeters = 0f,
+                    roadBearing = bearing ?: 0f
+                )
+                hereLimit != null && osmMatch != null -> osmMatch.copy(speedLimitKmh = hereLimit)
+                hereLimit != null -> RoadMatch(
                     name = null,
                     ref = null,
                     speedLimitKmh = hereLimit,
@@ -4027,6 +4047,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     distanceMeters = 0f,
                     roadBearing = bearing ?: 0f
                 )
+                else -> osmMatch
             }
             runOnUiThread {
                 // A slow Overpass response must not overwrite a newer road match.
