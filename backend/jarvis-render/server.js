@@ -267,10 +267,13 @@ async function handle(req, res) {
     try {
       // Public Overpass mirrors can rate-limit independently. Retry mirrors before
       // reporting an outage, and never interpret a timeout/remark as an empty map.
+      // Use genuinely independent public instances. kumi.systems now aliases
+      // private.coffee, so listing both does not provide meaningful redundancy.
       const endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter"
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter"
       ];
       let osm = null;
       const providerErrors = [];
@@ -280,7 +283,7 @@ async function handle(req, res) {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", "Accept": "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3" },
             body: new URLSearchParams({ data: query }),
-            signal: AbortSignal.timeout(8000)
+            signal: AbortSignal.timeout(5000)
           });
           const body = await upstream.text();
           if (!upstream.ok) {
