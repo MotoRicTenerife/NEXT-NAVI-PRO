@@ -265,20 +265,44 @@ async function handle(req, res) {
     const query = '[out:json][timeout:10];way[highway](around:80,' +
       lat + ',' + lon + ');out tags geom;';
     try {
-      const upstream = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", "Accept": "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3" },
-        body: new URLSearchParams({ data: query }),
-        signal: AbortSignal.timeout(12000)
-      });
-      const body = await upstream.text();
-      if (!upstream.ok) {
-        console.warn("Overpass speed-limit diagnostic failed", { status: upstream.status });
-        return send(res, 502, { error: "OSM/Overpass provider unavailable" });
+      // Public Overpass mirrors can rate-limit independently. Retry mirrors before
+      // reporting an outage, and never interpret a timeout/remark as an empty map.
+      const endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
+      ];
+      let osm = null;
+      const providerErrors = [];
+      for (const endpoint of endpoints) {
+        try {
+          const upstream = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", "Accept": "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3" },
+            body: new URLSearchParams({ data: query }),
+            signal: AbortSignal.timeout(8000)
+          });
+          const body = await upstream.text();
+          if (!upstream.ok) {
+            providerErrors.push(endpoint + " HTTP " + upstream.status);
+            continue;
+          }
+          const candidate = JSON.parse(body);
+          if (candidate.remark || !Array.isArray(candidate.elements)) {
+            providerErrors.push(endpoint + " returned a remark or malformed elements");
+            continue;
+          }
+          osm = candidate;
+          break;
+        } catch (error) {
+          providerErrors.push(endpoint + " " + (error instanceof Error ? error.name : "error"));
+        }
       }
-      const osm = JSON.parse(body);
-      if (osm.remark) return send(res, 502, { error: "Overpass query failed", detail: String(osm.remark).slice(0, 180) });
-      const elements = Array.isArray(osm.elements) ? osm.elements : [];
+      if (!osm) {
+        console.warn("All Overpass speed-limit providers failed", { providerErrors });
+        return send(res, 502, { error: "OSM/Overpass providers unavailable" });
+      }
+      const elements = osm.elements;
       const distanceToSegment = (a, b) => {
         const metersPerLat = 111320;
         const metersPerLon = 111320 * Math.cos(lat * Math.PI / 180);
