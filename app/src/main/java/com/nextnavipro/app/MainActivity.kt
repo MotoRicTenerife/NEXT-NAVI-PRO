@@ -3972,11 +3972,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
-        // Public Overpass is rate-limited and can take several seconds to respond.
-        // Avoid repeated requests while riding along the same road: refresh after 20 s,
-        // or sooner only after a meaningful 450 m displacement.
-        if (previous != null && previous.distanceTo(location) < 450f &&
-            now - lastSpeedLimitQueryMs < 20_000L) {
+        // Refresh often enough to keep up with the vehicle. The previous 20 s / 450 m
+        // gate let the GPS move hundreds of metres while a slow Overpass request was pending.
+        if (previous != null && previous.distanceTo(location) < 150f &&
+            now - lastSpeedLimitQueryMs < 8_000L) {
             updateSpeedLimitDisplay()
             return
         }
@@ -3995,27 +3994,30 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
         }
         thread(name = "osm-road-match") {
-            val osmMatch = try {
-                SpeedLimitService.findRoadNear(
-                    point,
-                    bearing,
-                    queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }
-                )
+            // Query the Render OSM proxy first: it centralizes mirror fallback and avoids
+            // waiting through several direct Overpass timeouts before trying the same data.
+            // The direct device query remains a fallback if Render is unavailable or has no limit.
+            val renderLimit = try {
+                RenderSpeedLimitService.findLimit(queryLocation)
             } catch (error: Exception) {
-                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass road lookup failed", error)
+                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Render OSM lookup failed", error)
                 null
             }
-            // Try a second independent OSM route (Render) if direct Overpass returned
-            // no explicit limit. This distinguishes device-side provider failures from
-            // genuinely missing map data; no limit is ever guessed.
-            val renderLimit = if (osmMatch?.speedLimitKmh == null) {
+            val osmMatch = if (renderLimit == null) {
                 try {
-                    RenderSpeedLimitService.findLimit(queryLocation)
+                    SpeedLimitService.findRoadNear(
+                        point,
+                        bearing,
+                        queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }
+                    )
                 } catch (error: Exception) {
-                    android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Render OSM fallback failed", error)
+                    android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass direct fallback failed", error)
                     null
                 }
-            } else null
+            } else {
+                // Still attempt a quick road-name match separately only when needed for UI context.
+                null
+            }
             // Keep a short HERE trace in the background; use HERE only when neither OSM
             // path has returned an explicit numeric limit.
             val hereLimit = try {
