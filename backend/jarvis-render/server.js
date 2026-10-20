@@ -59,7 +59,7 @@ function speedLimitRateLimited(ip, now) {
     window = { startedAt: now, count: 0 };
     speedLimitIpWindows.set(ip, window);
   }
-  if (window.count >= 8) return true;
+  if (window.count >= 20) return true;
   window.count += 1;
   if (speedLimitIpWindows.size > 5000) {
     for (const [key, value] of speedLimitIpWindows) {
@@ -339,10 +339,10 @@ async function handle(req, res) {
       return send(res, error.statusCode || 400, { error: "Invalid speed-limit request" });
     }
     const points = Array.isArray(input?.points) ? input.points.slice(-8) : [];
-    if (points.length < 3 || points.some(point =>
+    if (points.length < 2 || points.some(point =>
       !point || !Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90 ||
       !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180)) {
-      return send(res, 400, { error: "At least three valid GPS points are required" });
+      return send(res, 400, { error: "At least two valid GPS points are required" });
     }
 
     const csv = "LATITUDE,LONGITUDE\n" + points.map(point => point.latitude + "," + point.longitude).join("\n") + "\n";
