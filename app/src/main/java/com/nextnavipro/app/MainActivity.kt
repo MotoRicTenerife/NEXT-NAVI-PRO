@@ -211,6 +211,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastCameraLocation: Location? = null
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
+    private var speedLimitLookupInFlight = false
     private var currentSpeedLimit: Int? = null
     private var currentRoadMatch: RoadMatch? = null
     private var lastDisplayedSpeed: Int? = null
@@ -3985,6 +3986,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateGpsStatus(location)
             updateSpeedLimitDisplay()
         }
+        // Never launch a second slow network lookup while the previous one is running.
+        // Otherwise each new GPS fix supersedes the older response and the sign can
+        // remain blank forever on a moving vehicle.
+        if (speedLimitLookupInFlight) {
+            updateSpeedLimitDisplay()
+            return
+        }
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
         val queryLocation = Location(location)
@@ -3993,6 +4001,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val bearing = queryLocation.bearing.takeIf {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
         }
+        speedLimitLookupInFlight = true
         thread(name = "osm-road-match") {
             // Query the Render OSM proxy first: it centralizes mirror fallback and avoids
             // waiting through several direct Overpass timeouts before trying the same data.
@@ -4052,6 +4061,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> osmMatch ?: renderRoadMatch
             }
             runOnUiThread {
+                speedLimitLookupInFlight = false
                 // A slow Overpass response must not overwrite a newer road match.
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
