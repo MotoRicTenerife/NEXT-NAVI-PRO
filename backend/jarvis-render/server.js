@@ -247,6 +247,7 @@ async function handle(req, res) {
     return send(res, 200, {
       ok: true,
       osmDiagnostic: true,
+      tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
       hereConfigured: Boolean(process.env.HERE_API_KEY),
       revision: process.env.RENDER_GIT_COMMIT || "unknown"
     });
@@ -363,8 +364,9 @@ async function handle(req, res) {
 
   if (url.pathname === "/speed-limit") {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    const tomtomApiKey = process.env.TOMTOM_API_KEY;
     const hereApiKey = process.env.HERE_API_KEY;
-    if (!hereApiKey) return send(res, 503, { error: "Speed-limit provider not configured" });
+    if (!tomtomApiKey && !hereApiKey) return send(res, 503, { error: "Speed-limit provider not configured" });
     if (speedLimitRateLimited(getClientIp(req), Date.now())) {
       return send(res, 429, { error: "Too many speed-limit requests; try again later" });
     }
@@ -382,35 +384,97 @@ async function handle(req, res) {
       return send(res, 400, { error: "At least two valid GPS points are required" });
     }
 
-    const csv = "LATITUDE,LONGITUDE\n" + points.map(point => point.latitude + "," + point.longitude).join("\n") + "\n";
-    const query = new URLSearchParams({
-      routeMatch: "1",
-      mode: "fastest;car;traffic:disabled",
-      attributes: "SPEED_LIMITS_FCn(FROM_REF_SPEED_LIMIT,TO_REF_SPEED_LIMIT)",
-      apiKey: hereApiKey
-    });
-    try {
-      const upstream = await fetch("https://routematching.hereapi.com/v8/match/routelinks?" + query.toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "Accept": "application/json" },
-        body: csv,
-        signal: AbortSignal.timeout(9000)
-      });
-      const body = await upstream.text();
-      if (!upstream.ok) {
-        console.warn("HERE route matching failed", { status: upstream.status });
-        return send(res, 502, { error: "Speed-limit provider unavailable" });
+    // Prefer TomTom Snap to Roads. Keep the API key exclusively on the server.
+    if (tomtomApiKey) {
+      try {
+        const fields = "{route{properties{id,speedLimits{value,unit,type}}}}";
+        const query = new URLSearchParams({
+          key: tomtomApiKey,
+          fields,
+          vehicleType: "PassengerCar",
+          measurementSystem: "auto"
+        });
+        const tomtomPoints = points.map(point => ({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
+          properties: Number.isFinite(point.bearing) || Number.isFinite(point.heading)
+            ? { heading: Number.isFinite(point.bearing) ? point.bearing : point.heading }
+            : {}
+        }));
+        const upstream = await fetch("https://api.tomtom.com/snapToRoads/1?" + query.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ points: tomtomPoints }),
+          signal: AbortSignal.timeout(9000)
+        });
+        if (upstream.ok) {
+          const data = await upstream.json();
+          const routeSegments = Array.isArray(data?.route) ? data.route : [];
+          let speedLimitKmh = null;
+          for (const segment of routeSegments) {
+            const rawLimits = segment?.properties?.speedLimits;
+            const limits = Array.isArray(rawLimits) ? rawLimits : rawLimits ? [rawLimits] : [];
+            const parsed = limits.map(limit => {
+              const value = Number(limit?.value);
+              if (!Number.isFinite(value) || value <= 0) return null;
+              const type = String(limit?.type || "").toLowerCase();
+              if (type && type !== "maximum") return null;
+              const unit = String(limit?.unit || "kmph").toLowerCase();
+              const kmh = unit.includes("mph") || unit === "m" ? value * 1.609344 : value;
+              const rounded = Math.round(kmh);
+              return rounded >= 5 && rounded <= 200 ? rounded : null;
+            }).filter(value => value !== null);
+            // The last matched road segment is closest to the newest GPS fix.
+            if (parsed.length) speedLimitKmh = parsed[0];
+          }
+          if (speedLimitKmh !== null) {
+            return send(res, 200, { speedLimitKmh, source: "TomTom Snap to Roads" });
+          }
+          console.warn("TomTom returned no explicit speed limit for matched route");
+        } else {
+          console.warn("TomTom Snap to Roads failed", { status: upstream.status });
+        }
+      } catch (error) {
+        console.warn("TomTom Snap to Roads request failed", {
+          errorType: error instanceof Error ? error.name : "UnknownError"
+        });
       }
-      const speedLimitKmh = parseHereSpeedLimit(body);
-      return send(res, 200, { speedLimitKmh });
-    } catch (error) {
-      console.warn("HERE route matching request failed", {
-        errorType: error instanceof Error ? error.name : "UnknownError"
-      });
-      return send(res, 502, { error: "Speed-limit provider unavailable" });
     }
-  }
 
+    // HERE remains an optional secondary provider if configured. OSM is still
+    // available through GET /speed-limit and is handled separately by Android.
+    if (hereApiKey) {
+      const csv = "LATITUDE,LONGITUDE\n" + points.map(point => point.latitude + "," + point.longitude).join("\n") + "\n";
+      const query = new URLSearchParams({
+        routeMatch: "1",
+        mode: "fastest;car;traffic:disabled",
+        attributes: "SPEED_LIMITS_FCn(FROM_REF_SPEED_LIMIT,TO_REF_SPEED_LIMIT)",
+        apiKey: hereApiKey
+      });
+      try {
+        const upstream = await fetch("https://routematching.hereapi.com/v8/match/routelinks?" + query.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream", "Accept": "application/json" },
+          body: csv,
+          signal: AbortSignal.timeout(9000)
+        });
+        const body = await upstream.text();
+        if (!upstream.ok) {
+          console.warn("HERE route matching failed", { status: upstream.status });
+          return send(res, 502, { error: "Speed-limit providers unavailable" });
+        }
+        const speedLimitKmh = parseHereSpeedLimit(body);
+        return send(res, 200, { speedLimitKmh, source: "HERE Route Matching" });
+      } catch (error) {
+        console.warn("HERE route matching request failed", {
+          errorType: error instanceof Error ? error.name : "UnknownError"
+        });
+        return send(res, 502, { error: "Speed-limit providers unavailable" });
+      }
+    }
+
+    return send(res, 200, { speedLimitKmh: null, source: "TomTom Snap to Roads", reason: "no_explicit_speed_limit" });
+  }
   if (url.pathname !== "/jarvis") return send(res, 404, { error: "Not found" });
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
 
