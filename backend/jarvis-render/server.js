@@ -345,7 +345,9 @@ async function handle(req, res) {
       }
       return send(res, 200, {
         speedLimitKmh: nearest?.limit ?? null,
-        road: nearest?.way?.tags?.name ?? nearest?.way?.tags?.ref ?? null,
+        road: nearest?.way?.tags?.name ?? null,
+        ref: nearest?.way?.tags?.ref ?? null,
+        highwayType: nearest?.way?.tags?.highway ?? null,
         distanceMeters: nearest ? Math.round(nearest.distance) : null,
         source: "OpenStreetMap/Overpass"
       });
