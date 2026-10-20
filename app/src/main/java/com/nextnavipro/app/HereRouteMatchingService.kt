@@ -21,9 +21,11 @@ internal object HereRouteMatchingService {
     private const val TAG = "NEXT_NAVI_HERE"
     private const val CONNECT_TIMEOUT_MS = 7000
     private const val READ_TIMEOUT_MS = 10000
-    private const val MIN_TRACE_POINTS = 3
-    private const val MIN_TRACE_DISTANCE_METERS = 250.0
-    private const val MIN_REQUEST_INTERVAL_MS = 60_000L
+    // Collect trace points from every accepted GPS fix, not only when the slow
+    // Overpass lookup happens. Otherwise a trace may take minutes to become usable.
+    private const val MIN_TRACE_POINTS = 2
+    private const val MIN_TRACE_DISTANCE_METERS = 100.0
+    private const val MIN_REQUEST_INTERVAL_MS = 20_000L
     private const val MAX_TRACE_AGE_MS = 5 * 60_000L
     private const val MAX_TRACE_POINTS = 8
 
@@ -32,28 +34,45 @@ internal object HereRouteMatchingService {
     private var lastRequestMs = 0L
     private var lastRequestPoint: NavPoint? = null
 
-    /** Returns null when disabled, unavailable, ambiguous, or lacking explicit data. */
-    fun findLimit(location: Location, allowLookup: Boolean = true): Int? {
-        val configuredEndpoint = BuildConfig.JARVIS_AI_ENDPOINT.trim()
-        if (!configuredEndpoint.startsWith("https://") || !configuredEndpoint.endsWith("/jarvis")) return null
+    /**
+     * Record each accepted GPS fix independently of the OSM request cadence. This is
+     * critical: Overpass can take many seconds, so using only its refresh callback
+     * produced too few points and delayed/blocked HERE matching.
+     */
+    fun recordLocation(location: Location) {
         if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
-            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return null
-
+            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
         val now = System.currentTimeMillis()
         val point = NavPoint(location.latitude, location.longitude)
-        val snapshot = synchronized(lock) {
+        synchronized(lock) {
             while (trace.isNotEmpty() && now - trace.peekFirst().timestampMs > MAX_TRACE_AGE_MS) {
                 trace.removeFirst()
             }
             val last = trace.lastOrNull()
             if (last == null ||
-                GpxRouteService.distanceMeters(last.point, point) >= 25.0 ||
-                now - last.timestampMs >= 10_000L) {
+                GpxRouteService.distanceMeters(last.point, point) >= 20.0 ||
+                now - last.timestampMs >= 5_000L) {
                 trace.addLast(TracePoint(point, now))
             }
             while (trace.size > MAX_TRACE_POINTS) trace.removeFirst()
+        }
+    }
 
-            if (!allowLookup) return@synchronized emptyList()
+    /** Returns null when disabled, unavailable, ambiguous, or lacking explicit data. */
+    fun findLimit(location: Location, allowLookup: Boolean = true): Int? {
+        val configuredEndpoint = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+        if (!configuredEndpoint.startsWith("https://") || !configuredEndpoint.endsWith("/jarvis")) {
+            Log.w(TAG, "Speed-limit proxy not configured; check NEXT_NAVI_AI_ENDPOINT in the Android build")
+            return null
+        }
+        if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
+            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return null
+
+        recordLocation(location)
+        if (!allowLookup) return null
+        val now = System.currentTimeMillis()
+        val point = NavPoint(location.latitude, location.longitude)
+        val snapshot = synchronized(lock) {
             val distanceFromLastRequest = lastRequestPoint?.let {
                 GpxRouteService.distanceMeters(it, point)
             } ?: Double.POSITIVE_INFINITY
