@@ -42,8 +42,8 @@ object SpeedLimitService {
     private const val BASE_MATCH_DISTANCE_METERS = 28f
     private const val MAX_MATCH_DISTANCE_WITH_GPS_UNCERTAINTY_METERS = 45f
     private const val MAX_HEADING_DIFFERENCE_DEGREES = 50f
-    private const val CONNECT_TIMEOUT_MS = 8000
-    private const val READ_TIMEOUT_MS = 12000
+    private const val CONNECT_TIMEOUT_MS = 3000
+    private const val READ_TIMEOUT_MS = 5000
 
     /**
      * Finds the closest plausible road segment first, then reads that road's
@@ -83,7 +83,7 @@ object SpeedLimitService {
         require(point.longitude.isFinite() && point.longitude in -180.0..180.0)
         val lat = point.latitude.toString()
         val lon = point.longitude.toString()
-        val query = "[out:json][timeout:12];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
+        val query = "[out:json][timeout:5];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
