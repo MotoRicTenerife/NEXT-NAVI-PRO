@@ -262,7 +262,7 @@ async function handle(req, res) {
         !Number.isFinite(lon) || lon < -180 || lon > 180) {
       return send(res, 400, { error: "Valid lat and lon query parameters are required" });
     }
-    const query = '[out:json][timeout:10];way[highway](around:80,' +
+    const query = '[out:json][timeout:15];way[highway](around:80,' +
       lat + ',' + lon + ');out tags geom;';
     try {
       // Public Overpass mirrors can rate-limit independently. Retry mirrors before
@@ -270,10 +270,9 @@ async function handle(req, res) {
       // Use genuinely independent public instances. kumi.systems now aliases
       // private.coffee, so listing both does not provide meaningful redundancy.
       const endpoints = [
+        "https://overpass-api.de/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter"
+        "https://overpass.private.coffee/api/interpreter"
       ];
       let osm = null;
       const providerErrors = [];
@@ -283,7 +282,7 @@ async function handle(req, res) {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", "Accept": "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3" },
             body: new URLSearchParams({ data: query }),
-            signal: AbortSignal.timeout(5000)
+            signal: AbortSignal.timeout(12000)
           });
           const body = await upstream.text();
           if (!upstream.ok) {
@@ -303,7 +302,7 @@ async function handle(req, res) {
       }
       if (!osm) {
         console.warn("All Overpass speed-limit providers failed", { providerErrors });
-        return send(res, 502, { error: "OSM/Overpass providers unavailable" });
+        return send(res, 502, { error: "OSM/Overpass providers unavailable", providersTried: providerErrors.length });
       }
       const elements = osm.elements;
       const distanceToSegment = (a, b) => {
