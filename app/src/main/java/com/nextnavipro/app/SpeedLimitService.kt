@@ -35,7 +35,8 @@ object SpeedLimitService {
     // Retry a second public instance before reporting the road/limit as unknown.
     private val ENDPOINTS = listOf(
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter"
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
     )
     private const val RADIUS_METERS = 80
     private const val BASE_MATCH_DISTANCE_METERS = 28f
