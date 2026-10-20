@@ -9,10 +9,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Independent server-side OSM fallback when direct Overpass requests fail. */
+/** Server-side OSM lookup; keeps road metadata with the limit for motorway alerts and diagnostics. */
+data class RenderSpeedLimitResult(
+    val speedLimitKmh: Int?,
+    val road: String?,
+    val ref: String?,
+    val highwayType: String?,
+    val distanceMeters: Float?
+)
+
 object RenderSpeedLimitService {
     private const val TAG = "NEXT_NAVI_SPEED_LIMIT"
-    fun findLimit(location: Location): Int? {
+    fun findRoadMatch(location: Location): RenderSpeedLimitResult? {
         val configured = BuildConfig.JARVIS_AI_ENDPOINT.trim()
         if (!configured.startsWith("https://") || !configured.endsWith("/jarvis")) return null
         if (!location.latitude.isFinite() || !location.longitude.isFinite() || location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return null
@@ -32,10 +40,18 @@ object RenderSpeedLimitService {
                 Log.w(TAG, "Render OSM fallback HTTP $status: " + body.take(180))
                 return null
             }
+            val root = JSONObject(body)
             val limit = parseResponse(body)
-            if (limit == null) Log.i(TAG, "Render OSM fallback: no explicit numeric limit")
-            else Log.i(TAG, "Render OSM fallback returned $limit km/h")
-            return limit
+            val result = RenderSpeedLimitResult(
+                speedLimitKmh = limit,
+                road = root.optString("road").takeIf { it.isNotBlank() && it != "null" },
+                ref = root.optString("ref").takeIf { it.isNotBlank() && it != "null" },
+                highwayType = root.optString("highwayType").takeIf { it.isNotBlank() && it != "null" },
+                distanceMeters = root.optDouble("distanceMeters", Double.NaN).takeIf { it.isFinite() && it >= 0.0 }?.toFloat()
+            )
+            if (limit == null) Log.i(TAG, "Render OSM lookup: no explicit numeric limit; road=" + (result.road ?: "unknown"))
+            else Log.i(TAG, "Render OSM lookup returned $limit km/h for " + (result.road ?: "unnamed"))
+            return result
         } catch (error: Exception) {
             Log.w(TAG, "Render OSM fallback request failed", error)
             return null
