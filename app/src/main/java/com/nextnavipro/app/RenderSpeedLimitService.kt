@@ -30,7 +30,7 @@ object RenderSpeedLimitService {
         try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 5000
-            connection.readTimeout = 10000
+            connection.readTimeout = 23000
             connection.setRequestProperty("User-Agent", "NEXT-NAVI-PRO/0.3")
             connection.setRequestProperty("Accept", "application/json")
             val status = connection.responseCode
