@@ -4056,10 +4056,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
                 if (latest != null && latest.distanceTo(queryLocation) > 180f) {
+                    // A slow provider response for a point behind the vehicle must not
+                    // blank the sign indefinitely. Drop it and immediately query the live fix.
                     currentRoadMatch = null
                     currentSpeedLimit = null
+                    lastSpeedLimitQueryLocation = null
+                    lastSpeedLimitQueryMs = 0L
                     updateGpsStatus(latest)
                     updateSpeedLimitDisplay()
+                    refreshSpeedLimitIfNeeded(latest)
                     return@runOnUiThread
                 }
                 currentRoadMatch = match
