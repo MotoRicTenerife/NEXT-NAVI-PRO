@@ -242,6 +242,15 @@ async function handle(req, res) {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
   }
+  if (req.method === "GET" && url.pathname === "/speed-limit/status") {
+    // Safe diagnostic: report configuration state, never reveal credentials.
+    return send(res, 200, {
+      ok: true,
+      osmDiagnostic: true,
+      hereConfigured: Boolean(process.env.HERE_API_KEY),
+      revision: process.env.RENDER_GIT_COMMIT || "unknown"
+    });
+  }
   if (url.pathname === "/speed-limit" && req.method === "GET") {
     // Diagnostic endpoint for a single point. It deliberately uses OSM/Overpass,
     // so it can be tested in a browser without HERE credentials or a GPS trace.
