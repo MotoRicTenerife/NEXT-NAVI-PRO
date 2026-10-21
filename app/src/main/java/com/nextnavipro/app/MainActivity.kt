@@ -827,7 +827,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             if (start > nearest) selected = selected.reversed()
                             manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
                             roadEditorGeometry = emptyList()
-                            Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Premi FINE per confermare.", Toast.LENGTH_LONG).show()
+                            finishSegmentButton?.isEnabled = false
+                            Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Verifico ora il limite per questo tratto…", Toast.LENGTH_LONG).show()
+                            Thread {
+                                val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
+                                runOnUiThread {
+                                    roadEditorProposedLimit = null
+                                    finishSegmentButton?.isEnabled = true
+                                    val proposal = provider.speedLimitKmh?.let { it.toString() + " km/h (" + (provider.source ?: "provider") + ")" } ?: "nessun limite esplicito restituito"
+                                    Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
+                                }
+                            }.start()
                         }
                     }
                     refreshManualSegmentMarkers(); true
@@ -4362,7 +4372,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun finishManualSegmentDraft() {
-        if (manualSegmentDraft.size < 3) { Toast.makeText(this, "Servono almeno 3 punti lungo la strada.", Toast.LENGTH_LONG).show(); return }
+        if (manualSegmentDraft.size < (if (roadEditorRoad != null) 2 else 3)) { Toast.makeText(this, if (roadEditorRoad != null) "Seleziona un tratto valido sulla geometria OSM." else "Servono almeno 3 punti lungo la strada.", Toast.LENGTH_LONG).show(); return }
         val name = EditText(this).apply { hint = "Nome strada (facoltativo)"; setText(roadEditorRoad?.name.orEmpty()) }
         val f = EditText(this).apply { hint = "Limite nel verso selezionato"; inputType = InputType.TYPE_CLASS_NUMBER; roadEditorProposedLimit?.let { setText(it.toString()) } }
         val r = EditText(this).apply { hint = "Limite nel verso opposto (facoltativo)"; inputType = InputType.TYPE_CLASS_NUMBER }
@@ -4424,7 +4434,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         Thread {
             try {
                 val geometry = RenderRoadEditorService.fetchGeometry(road)
-                val provider = RenderRoadEditorService.proposeSpeedLimit(geometry.geometry)
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     roadEditorRoad = road
@@ -4437,8 +4446,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     if (!fullScreenMap) enterMapFullScreen()
                     finishSegmentButton?.visibility = View.VISIBLE
                     val direction = geometry.tags.optString("oneway").takeIf { it.isNotBlank() && it != "null" } ?: "non specificato"
-                    val limitText = provider.speedLimitKmh?.let { it.toString() + " km/h (" + (provider.source ?: "provider") + ")" }
-                        ?: "nessun limite esplicito affidabile restituito dal provider"
+                    val osmLimit = geometry.tags.optString("maxspeed").takeIf { it.isNotBlank() && it != "null" } ?: "non presente"
+                    val limitText = "OSM maxspeed: " + osmLimit + "; il provider verrà interrogato dopo aver selezionato il tratto"
                     AlertDialog.Builder(this).setTitle(geometry.name ?: road.name)
                         .setMessage("Geometria reale OSM caricata (" + geometry.geometry.size + " punti). Limite proposto: " + limitText + ". OSM oneway: " + direction + ". Tocca INIZIO e poi FINE del tratto sulla strada. La geometria viene mostrata sulla mappa.")
                         .setPositiveButton("Seleziona tratto") { _, _ ->
