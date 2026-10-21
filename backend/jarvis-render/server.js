@@ -7,6 +7,7 @@ const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 const ipWindows = new Map();
 const speedLimitIpWindows = new Map();
+const roadSearchIpWindows = new Map();
 
 function clampInt(raw, fallback, min, max) {
   const value = Number.parseInt(raw ?? "", 10);
@@ -46,6 +47,22 @@ function rateLimited(ip, now) {
   if (ipWindows.size > 5000) {
     for (const [key, value] of ipWindows) {
       if (now - value.startedAt >= WINDOW_MS) ipWindows.delete(key);
+    }
+  }
+  return false;
+}
+
+function roadSearchRateLimited(ip, now) {
+  let window = roadSearchIpWindows.get(ip);
+  if (!window || now - window.startedAt >= WINDOW_MS) {
+    window = { startedAt: now, count: 0 };
+    roadSearchIpWindows.set(ip, window);
+  }
+  if (window.count >= 8) return true;
+  window.count += 1;
+  if (roadSearchIpWindows.size > 5000) {
+    for (const [key, value] of roadSearchIpWindows) {
+      if (now - value.startedAt >= WINDOW_MS) roadSearchIpWindows.delete(key);
     }
   }
   return false;
@@ -240,6 +257,86 @@ async function handle(req, res) {
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
   }
+  if (req.method === "GET" && url.pathname === "/roads/search") {
+    const q = (url.searchParams.get("q") || "").trim().replace(/\\s+/g, " ");
+    if (q.length < 2 || q.length > 120) return send(res, 400, { error: "Road query must contain 2–120 characters" });
+    const ip = getClientIp(req);
+    if (roadSearchRateLimited(ip, Date.now())) return send(res, 429, { error: "Too many road-search requests; try again later" });
+    try {
+      const searchUrl = new URL("https://nominatim.openstreetmap.org/search");
+      searchUrl.search = new URLSearchParams({ q, format: "jsonv2", addressdetails: "1", extratags: "1", namedetails: "1", limit: "8", countrycodes: "es" }).toString();
+      const upstream = await fetch(searchUrl, { signal: AbortSignal.timeout(9000), headers: { accept: "application/json", "user-agent": "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)" } });
+      if (!upstream.ok) return send(res, 502, { error: "OpenStreetMap road search unavailable", providerStatus: upstream.status });
+      const results = await upstream.json();
+      if (!Array.isArray(results)) return send(res, 502, { error: "Invalid OpenStreetMap search response" });
+      const roads = results.filter(item => item && item.osm_type === "way" && Number.isFinite(Number(item.osm_id)) && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lon)) && (item.category === "highway" || item.type === "road" || item.addresstype === "road")).map(item => ({
+        osmType: "way",
+        osmId: Number(item.osm_id),
+        name: String(item.name || item.namedetails?.name || item.display_name || "Unnamed road").slice(0, 180),
+        displayName: String(item.display_name || item.name || "").slice(0, 240),
+        latitude: Number(item.lat),
+        longitude: Number(item.lon),
+        boundingBox: Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : null,
+        roadType: item.type || null,
+        address: item.address || {},
+        tags: item.extratags || {}
+      }));
+      return send(res, 200, { ok: true, source: "OpenStreetMap Nominatim", fetchedAt: new Date().toISOString(), roads });
+    } catch (error) {
+      console.warn("OSM road search failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
+      return send(res, 502, { error: "OpenStreetMap road search unavailable" });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/roads/geometry") {
+    const type = url.searchParams.get("type") || "way";
+    const idRaw = url.searchParams.get("id");
+    const osmId = Number(idRaw);
+    if (type !== "way" || !idRaw || !Number.isSafeInteger(osmId) || osmId <= 0) return send(res, 400, { error: "A valid OSM way id is required" });
+    const ip = getClientIp(req);
+    if (roadSearchRateLimited(ip, Date.now())) return send(res, 429, { error: "Too many road geometry requests; try again later" });
+    const query = "[out:json][timeout:12];way(" + osmId + ");out tags geom;";
+    const endpoints = [
+      "https://overpass-api.de/api/interpreter",
+      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter"
+    ];
+    const providerErrors = [];
+    for (const endpoint of endpoints) {
+      try {
+        const upstream = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", accept: "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)" },
+          body: new URLSearchParams({ data: query }),
+          signal: AbortSignal.timeout(11000)
+        });
+        const body = await upstream.text();
+        if (!upstream.ok) { providerErrors.push("HTTP " + upstream.status); continue; }
+        const data = JSON.parse(body);
+        const way = Array.isArray(data.elements) ? data.elements.find(item => item.type === "way" && Number(item.id) === osmId) : null;
+        if (!way || !Array.isArray(way.geometry) || way.geometry.length < 2) { providerErrors.push("way geometry missing"); continue; }
+        const geometry = way.geometry.filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lon)).map(point => ({ latitude: point.lat, longitude: point.lon }));
+        if (geometry.length < 2) { providerErrors.push("invalid way coordinates"); continue; }
+        return send(res, 200, {
+          ok: true, source: "OpenStreetMap/Overpass", fetchedAt: new Date().toISOString(),
+          osmType: "way", osmId, name: way.tags?.name || way.tags?.ref || null,
+          tags: way.tags || {}, geometry,
+          direction: {
+            oneway: way.tags?.oneway || null,
+            junction: way.tags?.junction || null,
+            motorVehicle: way.tags?.motor_vehicle || null,
+            access: way.tags?.access || null,
+            note: "Geometry order is OSM digitization order, not by itself proof of legal travel direction."
+          }
+        });
+      } catch (error) {
+        providerErrors.push(error instanceof Error ? error.name : "provider error");
+      }
+    }
+    console.warn("OSM road geometry unavailable", { osmId, providersTried: providerErrors.length });
+    return send(res, 502, { error: "OpenStreetMap road geometry unavailable", providersTried: providerErrors.length });
+  }
+
   if (req.method === "GET" && url.pathname === "/speed-limit/status") {
     // Safe diagnostic: report configuration state, never reveal credentials.
     return send(res, 200, {
