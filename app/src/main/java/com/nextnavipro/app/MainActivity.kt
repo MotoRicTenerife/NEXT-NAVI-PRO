@@ -4595,6 +4595,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             selectAll()
             contentDescription = "Inserisci il limite di velocità in chilometri orari"
         }
+        val manageSegmentsButton = Button(this).apply {
+            text = "Gestisci limiti manuali per tratto"
+        }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(8), dp(24), dp(4))
@@ -4607,7 +4610,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 textSize = 14f
                 setPadding(0, 0, 0, dp(10))
             })
-            val manageSegmentsButton = Button(this@MainActivity).apply { text = "Gestisci limiti manuali per tratto" }
             addView(manageSegmentsButton, LinearLayout.LayoutParams(-1, dp(48)))
             addView(input, LinearLayout.LayoutParams(-1, dp(56)))
             addView(TextView(this@MainActivity).apply {
