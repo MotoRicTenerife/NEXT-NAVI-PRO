@@ -815,7 +815,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     val nearest = nearestRoadGeometryIndex(picked, roadEditorGeometry)
-                    if (roadEditorStartIndex == null) {
+                    val nearestPoint = roadEditorGeometry[nearest]
+                    val snapDistance = FloatArray(1)
+                    Location.distanceBetween(picked.latitude, picked.longitude, nearestPoint.latitude, nearestPoint.longitude, snapDistance)
+                    if (snapDistance[0] > 40f) {
+                        Toast.makeText(this@MainActivity, "Tocca direttamente la strada evidenziata (entro 40 m). Nessun punto è stato selezionato.", Toast.LENGTH_LONG).show()
+                    } else if (roadEditorStartIndex == null) {
                         roadEditorStartIndex = nearest
                         Toast.makeText(this@MainActivity, "Inizio selezionato sulla geometria OSM. Tocca ora la fine del tratto.", Toast.LENGTH_LONG).show()
                     } else {
@@ -825,7 +830,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         } else {
                             val low = minOf(start, nearest); val high = maxOf(start, nearest)
                             var selected = roadEditorGeometry.subList(low, high + 1).toList()
-                            if (start > nearest) selected = selected.reversed()
+                            val selectedReverse = start > nearest
+                            if (selectedReverse) selected = selected.reversed()
                             manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
                             roadEditorGeometry = emptyList()
                             finishSegmentButton?.isEnabled = false
@@ -833,10 +839,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             Thread {
                                 val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
                                 runOnUiThread {
-                                    roadEditorProposedLimit = provider.speedLimitKmh
-                                    roadEditorProposedSource = provider.source
+                                    val osmTags = roadEditorRoad?.tags
+                                    val osmLimit = parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed:forward"))
+                                        ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
+                                    roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
+                                    roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null }
+                                        ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
                                     finishSegmentButton?.isEnabled = true
-                                    val proposal = provider.speedLimitKmh?.let { it.toString() + " km/h (" + (provider.source ?: "provider") + ")" } ?: "nessun limite esplicito restituito"
+                                    val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
+                                        ?: if (provider.reason == "multiple_speed_limits_in_selected_segment") "limiti diversi nel tratto; suddividilo in segmenti più corti" else "nessun limite esplicito restituito"
                                     Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
                                 }
                             }.start()
@@ -4470,6 +4481,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .setPositiveButton("OK", null).show() }
             }
         }.start()
+    }
+
+    private fun parseExplicitSpeedLimit(raw: String?): Int? {
+        val value = raw?.trim()?.lowercase()?.takeIf { it.isNotBlank() && it != "null" } ?: return null
+        val match = Regex("^(\\d{1,3})(?:\\s*(km/h|kmh|kph|mph|mi/h))?$").matchEntire(value) ?: return null
+        val number = match.groupValues[1].toIntOrNull() ?: return null
+        val unit = match.groupValues[2]
+        val kmh = if (unit == "mph" || unit == "mi/h") kotlin.math.round(number * 1.609344).toInt() else number
+        return kmh.takeIf { it in 5..200 }
     }
 
     private fun nearestRoadGeometryIndex(point: NavPoint, geometry: List<NavPoint>): Int {
