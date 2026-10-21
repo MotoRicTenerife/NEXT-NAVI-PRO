@@ -3894,9 +3894,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
-        // Build HERE's map-matching trace from accepted fixes continuously. Do not
-        // wait for the much slower Overpass speed-limit refresh to collect points.
-        HereRouteMatchingService.recordLocation(smoothed)
         if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
             pendingJarvisWeather = false
             answerJarvisWeather()
@@ -4024,17 +4021,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     null
                 }
             } else null
-            // Keep a short HERE trace in the background; use HERE only when neither OSM
-            // path has returned an explicit numeric limit.
-            val hereLimit = try {
-                HereRouteMatchingService.findLimit(
-                    queryLocation,
-                    allowLookup = true
-                )
-            } catch (error: Exception) {
-                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "HERE route matching failed; keeping OSM result", error)
-                null
-            }
             val renderRoadMatch = renderMatch?.let {
                 RoadMatch(
                     name = it.road,
@@ -4045,23 +4031,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     roadBearing = bearing ?: 0f
                 )
             }
-            // Prefer the server-side map-matched provider (TomTom, HERE fallback)
-            // when it returns an explicit limit. OSM remains the fallback, not the
-            // authority when its nearest-road match conflicts with a trace-matched road.
+            // Prefer TomTom's trace-matched explicit limit; OSM remains the fallback.
             val match = when {
-                hereLimit != null && osmMatch != null -> osmMatch.copy(speedLimitKmh = hereLimit)
-                hereLimit != null && renderRoadMatch != null -> renderRoadMatch.copy(speedLimitKmh = hereLimit)
-                hereLimit != null -> RoadMatch(
-                    name = null,
-                    ref = null,
-                    speedLimitKmh = hereLimit,
-                    highwayType = null,
-                    distanceMeters = 0f,
-                    roadBearing = bearing ?: 0f
-                )
-                osmMatch?.speedLimitKmh != null -> osmMatch
                 renderRoadMatch?.speedLimitKmh != null -> renderRoadMatch
-                else -> osmMatch ?: renderRoadMatch
+                osmMatch?.speedLimitKmh != null -> osmMatch
+                else -> renderRoadMatch ?: osmMatch
             }
             runOnUiThread {
                 speedLimitLookupInFlight = false
