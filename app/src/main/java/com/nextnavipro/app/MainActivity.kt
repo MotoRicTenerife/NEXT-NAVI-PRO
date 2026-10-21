@@ -841,7 +841,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                 var selected = roadEditorGeometry.subList(low, high + 1).toList()
                                 if (selectedReverse) selected = selected.reversed()
                                 manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
-                                roadEditorGeometry = emptyList()
+                                // Keep the complete OSM way visible while choosing/editing the selected sub-segment.
+                                // The selected draft is a slice of the actual road geometry, not a straight-line sketch.
                                 finishSegmentButton?.isEnabled = false
                                 Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Verifico ora il limite per questo tratto…", Toast.LENGTH_LONG).show()
                                 Thread {
@@ -4642,8 +4643,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if(i<points.lastIndex) { val n=points[i+1]; val a=Feature.fromGeometry(Point.fromLngLat((p.longitude+n.longitude)/2,(p.latitude+n.latitude)/2)); a.addNumberProperty("bearing",bearingBetween(p,n)); arrows.add(a) }
             }
         }
-        manualSpeedLimitSegments.forEach { add(it.geometry) }
-        if (roadEditorGeometry.size >= 2) add(roadEditorGeometry)
+        // Keep the map clean during normal navigation: saved speed-limit segments are matched
+        // against GPS in the background and should not remain painted over the live map.
+        // Show the full OSM way and selected segment only while the editor is active.
+        if (manualSegmentEditing && roadEditorGeometry.size >= 2) add(roadEditorGeometry)
         if (manualSegmentEditing && manualSegmentDraft.size >= 2) add(manualSegmentDraft)
         ls.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(lines.toTypedArray()))
         ars.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrows.toTypedArray()))
