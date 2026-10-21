@@ -4365,7 +4365,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun startManualSegmentDraft() {
-        roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null
+        roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
         manualSegmentDraft.clear(); manualSegmentEditing = true; selectionMode = false
         if (!fullScreenMap) enterMapFullScreen()
         finishSegmentButton?.visibility = View.VISIBLE
