@@ -504,6 +504,7 @@ async function handle(req, res) {
           const data = await upstream.json();
           const routeSegments = Array.isArray(data?.route) ? data.route : [];
           let speedLimitKmh = null;
+          const observedLimits = new Set();
           for (const segment of routeSegments) {
             const rawLimits = segment?.properties?.speedLimits;
             const limits = Array.isArray(rawLimits) ? rawLimits : rawLimits ? [rawLimits] : [];
@@ -527,8 +528,19 @@ async function handle(req, res) {
               const rounded = Math.round(kmh);
               return rounded >= 5 && rounded <= 200 ? { kmh: rounded, rawValue: value, unit, type: type || null } : null;
             }).filter(value => value !== null);
-            // The last matched road segment is closest to the newest GPS fix.
+            for (const value of parsed) observedLimits.add(value.kmh);
+            // Never assign one value across a selected section when TomTom reports
+            // different explicit limits along its sampled geometry. The editor can
+            // split the section at the transition instead.
             if (parsed.length) speedLimitKmh = parsed[0];
+          }
+          if (observedLimits.size > 1) {
+            return send(res, 200, {
+              speedLimitKmh: null,
+              source: "TomTom Snap to Roads",
+              reason: "multiple_speed_limits_in_selected_segment",
+              observedLimitsKmh: Array.from(observedLimits).sort((a, b) => a - b)
+            });
           }
           if (speedLimitKmh !== null) {
             return send(res, 200, {
