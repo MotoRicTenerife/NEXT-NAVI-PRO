@@ -223,6 +223,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var manualSegmentEditing = false
     private var roadEditorGeometry: List<NavPoint> = emptyList()
     private var roadEditorRoad: RoadSearchResult? = null
+    private var roadEditorGeometryTags: org.json.JSONObject? = null
     private var roadEditorStartIndex: Int? = null
     private var roadEditorProposedLimit: Int? = null
     private var roadEditorProposedSource: String? = null
@@ -839,7 +840,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             Thread {
                                 val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
                                 runOnUiThread {
-                                    val osmTags = roadEditorRoad?.tags
+                                    val osmTags = roadEditorGeometryTags
                                     val osmLimit = parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed:forward"))
                                         ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
                                     roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
@@ -4376,7 +4377,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun startManualSegmentDraft() {
-        roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
+        roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorGeometryTags = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
         manualSegmentDraft.clear(); manualSegmentEditing = true; selectionMode = false
         if (!fullScreenMap) enterMapFullScreen()
         finishSegmentButton?.visibility = View.VISIBLE
@@ -4450,6 +4451,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     roadEditorRoad = road
+                    roadEditorGeometryTags = geometry.tags
                     roadEditorGeometry = geometry.geometry
                     roadEditorStartIndex = null
                     roadEditorProposedLimit = null
@@ -4470,7 +4472,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             refreshManualSegmentMarkers()
                             Toast.makeText(this, "Tocca l’inizio del tratto, poi la fine. I punti verranno agganciati alla strada OSM.", Toast.LENGTH_LONG).show()
                         }.setNegativeButton("Annulla") { _, _ ->
-                            manualSegmentEditing = false; roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
+                            manualSegmentEditing = false; roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorGeometryTags = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
                             refreshManualSegmentMarkers()
                         }.show()
                     refreshManualSegmentMarkers()
