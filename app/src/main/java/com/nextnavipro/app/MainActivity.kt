@@ -830,28 +830,35 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             Toast.makeText(this@MainActivity, "Scegli una fine diversa dall'inizio.", Toast.LENGTH_SHORT).show()
                         } else {
                             val low = minOf(start, nearest); val high = maxOf(start, nearest)
-                            var selected = roadEditorGeometry.subList(low, high + 1).toList()
                             val selectedReverse = start > nearest
-                            if (selectedReverse) selected = selected.reversed()
-                            manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
-                            roadEditorGeometry = emptyList()
-                            finishSegmentButton?.isEnabled = false
-                            Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Verifico ora il limite per questo tratto…", Toast.LENGTH_LONG).show()
-                            Thread {
-                                val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
-                                runOnUiThread {
-                                    val osmTags = roadEditorGeometryTags
-                                    val osmLimit = parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed:forward"))
-                                        ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
-                                    roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
-                                    roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null }
-                                        ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
-                                    finishSegmentButton?.isEnabled = true
-                                    val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
-                                        ?: if (provider.reason == "multiple_speed_limits_in_selected_segment") "limiti diversi nel tratto; suddividilo in segmenti più corti" else "nessun limite esplicito restituito"
-                                    Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
-                                }
-                            }.start()
+                            val oneWay = roadEditorGeometryTags?.optString("oneway")?.trim()?.lowercase()
+                            val illegalDirection = (oneWay in setOf("yes", "1", "true") && selectedReverse) ||
+                                (oneWay == "-1" && !selectedReverse)
+                            if (illegalDirection) {
+                                Toast.makeText(this@MainActivity, "Il senso scelto contrasta con il tag oneway di OpenStreetMap. Seleziona il verso consentito; se la mappa è errata, non salvare il tratto.", Toast.LENGTH_LONG).show()
+                            } else {
+                                var selected = roadEditorGeometry.subList(low, high + 1).toList()
+                                if (selectedReverse) selected = selected.reversed()
+                                manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
+                                roadEditorGeometry = emptyList()
+                                finishSegmentButton?.isEnabled = false
+                                Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Verifico ora il limite per questo tratto…", Toast.LENGTH_LONG).show()
+                                Thread {
+                                    val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
+                                    runOnUiThread {
+                                        val osmTags = roadEditorGeometryTags
+                                        val osmLimit = parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed"))
+                                            ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
+                                        roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
+                                        roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null }
+                                            ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
+                                        finishSegmentButton?.isEnabled = true
+                                        val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
+                                            ?: if (provider.reason == "multiple_speed_limits_in_selected_segment") "limiti diversi nel tratto; suddividilo in segmenti più corti" else "nessun limite esplicito restituito"
+                                        Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
+                                    }
+                                }.start()
+                            }
                         }
                     }
                     refreshManualSegmentMarkers(); true
