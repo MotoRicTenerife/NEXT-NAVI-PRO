@@ -4354,8 +4354,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showManualSpeedLimitSegmentsMenu() {
         val labels = mutableListOf("⌕ Cerca strada online (OSM + limite provider)", "＋ Crea tratto manualmente sulla mappa")
         labels += manualSpeedLimitSegments.mapIndexed { i, s -> (s.roadName ?: "Tratto " + (i + 1)) + " • → " + (s.forwardLimitKmh ?: "—") + " / ← " + (s.reverseLimitKmh ?: "—") + " km/h" }
-        AlertDialog.Builder(this).setTitle("Limiti manuali per tratto")
-            .setMessage("Zooma e tocca almeno 3 punti lungo la strada. Le frecce viola seguono l'ordine dei tocchi. In questa prima versione la linea è tracciata manualmente e non è ancora agganciata automaticamente alla geometria OSM.")
+        AlertDialog.Builder(this).setTitle("Limiti stradali per tratto")
+            .setMessage("Puoi cercare una strada online: la geometria OSM viene evidenziata e il limite del provider viene cercato sul tratto selezionato. Controlla sempre strada, carreggiata e senso di marcia prima di salvare. Se la ricerca online non è disponibile, puoi ancora tracciare manualmente.")
             .setItems(labels.toTypedArray()) { _, i ->
                 when { i == 0 -> searchRoadForEditor(); i == 1 -> startManualSegmentDraft(); else -> editManualSegment(i - 2) }
             }
