@@ -392,7 +392,7 @@ async function handle(req, res) {
           key: tomtomApiKey,
           fields,
           vehicleType: "PassengerCar",
-          measurementSystem: "auto"
+          measurementSystem: "metric"
         });
         const tomtomPoints = points.map(point => ({
           type: "Feature",
@@ -419,16 +419,32 @@ async function handle(req, res) {
               if (!Number.isFinite(value) || value <= 0) return null;
               const type = String(limit?.type || "").toLowerCase();
               if (type && type !== "maximum") return null;
-              const unit = String(limit?.unit || "kmph").toLowerCase();
-              const kmh = unit.includes("mph") || unit === "m" ? value * 1.609344 : value;
+              // Request metric explicitly and never guess an unknown/missing unit.
+              // A silent default here can turn a provider value into a plausible but
+              // incorrect sign (for example, interpreting mph as km/h).
+              const unit = String(limit?.unit || "").trim().toLowerCase();
+              let kmh;
+              if (["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)) {
+                kmh = value;
+              } else if (["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit)) {
+                kmh = value * 1.609344;
+              } else {
+                return null;
+              }
               const rounded = Math.round(kmh);
-              return rounded >= 5 && rounded <= 200 ? rounded : null;
+              return rounded >= 5 && rounded <= 200 ? { kmh: rounded, rawValue: value, unit, type: type || null } : null;
             }).filter(value => value !== null);
             // The last matched road segment is closest to the newest GPS fix.
             if (parsed.length) speedLimitKmh = parsed[0];
           }
           if (speedLimitKmh !== null) {
-            return send(res, 200, { speedLimitKmh, source: "TomTom Snap to Roads" });
+            return send(res, 200, {
+              speedLimitKmh: speedLimitKmh.kmh,
+              source: "TomTom Snap to Roads",
+              providerValue: speedLimitKmh.rawValue,
+              providerUnit: speedLimitKmh.unit,
+              providerType: speedLimitKmh.type
+            });
           }
           console.warn("TomTom returned no explicit speed limit for matched route");
         } else {
