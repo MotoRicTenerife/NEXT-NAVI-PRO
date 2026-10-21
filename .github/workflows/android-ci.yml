@@ -142,7 +142,6 @@ jobs:
                           raise RuntimeError("Render speed-limit diagnostic endpoint is missing or invalid")
                       print("Render speed-limit provider status:", {
                           "revision": provider_status.get("revision"),
-                          "hereConfigured": provider_status.get("hereConfigured"),
                           "osmDiagnostic": provider_status.get("osmDiagnostic")
                       })
                       test_url = endpoint[:-len("/jarvis")] + "/speed-limit?" + urllib.parse.urlencode({
