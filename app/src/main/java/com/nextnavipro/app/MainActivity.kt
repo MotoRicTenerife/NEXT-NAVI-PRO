@@ -4470,8 +4470,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun showManualSpeedLimitSegmentsMenu() {
         val labels = mutableListOf("⌕ Cerca strada online (OSM + limite provider)", "＋ Crea tratto manualmente sulla mappa")
         labels += manualSpeedLimitSegments.mapIndexed { i, s -> (s.roadName ?: "Tratto " + (i + 1)) + " • → " + (s.forwardLimitKmh ?: "—") + " / ← " + (s.reverseLimitKmh ?: "—") + " km/h" }
+        // Android AlertDialog cannot reliably display setMessage() and setItems() together.
+        // Keeping both caused the explanatory message to replace the actionable editor choices.
         AlertDialog.Builder(this).setTitle("Limiti stradali per tratto")
-            .setMessage("Puoi cercare una strada online: la geometria OSM viene evidenziata e il limite del provider viene cercato sul tratto selezionato. Controlla sempre strada, carreggiata e senso di marcia prima di salvare. Se la ricerca online non è disponibile, puoi ancora tracciare manualmente.")
             .setItems(labels.toTypedArray()) { _, i ->
                 when { i == 0 -> searchRoadForEditor(); i == 1 -> startManualSegmentDraft(); else -> editManualSegment(i - 2) }
             }
