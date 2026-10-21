@@ -4447,6 +4447,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     manualSegmentEditing = true
                     selectionMode = false
                     if (!fullScreenMap) enterMapFullScreen()
+                    map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(road.latitude, road.longitude), 15.5))
                     finishSegmentButton?.visibility = View.VISIBLE
                     val direction = geometry.tags.optString("oneway").takeIf { it.isNotBlank() && it != "null" } ?: "non specificato"
                     val osmLimit = geometry.tags.optString("maxspeed").takeIf { it.isNotBlank() && it != "null" } ?: "non presente"
