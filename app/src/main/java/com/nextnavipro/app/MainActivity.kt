@@ -847,10 +847,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                     val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
                                     runOnUiThread {
                                         val osmTags = roadEditorGeometryTags
-                                        val osmLimit = parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed"))
-                                            ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
+                                        val osmLimit = if (provider.reason == "multiple_speed_limits_in_selected_segment") null else
+                                            parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed:forward"))
+                                                ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
                                         roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
-                                        roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null }
+                                        roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null || provider.reason == "multiple_speed_limits_in_selected_segment" }
                                             ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
                                         finishSegmentButton?.isEnabled = true
                                         val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
