@@ -857,7 +857,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                             ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
                                         finishSegmentButton?.isEnabled = true
                                         val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
-                                            ?: if (provider.reason == "multiple_speed_limits_in_selected_segment") "limiti diversi nel tratto; suddividilo in segmenti più corti" else "nessun limite esplicito restituito"
+                                            ?: when (provider.reason) {
+                                                "multiple_speed_limits_in_selected_segment" -> "limiti diversi nel tratto; suddividilo in segmenti più corti"
+                                                "backend_not_configured" -> "backend Render non configurato"
+                                                "provider_http_503" -> "TomTom non configurato sul server"
+                                                "provider_http_401", "provider_http_403" -> "TomTom ha rifiutato la chiave o i permessi"
+                                                "provider_http_429" -> "limite richieste/quota TomTom raggiunto"
+                                                "tomtom_auth_or_permission_error" -> "TomTom: chiave o permessi non validi"
+                                                "tomtom_quota_or_rate_limit" -> "TomTom: quota o frequenza richieste superata"
+                                                "tomtom_timeout" -> "TomTom non ha risposto in tempo"
+                                                "tomtom_network_error" -> "errore di rete verso TomTom"
+                                                "no_explicit_speed_limit" -> "provider interrogato, nessun limite esplicito restituito"
+                                                else -> "limite non disponibile (" + (provider.reason ?: "motivo sconosciuto") + ")"
+                                            }
                                         Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
                                     }
                                 }.start()

@@ -611,6 +611,8 @@ async function handle(req, res) {
     }
 
     // Prefer TomTom Snap to Roads. Keep the API key exclusively on the server.
+    // Preserve failure categories for diagnostics; never turn provider errors into a fake limit.
+    let tomtomFailureReason = "no_explicit_speed_limit";
     if (tomtomApiKey) {
       try {
         const fields = "{route{properties{id,speedLimits{value,unit,type}}}}";
@@ -686,16 +688,21 @@ async function handle(req, res) {
           }
           console.warn("TomTom returned no explicit speed limit for matched route");
         } else {
+          tomtomFailureReason = upstream.status === 401 || upstream.status === 403
+            ? "tomtom_auth_or_permission_error"
+            : upstream.status === 429 ? "tomtom_quota_or_rate_limit"
+            : "tomtom_http_" + upstream.status;
           console.warn("TomTom Snap to Roads failed", { status: upstream.status });
         }
       } catch (error) {
+        tomtomFailureReason = error?.name === "TimeoutError" ? "tomtom_timeout" : "tomtom_network_error";
         console.warn("TomTom Snap to Roads request failed", {
           errorType: error instanceof Error ? error.name : "UnknownError"
         });
       }
     }
 
-    return send(res, 200, { speedLimitKmh: null, source: "TomTom Snap to Roads", reason: "no_explicit_speed_limit" });
+    return send(res, 200, { speedLimitKmh: null, source: "TomTom Snap to Roads", reason: tomtomFailureReason });
   }
   if (url.pathname !== "/jarvis") return send(res, 404, { error: "Not found" });
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
