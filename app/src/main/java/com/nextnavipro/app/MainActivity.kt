@@ -381,6 +381,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         manualSpeedLimit = preferences.getInt("manual_speed_limit_kmh", -1).takeIf { it in 5..200 }
         currentSpeedLimit = manualSpeedLimit
         runCatching { val a = org.json.JSONArray(preferences.getString("manual_speed_limit_segments_json", "[]") ?: "[]"); for (i in 0 until a.length()) manualSpeedLimitSegments.add(ManualSpeedLimitSegment.fromJson(a.getJSONObject(i))) }.onFailure { android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Manual segments unreadable", it) }
+        syncManualSegmentsWithCloud()
         // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
         themeMode = "auto"
         mapLayer = preferences.getString(PREF_MAP_LAYER, "standard") ?: "standard"
@@ -4394,6 +4395,76 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val a = org.json.JSONArray(); manualSpeedLimitSegments.forEach { a.put(it.toJson()) }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("manual_speed_limit_segments_json", a.toString()).apply()
         refreshManualSegmentMarkers()
+        // Local save is immediate; cloud synchronization runs off the UI thread.
+        manualSpeedLimitSegments.toList().forEach { syncManualSegmentToCloud(it) }
+    }
+
+    private fun syncManualSegmentToCloud(segment: ManualSpeedLimitSegment) {
+        Thread {
+            try {
+                CloudSpeedLimitService.upsert(segment)
+                android.util.Log.i("NEXT_NAVI_CLOUD", "Segment synced: " + segment.id)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_CLOUD", "Segment remains local; cloud sync failed", error)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) Toast.makeText(this, "Tratto salvato sul telefono; sincronizzazione cloud non riuscita. Riproverò al prossimo avvio.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun deleteManualSegmentFromCloud(id: String) {
+        Thread {
+            try { CloudSpeedLimitService.delete(id) }
+            catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_CLOUD", "Cloud delete failed for " + id, error)
+                val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val pending = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toMutableSet() ?: mutableSetOf()
+                pending.add(id)
+                prefs.edit().putStringSet("manual_segments_pending_cloud_delete", pending).apply()
+            }
+        }.start()
+    }
+
+    private fun syncManualSegmentsWithCloud() {
+        Thread {
+            try {
+                val cloudSegments = CloudSpeedLimitService.list()
+                val cloudById = cloudSegments.associateBy { it.id }
+                val localSnapshot = manualSpeedLimitSegments.toList()
+                val merged = LinkedHashMap<String, ManualSpeedLimitSegment>()
+                cloudSegments.forEach { merged[it.id] = it }
+                localSnapshot.forEach { local ->
+                    val cloud = cloudById[local.id]
+                    if (cloud == null || local.updatedAtEpochMs > cloud.updatedAtEpochMs) {
+                        merged[local.id] = local
+                        CloudSpeedLimitService.upsert(local)
+                    }
+                }
+                val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val pendingDeletes = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toSet().orEmpty()
+                pendingDeletes.forEach { id ->
+                    try {
+                        CloudSpeedLimitService.delete(id)
+                        val remaining = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toMutableSet() ?: mutableSetOf()
+                        remaining.remove(id)
+                        prefs.edit().putStringSet("manual_segments_pending_cloud_delete", remaining).apply()
+                    } catch (_: Exception) { }
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    manualSpeedLimitSegments.clear()
+                    manualSpeedLimitSegments.addAll(merged.values.sortedBy { it.roadName.orEmpty().lowercase(Locale.ROOT) })
+                    val a = org.json.JSONArray(); manualSpeedLimitSegments.forEach { a.put(it.toJson()) }
+                    prefs.edit().putString("manual_speed_limit_segments_json", a.toString()).apply()
+                    refreshManualSegmentMarkers()
+                    currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
+                    Toast.makeText(this, "Archivio cloud sincronizzato: " + manualSpeedLimitSegments.size + " tratti.", Toast.LENGTH_SHORT).show()
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_CLOUD", "Cloud archive unavailable; keeping local archive", error)
+            }
+        }.start()
     }
 
     private fun showManualSpeedLimitSegmentsMenu() {
@@ -4541,7 +4612,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val r=EditText(this).apply { hint="Limite nel verso opposto"; inputType=InputType.TYPE_CLASS_NUMBER; setText(s.reverseLimitKmh?.toString().orEmpty()) }
         AlertDialog.Builder(this).setTitle(s.roadName ?: "Tratto manuale")
             .setItems(arrayOf("Modifica limiti", "Elimina tratto")) { _, which ->
-                if (which==1) AlertDialog.Builder(this).setTitle("Eliminare il tratto?").setPositiveButton("Elimina") { _, _ -> manualSpeedLimitSegments.removeAt(index); persistManualSpeedLimitSegments(); currentLocation?.let { refreshSpeedLimitIfNeeded(it) } }.setNegativeButton("Annulla",null).show()
+                if (which==1) AlertDialog.Builder(this).setTitle("Eliminare il tratto?").setPositiveButton("Elimina") { _, _ -> deleteManualSegmentFromCloud(s.id); manualSpeedLimitSegments.removeAt(index); persistManualSpeedLimitSegments(); currentLocation?.let { refreshSpeedLimitIfNeeded(it) } }.setNegativeButton("Annulla",null).show()
                 else {
                     val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(4)); addView(f); addView(r) }
                     val d=AlertDialog.Builder(this).setTitle("Modifica limiti").setView(box).setPositiveButton("Salva",null).setNegativeButton("Annulla",null).create()

@@ -246,6 +246,137 @@ async function readJson(req) {
   }
 }
 
+
+/* Firestore-backed shared archive. Credentials stay on Render; never ship them to Android. */
+let firestoreAccessToken = null;
+let firestoreTokenExpiresAt = 0;
+function base64url(value) {
+  return Buffer.from(value).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+function firestoreConfig() {
+  let account;
+  try { account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || ""); } catch { account = null; }
+  const projectId = (process.env.FIREBASE_PROJECT_ID || account?.project_id || "").trim();
+  if (!projectId || !account?.client_email || !account?.private_key) return null;
+  return { projectId, account };
+}
+async function firestoreToken(config) {
+  if (firestoreAccessToken && Date.now() < firestoreTokenExpiresAt - 60000) return firestoreAccessToken;
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64url(JSON.stringify({
+    iss: config.account.client_email, scope: "https://www.googleapis.com/auth/datastore",
+    aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600
+  }));
+  const unsigned = header + "." + claims;
+  const signer = (await import("node:crypto")).createSign("RSA-SHA256");
+  signer.update(unsigned); signer.end();
+  const assertion = unsigned + "." + signer.sign(config.account.private_key, "base64url");
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) throw new Error("Google OAuth token HTTP " + response.status);
+  const body = await response.json();
+  if (typeof body.access_token !== "string" || !Number.isFinite(body.expires_in)) throw new Error("Invalid Google OAuth token response");
+  firestoreAccessToken = body.access_token;
+  firestoreTokenExpiresAt = Date.now() + body.expires_in * 1000;
+  return firestoreAccessToken;
+}
+async function firestoreRequest(path, options = {}) {
+  const config = firestoreConfig();
+  if (!config) {
+    const error = new Error("Firestore is not configured on Render");
+    error.statusCode = 503;
+    throw error;
+  }
+  const token = await firestoreToken(config);
+  const url = "https://firestore.googleapis.com/v1/projects/" + encodeURIComponent(config.projectId) +
+    "/databases/(default)/documents" + path;
+  const response = await fetch(url, {
+    ...options,
+    headers: { authorization: "Bearer " + token, accept: "application/json", ...(options.headers || {}) },
+    signal: options.signal || AbortSignal.timeout(12000)
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const error = new Error("Firestore HTTP " + response.status + (detail ? ": " + detail.slice(0, 300) : ""));
+    error.statusCode = response.status === 404 ? 404 : response.status >= 500 ? 502 : 400;
+    throw error;
+  }
+  if (response.status === 204) return {};
+  return response.json().catch(() => ({}));
+}
+function validateCloudSegment(segment) {
+  if (!segment || typeof segment !== "object" || Array.isArray(segment)) return false;
+  if (typeof segment.id !== "string" || !/^[A-Za-z0-9_-]{1,120}$/.test(segment.id)) return false;
+  if (!Array.isArray(segment.geometry) || segment.geometry.length < 2 || segment.geometry.length > 10000) return false;
+  if (!segment.geometry.every(p => p && Number.isFinite(p.latitude) && p.latitude >= -90 && p.latitude <= 90 &&
+    Number.isFinite(p.longitude) && p.longitude >= -180 && p.longitude <= 180)) return false;
+  const validLimit = v => v === null || (Number.isInteger(v) && v >= 5 && v <= 200);
+  if (!validLimit(segment.forwardLimitKmh) || !validLimit(segment.reverseLimitKmh) ||
+      (segment.forwardLimitKmh == null && segment.reverseLimitKmh == null)) return false;
+  if (segment.status && !["PENDING", "CONFIRMED", "CONTESTED"].includes(segment.status)) return false;
+  return true;
+}
+function firestoreDocumentToSegment(doc) {
+  try {
+    const raw = doc?.fields?.payload?.stringValue;
+    const segment = JSON.parse(raw || "null");
+    return validateCloudSegment(segment) ? segment : null;
+  } catch { return null; }
+}
+async function handleCloudSpeedSegments(req, res, url) {
+  const ip = getClientIp(req);
+  if (speedLimitRateLimited(ip, Date.now())) return send(res, 429, { error: "Too many speed-limit archive requests; try again later" });
+  try {
+    if (req.method === "GET" && url.pathname === "/speed-limit-segments") {
+      const segments = [];
+      let pageToken = "";
+      do {
+        const query = new URLSearchParams({ pageSize: "1000" });
+        if (pageToken) query.set("pageToken", pageToken);
+        const result = await firestoreRequest("/speedLimitSegments?" + query.toString());
+        for (const doc of result.documents || []) {
+          const segment = firestoreDocumentToSegment(doc);
+          if (segment) segments.push(segment);
+        }
+        pageToken = result.nextPageToken || "";
+      } while (pageToken && segments.length < 20000);
+      return send(res, 200, { ok: true, source: "Firebase Firestore", count: segments.length, segments });
+    }
+    if (req.method === "POST" && url.pathname === "/speed-limit-segments/upsert") {
+      let input;
+      try { input = await readJson(req); } catch (error) { return send(res, error.statusCode || 400, { error: "Invalid segment payload" }); }
+      const segment = input?.segment;
+      if (!validateCloudSegment(segment)) return send(res, 400, { error: "Invalid segment schema or coordinates" });
+      const id = segment.id;
+      const payload = JSON.stringify(segment);
+      const fields = {
+        payload: { stringValue: payload },
+        updatedAtEpochMs: { integerValue: String(Number.isSafeInteger(segment.updatedAtEpochMs) ? segment.updatedAtEpochMs : Date.now()) },
+        revision: { integerValue: String(Number.isSafeInteger(segment.revision) && segment.revision > 0 ? segment.revision : 1) }
+      };
+      const mask = new URLSearchParams({ "updateMask.fieldPaths": "payload", "updateMask.fieldPaths": "updatedAtEpochMs" });
+      const endpoint = "/speedLimitSegments/" + encodeURIComponent(id) + "?updateMask.fieldPaths=payload&updateMask.fieldPaths=updatedAtEpochMs&updateMask.fieldPaths=revision";
+      const saved = await firestoreRequest(endpoint, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ fields }) });
+      return send(res, 200, { ok: true, source: "Firebase Firestore", id, updatedAtEpochMs: segment.updatedAtEpochMs, name: saved.name || null });
+    }
+    if (req.method === "DELETE" && url.pathname === "/speed-limit-segments") {
+      const id = (url.searchParams.get("id") || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return send(res, 400, { error: "Valid segment id required" });
+      await firestoreRequest("/speedLimitSegments/" + encodeURIComponent(id), { method: "DELETE" });
+      return send(res, 200, { ok: true, deleted: true, id });
+    }
+    return send(res, 405, { error: "Method not allowed" });
+  } catch (error) {
+    const status = error.statusCode || 502;
+    console.warn("Firestore speed-limit archive request failed", { method: req.method, status, errorType: error instanceof Error ? error.name : "UnknownError" });
+    return send(res, status, { error: status === 503 ? "Firestore archive is not configured on Render" : status === 404 ? "Segment not found in cloud archive" : "Cloud speed-limit archive unavailable" });
+  }
+}
+
 async function handle(req, res) {
   let url;
   try {
@@ -253,6 +384,8 @@ async function handle(req, res) {
   } catch {
     return send(res, 400, { error: "Invalid URL" });
   }
+
+  if (url.pathname === "/speed-limit-segments" || url.pathname === "/speed-limit-segments/upsert") { return handleCloudSpeedSegments(req, res, url); }
 
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
