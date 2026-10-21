@@ -213,6 +213,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryMs = 0L
     private var speedLimitLookupInFlight = false
     private var currentSpeedLimit: Int? = null
+    // User-confirmed limit override. Persisted independently from automatic road lookup.
+    private var manualSpeedLimit: Int? = null
     private var currentRoadMatch: RoadMatch? = null
     private var lastDisplayedSpeed: Int? = null
     private var speedAlertActive = false
@@ -363,6 +365,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
         motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
+        manualSpeedLimit = preferences.getInt("manual_speed_limit_kmh", -1).takeIf { it in 5..200 }
+        currentSpeedLimit = manualSpeedLimit
         // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
         themeMode = "auto"
         mapLayer = preferences.getString(PREF_MAP_LAYER, "standard") ?: "standard"
@@ -537,6 +541,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(Color.BLACK)
             applySpeedLimitSignStyle(this)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Limite di velocità. Tocca per impostare o aggiornare manualmente"
+            setOnClickListener { showSpeedLimitOptions() }
         }
         infoColumn.addView(limitValue, params(dp(58), dp(58)))
         gpsText = TextView(this).apply {
@@ -3968,6 +3976,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun refreshSpeedLimitIfNeeded(location: Location) {
+        // A manual value takes precedence over all providers until the rider explicitly
+        // switches back to automatic mode. Never let a late network response replace it.
+        manualSpeedLimit?.let { manual ->
+            currentSpeedLimit = manual
+            updateSpeedLimitDisplay()
+            return
+        }
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
         // Refresh often enough to keep up with the vehicle. The previous 20 s / 450 m
@@ -4055,7 +4070,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@runOnUiThread
                 }
                 currentRoadMatch = match
-                currentSpeedLimit = match?.speedLimitKmh
+                currentSpeedLimit = manualSpeedLimit ?: match?.speedLimitKmh
                 if (match == null) {
                     android.util.Log.i(
                         "NEXT_NAVI_SPEED_LIMIT",
@@ -4246,6 +4261,94 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton("Chiudi", null).show()
     }
 
+    private fun showSpeedLimitOptions() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "Limite in km/h (5–200)"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+            setText(manualSpeedLimit?.toString() ?: currentSpeedLimit?.toString().orEmpty())
+            selectAll()
+            contentDescription = "Inserisci il limite di velocità in chilometri orari"
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+            addView(TextView(this@MainActivity).apply {
+                text = if (manualSpeedLimit != null) {
+                    "Limite manuale attivo. Il valore resta salvato anche dopo la chiusura dell'app."
+                } else {
+                    "Imposta un limite noto per la strada attuale. Non viene verificato automaticamente."
+                }
+                textSize = 14f
+                setPadding(0, 0, 0, dp(10))
+            })
+            addView(input, LinearLayout.LayoutParams(-1, dp(56)))
+            addView(TextView(this@MainActivity).apply {
+                text = "Usa solo un limite verificato sulla segnaletica stradale."
+                textSize = 12f
+                setPadding(0, dp(8), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Limite di velocità")
+            .setView(content)
+            .setPositiveButton("Salva limite", null)
+            .setNeutralButton(if (manualSpeedLimit != null) "Modalità automatica" else "Riprova ricerca", null)
+            .setNegativeButton("Annulla", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val value = input.text.toString().trim().toIntOrNull()
+                if (value == null || value !in 5..200) {
+                    input.error = "Inserisci un valore da 5 a 200 km/h"
+                    return@setOnClickListener
+                }
+                manualSpeedLimit = value
+                currentSpeedLimit = value
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putInt("manual_speed_limit_kmh", value)
+                    .apply()
+                lastSpeedLimitQueryLocation = null
+                lastSpeedLimitQueryMs = 0L
+                speedingVoiceActive = false
+                updateSpeedLimitDisplay()
+                Toast.makeText(this, "Limite manuale impostato: $value km/h", Toast.LENGTH_LONG).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                if (manualSpeedLimit != null) {
+                    manualSpeedLimit = null
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .remove("manual_speed_limit_kmh")
+                        .apply()
+                    currentSpeedLimit = null
+                    currentRoadMatch = null
+                    lastSpeedLimitQueryLocation = null
+                    lastSpeedLimitQueryMs = 0L
+                    speedingVoiceActive = false
+                    updateSpeedLimitDisplay()
+                    val location = currentLocation
+                    if (location != null) refreshSpeedLimitIfNeeded(location)
+                    Toast.makeText(this, "Modalità automatica riattivata", Toast.LENGTH_SHORT).show()
+                } else {
+                    val location = currentLocation
+                    if (location == null) {
+                        Toast.makeText(this, "In attesa della posizione GPS", Toast.LENGTH_SHORT).show()
+                    } else {
+                        lastSpeedLimitQueryLocation = null
+                        lastSpeedLimitQueryMs = 0L
+                        refreshSpeedLimitIfNeeded(location)
+                        Toast.makeText(this, "Nuova ricerca del limite avviata", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
     private fun updateSpeedLimitDisplay() {
         val location = currentLocation
         val limit = currentSpeedLimit
@@ -4269,6 +4372,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         if (!::limitValue.isInitialized) return
         limitValue.text = limit?.toString() ?: "—"
+        limitValue.contentDescription = when {
+            manualSpeedLimit != null -> "Limite manuale $limit chilometri orari. Tocca per modificarlo o riattivare l'aggiornamento automatico"
+            limit != null -> "Limite automatico $limit chilometri orari. Tocca per impostarlo manualmente o aggiornare"
+            else -> "Limite di velocità non disponibile. Tocca per impostarlo manualmente o riprovare la ricerca"
+        }
         // The speed-limit digits stay black inside the white/red regulatory sign.
         limitValue.setTextColor(Color.BLACK)
     }
