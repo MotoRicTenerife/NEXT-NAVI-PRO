@@ -18,7 +18,9 @@ data class ManualSpeedLimitSegment(
     val reverseLimitKmh: Int?,
     val updatedAtEpochMs: Long,
     val revision: Long = 1L,
-    val status: Status = Status.CONFIRMED
+    val status: Status = Status.CONFIRMED,
+    val providerSpeedLimitKmh: Int? = null,
+    val providerSource: String? = null
 ) {
     enum class Status { PENDING, CONFIRMED, CONTESTED }
 
@@ -28,6 +30,7 @@ data class ManualSpeedLimitSegment(
         require(geometry.all { it.latitude.isFinite() && it.latitude in -90.0..90.0 && it.longitude.isFinite() && it.longitude in -180.0..180.0 })
         require(forwardLimitKmh == null || forwardLimitKmh in 5..200)
         require(reverseLimitKmh == null || reverseLimitKmh in 5..200)
+        require(providerSpeedLimitKmh == null || providerSpeedLimitKmh in 5..200)
         require(forwardLimitKmh != null || reverseLimitKmh != null)
         require(revision >= 1)
     }
@@ -61,12 +64,14 @@ data class ManualSpeedLimitSegment(
         put("updatedAtEpochMs", updatedAtEpochMs)
         put("revision", revision)
         put("status", status.name)
-        put("schemaVersion", 1)
+        put("providerSpeedLimitKmh", providerSpeedLimitKmh ?: JSONObject.NULL)
+        put("providerSource", providerSource ?: JSONObject.NULL)
+        put("schemaVersion", 2)
     }
 
     companion object {
         fun fromJson(json: JSONObject): ManualSpeedLimitSegment {
-            require(json.optInt("schemaVersion", 0) == 1) { "Unsupported manual segment schema" }
+            require(json.optInt("schemaVersion", 0) in 1..2) { "Unsupported manual segment schema" }
             val points = json.optJSONArray("geometry") ?: throw IllegalArgumentException("Missing geometry")
             val geometry = (0 until points.length()).map { index ->
                 val point = points.getJSONObject(index)
@@ -85,7 +90,9 @@ data class ManualSpeedLimitSegment(
                 reverseLimitKmh = nullableLimit("reverseLimitKmh"),
                 updatedAtEpochMs = json.optLong("updatedAtEpochMs", 0L),
                 revision = json.optLong("revision", 1L),
-                status = status
+                status = status,
+                providerSpeedLimitKmh = if (json.isNull("providerSpeedLimitKmh") || !json.has("providerSpeedLimitKmh")) null else json.optInt("providerSpeedLimitKmh", -1).takeIf { it in 5..200 } ?: throw IllegalArgumentException("Invalid providerSpeedLimitKmh"),
+                providerSource = json.optString("providerSource").takeIf { it.isNotBlank() && it != "null" }
             )
         }
 
