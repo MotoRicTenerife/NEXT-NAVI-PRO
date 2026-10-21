@@ -4419,7 +4419,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_CLOUD", "Cloud delete failed for " + id, error)
                 val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-                val pending = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toMutableSet() ?: mutableSetOf()
+                val pending = prefs.getStringSet("manual_segments_pending_cloud_delete", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
                 pending.add(id)
                 prefs.edit().putStringSet("manual_segments_pending_cloud_delete", pending).apply()
             }
@@ -4442,11 +4442,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                 }
                 val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-                val pendingDeletes = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toSet().orEmpty()
+                val pendingDeletes = prefs.getStringSet("manual_segments_pending_cloud_delete", mutableSetOf())?.toSet().orEmpty()
                 pendingDeletes.forEach { id ->
                     try {
                         CloudSpeedLimitService.delete(id)
-                        val remaining = prefs.getStringSet("manual_segments_pending_cloud_delete", emptySet())?.toMutableSet() ?: mutableSetOf()
+                        val remaining = prefs.getStringSet("manual_segments_pending_cloud_delete", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
                         remaining.remove(id)
                         prefs.edit().putStringSet("manual_segments_pending_cloud_delete", remaining).apply()
                     } catch (_: Exception) { }
