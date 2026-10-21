@@ -12,8 +12,6 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
-      - key: HERE_API_KEY
-        sync: false
       - key: TOMTOM_API_KEY
         sync: false
       - key: GEMINI_MODEL
