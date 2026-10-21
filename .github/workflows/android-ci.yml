@@ -163,6 +163,34 @@ jobs:
                           failures.append("Render speed-limit endpoint: " + str(error))
 
                   try:
+                      base_url = endpoint[:-len("/jarvis")]
+                      road_url = base_url + "/roads/search?" + urllib.parse.urlencode({"q":"TF-82"})
+                      status, road_search = get_json(road_url, 25)
+                      roads = road_search.get("roads", []) if isinstance(road_search, dict) else []
+                      if status != 200 or road_search.get("ok") is not True or not isinstance(roads, list):
+                          raise RuntimeError("Render OSM road-search endpoint returned an invalid payload: " + repr(road_search)[:240])
+                      if not roads:
+                          raise RuntimeError("Render OSM road search returned no TF-82 candidates")
+                      selected_road = roads[0]
+                      geometry_url = base_url + "/roads/geometry?" + urllib.parse.urlencode({
+                          "type": selected_road.get("osmType", "way"), "id": str(selected_road.get("osmId", ""))
+                      })
+                      status, road_geometry = get_json(geometry_url, 25)
+                      points = road_geometry.get("geometry", []) if isinstance(road_geometry, dict) else []
+                      if status != 200 or road_geometry.get("ok") is not True or not isinstance(points, list) or len(points) < 2:
+                          raise RuntimeError("Render OSM road-geometry endpoint returned an invalid payload: " + repr(road_geometry)[:240])
+                      print("Render road editor OSM search/geometry PASSED:", {
+                          "road": selected_road.get("name"), "osmId": selected_road.get("osmId"),
+                          "geometryPoints": len(points), "source": road_geometry.get("source")
+                      })
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Render road editor OSM endpoint HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Render road editor OSM search/geometry: " + str(error))
+
+                  try:
                       status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
                       reply = result.get("reply", "")
                       if status != 200 or not reply.strip():
