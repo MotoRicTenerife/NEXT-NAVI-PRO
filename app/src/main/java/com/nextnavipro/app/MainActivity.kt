@@ -4028,6 +4028,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val b = location.bearing.takeIf { location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f }
             val match = ManualSpeedLimitMatcher.find(manualSpeedLimitSegments, location.latitude, location.longitude, b, if (location.hasAccuracy()) location.accuracy else null)
             if (match != null) { currentSpeedLimit = match.limitKmh; updateSpeedLimitDisplay(); return }
+            // Do not carry a previous segment limit onto a nearby parallel road or beyond its endpoint.
+            currentSpeedLimit = null
+            updateSpeedLimitDisplay()
         } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
