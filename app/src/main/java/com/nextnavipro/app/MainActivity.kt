@@ -4382,7 +4382,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val lines=mutableListOf<Feature>(); val arrows=mutableListOf<Feature>(); val flags=mutableListOf<Feature>()
         fun add(points:List<NavPoint>) {
             if(points.size<2)return
-            lines.add(Feature.fromGeometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude,it.latitude) }))
+            lines.add(Feature.fromGeometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude,it.latitude) })))
             points.forEachIndexed { i,p ->
                 flags.add(Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude)))
                 if(i<points.lastIndex) { val n=points[i+1]; val a=Feature.fromGeometry(Point.fromLngLat((p.longitude+n.longitude)/2,(p.latitude+n.latitude)/2)); a.addNumberProperty("bearing",bearingBetween(p,n)); arrows.add(a) }
@@ -4423,6 +4423,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 textSize = 14f
                 setPadding(0, 0, 0, dp(10))
             })
+            addView(Button(this@MainActivity).apply { text = "Gestisci limiti manuali per tratto"; setOnClickListener { showManualSpeedLimitSegmentsMenu() } }, LinearLayout.LayoutParams(-1, dp(48)))
             addView(input, LinearLayout.LayoutParams(-1, dp(56)))
             addView(TextView(this@MainActivity).apply {
                 text = "Usa solo un limite verificato sulla segnaletica stradale."
