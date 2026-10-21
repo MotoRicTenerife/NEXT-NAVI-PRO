@@ -4029,7 +4029,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val hereLimit = try {
                 HereRouteMatchingService.findLimit(
                     queryLocation,
-                    allowLookup = osmMatch?.speedLimitKmh == null && renderMatch?.speedLimitKmh == null
+                    allowLookup = true
                 )
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "HERE route matching failed; keeping OSM result", error)
@@ -4045,9 +4045,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     roadBearing = bearing ?: 0f
                 )
             }
+            // Prefer the server-side map-matched provider (TomTom, HERE fallback)
+            // when it returns an explicit limit. OSM remains the fallback, not the
+            // authority when its nearest-road match conflicts with a trace-matched road.
             val match = when {
-                osmMatch?.speedLimitKmh != null -> osmMatch
-                renderRoadMatch?.speedLimitKmh != null -> renderRoadMatch
                 hereLimit != null && osmMatch != null -> osmMatch.copy(speedLimitKmh = hereLimit)
                 hereLimit != null && renderRoadMatch != null -> renderRoadMatch.copy(speedLimitKmh = hereLimit)
                 hereLimit != null -> RoadMatch(
@@ -4058,6 +4059,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     distanceMeters = 0f,
                     roadBearing = bearing ?: 0f
                 )
+                osmMatch?.speedLimitKmh != null -> osmMatch
+                renderRoadMatch?.speedLimitKmh != null -> renderRoadMatch
                 else -> osmMatch ?: renderRoadMatch
             }
             runOnUiThread {
