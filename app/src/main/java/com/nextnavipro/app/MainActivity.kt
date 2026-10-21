@@ -101,6 +101,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val SOURCE_DESTINATION = "next-destination"
         private const val SOURCE_ROUTE = "next-active-route"
         private const val SOURCE_RADARS = "next-speed-cameras"
+        private const val SOURCE_MANUAL_SEGMENTS = "next-manual-speed-segments"
+        private const val SOURCE_MANUAL_ARROWS = "next-manual-speed-arrows"
+        private const val SOURCE_MANUAL_FLAGS = "next-manual-speed-flags"
     }
 
     private lateinit var locationManager: LocationManager
@@ -215,6 +218,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var currentSpeedLimit: Int? = null
     // User-confirmed limit override. Persisted independently from automatic road lookup.
     private var manualSpeedLimit: Int? = null
+    private val manualSpeedLimitSegments = mutableListOf<ManualSpeedLimitSegment>()
+    private val manualSegmentDraft = mutableListOf<NavPoint>()
+    private var manualSegmentEditing = false
+    private var finishSegmentButton: Button? = null
     private var currentRoadMatch: RoadMatch? = null
     private var lastDisplayedSpeed: Int? = null
     private var speedAlertActive = false
@@ -367,6 +374,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
         manualSpeedLimit = preferences.getInt("manual_speed_limit_kmh", -1).takeIf { it in 5..200 }
         currentSpeedLimit = manualSpeedLimit
+        runCatching { val a = org.json.JSONArray(preferences.getString("manual_speed_limit_segments_json", "[]") ?: "[]"); for (i in 0 until a.length()) manualSpeedLimitSegments.add(ManualSpeedLimitSegment.fromJson(a.getJSONObject(i))) }.onFailure { android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Manual segments unreadable", it) }
         // Always start in automatic light-sensor mode; keep the last palette until the sensor reports lux.
         themeMode = "auto"
         mapLayer = preferences.getString(PREF_MAP_LAYER, "standard") ?: "standard"
@@ -799,6 +807,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
                     true
+                } else if (fullScreenMap && manualSegmentEditing) {
+                    manualSegmentDraft.add(NavPoint(point.latitude, point.longitude)); refreshManualSegmentMarkers()
+                    Toast.makeText(this@MainActivity, "Punto " + manualSegmentDraft.size + " aggiunto • premi FINE al termine", Toast.LENGTH_SHORT).show(); true
                 } else if (fullScreenMap && selectionMode) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     showPickedPointDialog(picked)
@@ -849,11 +860,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             mapStyleReady = true
             style.addImage("next-user-arrow-icon", createGpsArrowBitmap())
             style.addImage("next-place-flag-icon", createPlaceFlagBitmap())
+            style.addImage("next-manual-direction-icon", createGpsArrowBitmap())
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
                 PropertyFactory.lineWidth(5f)
             ))
+            style.addSource(GeoJsonSource(SOURCE_MANUAL_SEGMENTS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(LineLayer("next-manual-speed-segment-lines", SOURCE_MANUAL_SEGMENTS).withProperties(PropertyFactory.lineColor("#D500F9"), PropertyFactory.lineWidth(5f)))
+            style.addSource(GeoJsonSource(SOURCE_MANUAL_ARROWS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(SymbolLayer("next-manual-speed-arrows", SOURCE_MANUAL_ARROWS).withProperties(PropertyFactory.iconImage("next-manual-direction-icon"), PropertyFactory.iconSize(0.65f), PropertyFactory.iconRotate(Expression.get("bearing")), PropertyFactory.iconRotationAlignment("map"), PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)))
+            style.addSource(GeoJsonSource(SOURCE_MANUAL_FLAGS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(SymbolLayer("next-manual-speed-flags", SOURCE_MANUAL_FLAGS).withProperties(PropertyFactory.iconImage("next-place-flag-icon"), PropertyFactory.iconSize(0.55f), PropertyFactory.iconAnchor("bottom"), PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)))
             style.addSource(GeoJsonSource(SOURCE_RADARS, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(CircleLayer("next-radar-circles", SOURCE_RADARS).withProperties(
                 PropertyFactory.circleColor("#FF3B30"),
@@ -890,6 +908,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             ))
             refreshSavedPoiMarkers()
             refreshDestinationMarker()
+            refreshManualSegmentMarkers()
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
@@ -3649,13 +3668,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
         bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 0.8f))
         bar.addView(makeButton("⌖ GPS") { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
-        bar.addView(makeButton("LAYER") { showMapLayerPicker() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
+        bar.addView(makeButton("LAYER") { showMapLayerPicker() }, LinearLayout.LayoutParams(0, dp(48), 0.65f))
+        bar.addView(makeButton("TRATTI") { showManualSpeedLimitSegmentsMenu() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
         val flagButton = makeButton(if (selectionMode) "FLAG ✓" else "SELEZIONA") { }
         flagButton.setOnClickListener {
             selectionMode = !selectionMode
             flagButton.text = if (selectionMode) "FLAG ✓" else "SELEZIONA"
         }
-        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 0.85f))
+        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 0.65f))
+        finishSegmentButton = makeButton("FINE") { finishManualSegmentDraft() }
+        finishSegmentButton?.visibility = if (manualSegmentEditing) View.VISIBLE else View.GONE
+        bar.addView(finishSegmentButton, LinearLayout.LayoutParams(0, dp(48), 0.55f))
         page.addView(bar, params(-1, dp(48)))
         page.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
@@ -3683,6 +3706,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             parent.addView(view, mapOriginalIndex.coerceIn(0, parent.childCount), mapOriginalParams)
         }
         fullScreenMap = false
+        finishSegmentButton = null
+        if (manualSegmentEditing) { manualSegmentEditing = false; manualSegmentDraft.clear(); refreshManualSegmentMarkers() }
         followGps = true
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
         currentLocation?.let { updateMapForLocation(it, true) }
@@ -3999,11 +4024,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         // A manual value takes precedence over all providers until the rider explicitly
         // switches back to automatic mode. Never let a late network response replace it.
-        manualSpeedLimit?.let { manual ->
-            currentSpeedLimit = manual
-            updateSpeedLimitDisplay()
-            return
-        }
+        if (manualSpeedLimitSegments.isNotEmpty()) {
+            val b = location.bearing.takeIf { location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f }
+            val match = ManualSpeedLimitMatcher.find(manualSpeedLimitSegments, location.latitude, location.longitude, b, if (location.hasAccuracy()) location.accuracy else null)
+            if (match != null) { currentSpeedLimit = match.limitKmh; updateSpeedLimitDisplay(); return }
+        } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
         val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
         // Refresh often enough to keep up with the vehicle. The previous 20 s / 450 m
@@ -4280,6 +4305,99 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 forecastRequested = true
                 currentLocation?.let { refreshWeatherIfNeeded(it, true) }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+
+    private fun persistManualSpeedLimitSegments() {
+        val a = org.json.JSONArray(); manualSpeedLimitSegments.forEach { a.put(it.toJson()) }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("manual_speed_limit_segments_json", a.toString()).apply()
+        refreshManualSegmentMarkers()
+    }
+
+    private fun showManualSpeedLimitSegmentsMenu() {
+        val labels = mutableListOf("＋ Crea nuovo tratto sulla mappa")
+        labels += manualSpeedLimitSegments.mapIndexed { i, s -> (s.roadName ?: "Tratto " + (i + 1)) + " • → " + (s.forwardLimitKmh ?: "—") + " / ← " + (s.reverseLimitKmh ?: "—") + " km/h" }
+        AlertDialog.Builder(this).setTitle("Limiti manuali per tratto")
+            .setMessage("Zooma e tocca almeno 3 punti lungo la strada. Le frecce viola seguono l'ordine dei tocchi. In questa prima versione la linea è tracciata manualmente e non è ancora agganciata automaticamente alla geometria OSM.")
+            .setItems(labels.toTypedArray()) { _, i -> if (i == 0) startManualSegmentDraft() else editManualSegment(i - 1) }
+            .setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun startManualSegmentDraft() {
+        manualSegmentDraft.clear(); manualSegmentEditing = true; selectionMode = false
+        if (!fullScreenMap) enterMapFullScreen()
+        finishSegmentButton?.visibility = View.VISIBLE
+        Toast.makeText(this, "Tocca almeno 3 punti sulla strada, dal primo all'ultimo nel verso desiderato. Poi premi FINE.", Toast.LENGTH_LONG).show()
+        refreshManualSegmentMarkers()
+    }
+
+    private fun finishManualSegmentDraft() {
+        if (manualSegmentDraft.size < 3) { Toast.makeText(this, "Servono almeno 3 punti lungo la strada.", Toast.LENGTH_LONG).show(); return }
+        val name = EditText(this).apply { hint = "Nome strada (facoltativo)" }
+        val f = EditText(this).apply { hint = "Limite nel verso delle frecce"; inputType = InputType.TYPE_CLASS_NUMBER }
+        val r = EditText(this).apply { hint = "Limite nel verso opposto (facoltativo)"; inputType = InputType.TYPE_CLASS_NUMBER }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)); addView(name); addView(f); addView(r) }
+        val d = AlertDialog.Builder(this).setTitle("Limiti verificati").setMessage("Inserisci i due sensi separatamente; lascia vuoto quello non verificato.").setView(box).setPositiveButton("Salva", null).setNegativeButton("Annulla", null).create()
+        d.setOnShowListener {
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val fv=f.text.toString().trim().toIntOrNull(); val rv=r.text.toString().trim().toIntOrNull()
+                if ((fv!=null && fv !in 5..200)||(rv!=null && rv !in 5..200)||(fv==null && rv==null)) { Toast.makeText(this,"Inserisci almeno un limite valido da 5 a 200.",Toast.LENGTH_LONG).show(); return@setOnClickListener }
+                manualSpeedLimitSegments.add(ManualSpeedLimitSegment("manual-"+System.currentTimeMillis(), null, name.text.toString().trim().takeIf { it.isNotBlank() }, manualSegmentDraft.toList(), fv, rv, System.currentTimeMillis()))
+                manualSpeedLimit=null; getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("manual_speed_limit_kmh").apply()
+                manualSegmentDraft.clear(); manualSegmentEditing=false; finishSegmentButton?.visibility=View.GONE
+                persistManualSpeedLimitSegments(); d.dismiss()
+                Toast.makeText(this,"Tratto salvato: limite applicato solo vicino alla linea e con direzione coerente.",Toast.LENGTH_LONG).show()
+                currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
+            }
+        }
+        d.show()
+    }
+
+    private fun editManualSegment(index: Int) {
+        val s=manualSpeedLimitSegments.getOrNull(index) ?: return
+        val f=EditText(this).apply { hint="Limite nel verso delle frecce"; inputType=InputType.TYPE_CLASS_NUMBER; setText(s.forwardLimitKmh?.toString().orEmpty()) }
+        val r=EditText(this).apply { hint="Limite nel verso opposto"; inputType=InputType.TYPE_CLASS_NUMBER; setText(s.reverseLimitKmh?.toString().orEmpty()) }
+        AlertDialog.Builder(this).setTitle(s.roadName ?: "Tratto manuale")
+            .setItems(arrayOf("Modifica limiti", "Elimina tratto")) { _, which ->
+                if (which==1) AlertDialog.Builder(this).setTitle("Eliminare il tratto?").setPositiveButton("Elimina") { _, _ -> manualSpeedLimitSegments.removeAt(index); persistManualSpeedLimitSegments(); currentLocation?.let { refreshSpeedLimitIfNeeded(it) } }.setNegativeButton("Annulla",null).show()
+                else {
+                    val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(4)); addView(f); addView(r) }
+                    val d=AlertDialog.Builder(this).setTitle("Modifica limiti").setView(box).setPositiveButton("Salva",null).setNegativeButton("Annulla",null).create()
+                    d.setOnShowListener { d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val fv=f.text.toString().trim().toIntOrNull(); val rv=r.text.toString().trim().toIntOrNull()
+                        if ((fv!=null&&fv !in 5..200)||(rv!=null&&rv !in 5..200)||(fv==null&&rv==null)) { Toast.makeText(this,"Limiti non validi.",Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                        manualSpeedLimitSegments[index]=s.copy(forwardLimitKmh=fv,reverseLimitKmh=rv,updatedAtEpochMs=System.currentTimeMillis(),revision=s.revision+1)
+                        persistManualSpeedLimitSegments(); d.dismiss(); currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
+                    } }; d.show()
+                }
+            }.setNeutralButton("Chiudi",null).show()
+    }
+
+    private fun refreshManualSegmentMarkers() {
+        if (!mapStyleReady) return
+        val style=map?.style ?: return
+        val ls=style.getSource(SOURCE_MANUAL_SEGMENTS) as? GeoJsonSource ?: return
+        val ars=style.getSource(SOURCE_MANUAL_ARROWS) as? GeoJsonSource ?: return
+        val fs=style.getSource(SOURCE_MANUAL_FLAGS) as? GeoJsonSource ?: return
+        val lines=mutableListOf<Feature>(); val arrows=mutableListOf<Feature>(); val flags=mutableListOf<Feature>()
+        fun add(points:List<NavPoint>) {
+            if(points.size<2)return
+            lines.add(Feature.fromGeometry(LineString.fromLngLats(points.map { Point.fromLngLat(it.longitude,it.latitude) }))
+            points.forEachIndexed { i,p ->
+                flags.add(Feature.fromGeometry(Point.fromLngLat(p.longitude,p.latitude)))
+                if(i<points.lastIndex) { val n=points[i+1]; val a=Feature.fromGeometry(Point.fromLngLat((p.longitude+n.longitude)/2,(p.latitude+n.latitude)/2)); a.addNumberProperty("bearing",bearingBetween(p,n)); arrows.add(a) }
+            }
+        }
+        manualSpeedLimitSegments.forEach { add(it.geometry) }; if(manualSegmentEditing)add(manualSegmentDraft)
+        ls.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(lines.toTypedArray()))
+        ars.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrows.toTypedArray()))
+        fs.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(flags.toTypedArray()))
+    }
+
+    private fun bearingBetween(a:NavPoint,b:NavPoint):Float {
+        val p1=Math.toRadians(a.latitude); val p2=Math.toRadians(b.latitude); val dl=Math.toRadians(b.longitude-a.longitude)
+        val y=kotlin.math.sin(dl)*kotlin.math.cos(p2); val x=kotlin.math.cos(p1)*kotlin.math.sin(p2)-kotlin.math.sin(p1)*kotlin.math.cos(p2)*kotlin.math.cos(dl)
+        return ((Math.toDegrees(kotlin.math.atan2(y,x))+360.0)%360.0).toFloat()
     }
 
     private fun showSpeedLimitOptions() {
