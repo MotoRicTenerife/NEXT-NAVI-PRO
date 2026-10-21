@@ -221,6 +221,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val manualSpeedLimitSegments = mutableListOf<ManualSpeedLimitSegment>()
     private val manualSegmentDraft = mutableListOf<NavPoint>()
     private var manualSegmentEditing = false
+    private var roadEditorGeometry: List<NavPoint> = emptyList()
+    private var roadEditorRoad: RoadSearchResult? = null
+    private var roadEditorStartIndex: Int? = null
+    private var roadEditorProposedLimit: Int? = null
     private var finishSegmentButton: Button? = null
     private var currentRoadMatch: RoadMatch? = null
     private var lastDisplayedSpeed: Int? = null
@@ -807,6 +811,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
                     true
+                } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
+                    val picked = NavPoint(point.latitude, point.longitude)
+                    val nearest = nearestRoadGeometryIndex(picked, roadEditorGeometry)
+                    if (roadEditorStartIndex == null) {
+                        roadEditorStartIndex = nearest
+                        Toast.makeText(this@MainActivity, "Inizio selezionato sulla geometria OSM. Tocca ora la fine del tratto.", Toast.LENGTH_LONG).show()
+                    } else {
+                        val start = roadEditorStartIndex!!
+                        if (kotlin.math.abs(nearest - start) < 1) {
+                            Toast.makeText(this@MainActivity, "Scegli una fine diversa dall'inizio.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val low = minOf(start, nearest); val high = maxOf(start, nearest)
+                            var selected = roadEditorGeometry.subList(low, high + 1).toList()
+                            if (start > nearest) selected = selected.reversed()
+                            manualSegmentDraft.clear(); manualSegmentDraft.addAll(selected)
+                            roadEditorGeometry = emptyList()
+                            Toast.makeText(this@MainActivity, "Tratto agganciato alla geometria OSM: " + selected.size + " punti. Premi FINE per confermare.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    refreshManualSegmentMarkers(); true
                 } else if (fullScreenMap && manualSegmentEditing) {
                     manualSegmentDraft.add(NavPoint(point.latitude, point.longitude)); refreshManualSegmentMarkers()
                     Toast.makeText(this@MainActivity, "Punto " + manualSegmentDraft.size + " aggiunto • premi FINE al termine", Toast.LENGTH_SHORT).show(); true
@@ -4318,15 +4342,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showManualSpeedLimitSegmentsMenu() {
-        val labels = mutableListOf("＋ Crea nuovo tratto sulla mappa")
+        val labels = mutableListOf("⌕ Cerca strada online (OSM + limite provider)", "＋ Crea tratto manualmente sulla mappa")
         labels += manualSpeedLimitSegments.mapIndexed { i, s -> (s.roadName ?: "Tratto " + (i + 1)) + " • → " + (s.forwardLimitKmh ?: "—") + " / ← " + (s.reverseLimitKmh ?: "—") + " km/h" }
         AlertDialog.Builder(this).setTitle("Limiti manuali per tratto")
             .setMessage("Zooma e tocca almeno 3 punti lungo la strada. Le frecce viola seguono l'ordine dei tocchi. In questa prima versione la linea è tracciata manualmente e non è ancora agganciata automaticamente alla geometria OSM.")
-            .setItems(labels.toTypedArray()) { _, i -> if (i == 0) startManualSegmentDraft() else editManualSegment(i - 1) }
+            .setItems(labels.toTypedArray()) { _, i ->
+                when { i == 0 -> searchRoadForEditor(); i == 1 -> startManualSegmentDraft(); else -> editManualSegment(i - 2) }
+            }
             .setNegativeButton("Chiudi", null).show()
     }
 
     private fun startManualSegmentDraft() {
+        roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null
         manualSegmentDraft.clear(); manualSegmentEditing = true; selectionMode = false
         if (!fullScreenMap) enterMapFullScreen()
         finishSegmentButton?.visibility = View.VISIBLE
@@ -4336,8 +4363,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun finishManualSegmentDraft() {
         if (manualSegmentDraft.size < 3) { Toast.makeText(this, "Servono almeno 3 punti lungo la strada.", Toast.LENGTH_LONG).show(); return }
-        val name = EditText(this).apply { hint = "Nome strada (facoltativo)" }
-        val f = EditText(this).apply { hint = "Limite nel verso delle frecce"; inputType = InputType.TYPE_CLASS_NUMBER }
+        val name = EditText(this).apply { hint = "Nome strada (facoltativo)"; setText(roadEditorRoad?.name.orEmpty()) }
+        val f = EditText(this).apply { hint = "Limite nel verso selezionato"; inputType = InputType.TYPE_CLASS_NUMBER; roadEditorProposedLimit?.let { setText(it.toString()) } }
         val r = EditText(this).apply { hint = "Limite nel verso opposto (facoltativo)"; inputType = InputType.TYPE_CLASS_NUMBER }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)); addView(name); addView(f); addView(r) }
         val d = AlertDialog.Builder(this).setTitle("Limiti verificati").setMessage("Inserisci i due sensi separatamente; lascia vuoto quello non verificato.").setView(box).setPositiveButton("Salva", null).setNegativeButton("Annulla", null).create()
@@ -4345,9 +4372,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val fv=f.text.toString().trim().toIntOrNull(); val rv=r.text.toString().trim().toIntOrNull()
                 if ((fv!=null && fv !in 5..200)||(rv!=null && rv !in 5..200)||(fv==null && rv==null)) { Toast.makeText(this,"Inserisci almeno un limite valido da 5 a 200.",Toast.LENGTH_LONG).show(); return@setOnClickListener }
-                manualSpeedLimitSegments.add(ManualSpeedLimitSegment("manual-"+System.currentTimeMillis(), null, name.text.toString().trim().takeIf { it.isNotBlank() }, manualSegmentDraft.toList(), fv, rv, System.currentTimeMillis()))
+                manualSpeedLimitSegments.add(ManualSpeedLimitSegment("manual-"+System.currentTimeMillis(), roadEditorRoad?.let { "osm:way:" + it.osmId }, name.text.toString().trim().takeIf { it.isNotBlank() }, manualSegmentDraft.toList(), fv, rv, System.currentTimeMillis()))
                 manualSpeedLimit=null; getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("manual_speed_limit_kmh").apply()
-                manualSegmentDraft.clear(); manualSegmentEditing=false; finishSegmentButton?.visibility=View.GONE
+                manualSegmentDraft.clear(); manualSegmentEditing=false; roadEditorGeometry=emptyList(); roadEditorRoad=null; roadEditorStartIndex=null; roadEditorProposedLimit=null; finishSegmentButton?.visibility=View.GONE
                 persistManualSpeedLimitSegments(); d.dismiss()
                 Toast.makeText(this,"Tratto salvato: limite applicato solo vicino alla linea e con direzione coerente.",Toast.LENGTH_LONG).show()
                 currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
@@ -4356,6 +4383,92 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         d.show()
     }
 
+    private fun searchRoadForEditor() {
+        val query = EditText(this).apply { hint = "Es. TF-82, TF-1, Calle Morro Afonso Alto"; singleLine = true }
+        val dialog = AlertDialog.Builder(this).setTitle("Cerca una strada").setMessage("Ricerca online OpenStreetMap. Seleziona il risultato corretto, controllando località e posizione.")
+            .setView(query).setPositiveButton("Cerca", null).setNegativeButton("Annulla", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val text = query.text.toString().trim()
+                if (text.length < 2) { query.error = "Inserisci almeno 2 caratteri"; return@setOnClickListener }
+                dialog.dismiss()
+                Toast.makeText(this, "Cerco la strada su OpenStreetMap…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    try {
+                        val roads = RenderRoadEditorService.searchRoads(text)
+                        runOnUiThread {
+                            if (isFinishing) return@runOnUiThread
+                            if (roads.isEmpty()) {
+                                AlertDialog.Builder(this).setTitle("Nessuna strada trovata").setMessage("OpenStreetMap non ha restituito corrispondenze stradali utilizzabili per “" + text + "”. Nessun dato è stato inventato.")
+                                    .setPositiveButton("OK", null).show()
+                            } else {
+                                val labels = roads.map { it.name + "\n" + it.displayName + "\nOSM way " + it.osmId }
+                                AlertDialog.Builder(this).setTitle("Scegli la strada corretta")
+                                    .setItems(labels.toTypedArray()) { _, index -> loadRoadForEditor(roads[index]) }
+                                    .setNegativeButton("Annulla", null).show()
+                            }
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread { if (!isFinishing) AlertDialog.Builder(this).setTitle("Ricerca non disponibile")
+                            .setMessage(error.message ?: "Il backend Render o OpenStreetMap non ha risposto.")
+                            .setPositiveButton("OK", null).show() }
+                    }
+                }.start()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun loadRoadForEditor(road: RoadSearchResult) {
+        Toast.makeText(this, "Carico geometria OSM e verifico il limite disponibile…", Toast.LENGTH_LONG).show()
+        Thread {
+            try {
+                val geometry = RenderRoadEditorService.fetchGeometry(road)
+                val provider = RenderRoadEditorService.proposeSpeedLimit(geometry.geometry)
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    roadEditorRoad = road
+                    roadEditorGeometry = geometry.geometry
+                    roadEditorStartIndex = null
+                    roadEditorProposedLimit = provider.speedLimitKmh
+                    manualSegmentDraft.clear()
+                    manualSegmentEditing = true
+                    selectionMode = false
+                    if (!fullScreenMap) enterMapFullScreen()
+                    finishSegmentButton?.visibility = View.VISIBLE
+                    val direction = geometry.tags.optString("oneway").takeIf { it.isNotBlank() && it != "null" } ?: "non specificato"
+                    val limitText = provider.speedLimitKmh?.let { it.toString() + " km/h (" + (provider.source ?: "provider") + ")" }
+                        ?: "nessun limite esplicito affidabile restituito dal provider"
+                    AlertDialog.Builder(this).setTitle(geometry.name ?: road.name)
+                        .setMessage("Geometria reale OSM caricata (" + geometry.geometry.size + " punti). Limite proposto: " + limitText + ". OSM oneway: " + direction + ". Tocca INIZIO e poi FINE del tratto sulla strada. La geometria viene mostrata sulla mappa.")
+                        .setPositiveButton("Seleziona tratto") { _, _ ->
+                            manualSegmentDraft.clear()
+                            refreshManualSegmentMarkers()
+                            Toast.makeText(this, "Tocca l’inizio del tratto, poi la fine. I punti verranno agganciati alla strada OSM.", Toast.LENGTH_LONG).show()
+                        }.setNegativeButton("Annulla") { _, _ ->
+                            manualSegmentEditing = false; roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null
+                            refreshManualSegmentMarkers()
+                        }.show()
+                    refreshManualSegmentMarkers()
+                }
+            } catch (error: Exception) {
+                runOnUiThread { if (!isFinishing) AlertDialog.Builder(this).setTitle("Geometria stradale non disponibile")
+                    .setMessage(error.message ?: "Non è stato possibile recuperare la geometria OSM.")
+                    .setPositiveButton("OK", null).show() }
+            }
+        }.start()
+    }
+
+    private fun nearestRoadGeometryIndex(point: NavPoint, geometry: List<NavPoint>): Int {
+        var bestIndex = 0
+        var bestDistance = Double.POSITIVE_INFINITY
+        geometry.forEachIndexed { index, candidate ->
+            val results = FloatArray(1)
+            android.location.Location.distanceBetween(point.latitude, point.longitude, candidate.latitude, candidate.longitude, results)
+            if (results[0].toDouble() < bestDistance) { bestDistance = results[0].toDouble(); bestIndex = index }
+        }
+        return bestIndex
+    }
     private fun editManualSegment(index: Int) {
         val s=manualSpeedLimitSegments.getOrNull(index) ?: return
         val f=EditText(this).apply { hint="Limite nel verso delle frecce"; inputType=InputType.TYPE_CLASS_NUMBER; setText(s.forwardLimitKmh?.toString().orEmpty()) }
@@ -4391,7 +4504,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if(i<points.lastIndex) { val n=points[i+1]; val a=Feature.fromGeometry(Point.fromLngLat((p.longitude+n.longitude)/2,(p.latitude+n.latitude)/2)); a.addNumberProperty("bearing",bearingBetween(p,n)); arrows.add(a) }
             }
         }
-        manualSpeedLimitSegments.forEach { add(it.geometry) }; if(manualSegmentEditing)add(manualSegmentDraft)
+        manualSpeedLimitSegments.forEach { add(it.geometry) }
+        if (roadEditorGeometry.size >= 2) add(roadEditorGeometry)
+        if (manualSegmentEditing && manualSegmentDraft.size >= 2) add(manualSegmentDraft)
         ls.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(lines.toTypedArray()))
         ars.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(arrows.toTypedArray()))
         fs.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(flags.toTypedArray()))
