@@ -3718,24 +3718,47 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         fullScreenMap = true
         followGps = false
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
-        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(black) }
+
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(black)
+        }
         fullScreenRoot = page
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        bar.addView(makeButton("CRUSCOTTO") { exitMapFullScreen() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        bar.addView(makeButton("LUOGHI") { showSavedPois() }, LinearLayout.LayoutParams(0, dp(48), 0.8f))
-        bar.addView(makeButton("⌖ GPS") { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
-        bar.addView(makeButton("LAYER") { showMapLayerPicker() }, LinearLayout.LayoutParams(0, dp(48), 0.65f))
-        bar.addView(makeButton("TRATTI") { showManualSpeedLimitSegmentsMenu() }, LinearLayout.LayoutParams(0, dp(48), 0.75f))
-        val flagButton = makeButton(if (selectionMode) "FLAG ✓" else "SELEZIONA") { }
+
+        // Two compact rows prevent labels from being clipped in portrait orientation.
+        fun controlRow(): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(1), dp(2), dp(1))
+        }
+        fun addControl(row: LinearLayout, button: Button, weight: Float = 1f) {
+            row.addView(button, LinearLayout.LayoutParams(0, dp(44), weight).apply {
+                setMargins(dp(2), dp(1), dp(2), dp(1))
+            })
+        }
+
+        val firstRow = controlRow()
+        addControl(firstRow, makeButton("CRUSCOTTO") { exitMapFullScreen() }, 1.25f)
+        addControl(firstRow, makeButton("LUOGHI") { showSavedPois() })
+        addControl(firstRow, makeButton("⌖ GPS") { recenterMapToGps() })
+        addControl(firstRow, makeButton("LAYER") { showMapLayerPicker() })
+
+        val secondRow = controlRow()
+        val segmentsButton = makeButton("TRATTI") { }
+        segmentsButton.setOnClickListener { showManualSpeedLimitSegmentsMenu() }
+        addControl(secondRow, segmentsButton)
+        val flagButton = makeButton(if (selectionMode) "SELEZIONA ✓" else "SELEZIONA") { }
         flagButton.setOnClickListener {
             selectionMode = !selectionMode
-            flagButton.text = if (selectionMode) "FLAG ✓" else "SELEZIONA"
+            flagButton.text = if (selectionMode) "SELEZIONA ✓" else "SELEZIONA"
         }
-        bar.addView(flagButton, LinearLayout.LayoutParams(0, dp(48), 0.65f))
+        addControl(secondRow, flagButton, 1.2f)
         finishSegmentButton = makeButton("FINE") { finishManualSegmentDraft() }
         finishSegmentButton?.visibility = if (manualSegmentEditing) View.VISIBLE else View.GONE
-        bar.addView(finishSegmentButton, LinearLayout.LayoutParams(0, dp(48), 0.55f))
-        page.addView(bar, params(-1, dp(48)))
+        addControl(secondRow, finishSegmentButton!!)
+
+        page.addView(firstRow, params(-1, dp(48)))
+        page.addView(secondRow, params(-1, dp(48)))
         page.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(page)
     }
@@ -4584,7 +4607,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 textSize = 14f
                 setPadding(0, 0, 0, dp(10))
             })
-            addView(Button(this@MainActivity).apply { text = "Gestisci limiti manuali per tratto"; setOnClickListener { showManualSpeedLimitSegmentsMenu() } }, LinearLayout.LayoutParams(-1, dp(48)))
+            val manageSegmentsButton = Button(this@MainActivity).apply { text = "Gestisci limiti manuali per tratto" }
+            addView(manageSegmentsButton, LinearLayout.LayoutParams(-1, dp(48)))
             addView(input, LinearLayout.LayoutParams(-1, dp(56)))
             addView(TextView(this@MainActivity).apply {
                 text = "Usa solo un limite verificato sulla segnaletica stradale."
@@ -4599,6 +4623,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setNeutralButton(if (manualSpeedLimit != null) "Modalità automatica" else "Riprova ricerca", null)
             .setNegativeButton("Annulla", null)
             .create()
+        // Close the speed-limit dialog before opening the segment editor, avoiding a hidden dialog.
+        manageSegmentsButton.setOnClickListener {
+            dialog.dismiss()
+            showManualSpeedLimitSegmentsMenu()
+        }
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val value = input.text.toString().trim().toIntOrNull()
