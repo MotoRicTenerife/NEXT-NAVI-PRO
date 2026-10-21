@@ -1,6 +1,4 @@
 import http from "node:http";
-import { parseHereSpeedLimit } from "./here-speed-limit.js";
-
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -248,7 +246,6 @@ async function handle(req, res) {
       ok: true,
       osmDiagnostic: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
-      hereConfigured: Boolean(process.env.HERE_API_KEY),
       revision: process.env.RENDER_GIT_COMMIT || "unknown"
     });
   }
@@ -365,8 +362,7 @@ async function handle(req, res) {
   if (url.pathname === "/speed-limit") {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
-    const hereApiKey = process.env.HERE_API_KEY;
-    if (!tomtomApiKey && !hereApiKey) return send(res, 503, { error: "Speed-limit provider not configured" });
+    if (!tomtomApiKey) return send(res, 503, { error: "TomTom speed-limit provider not configured" });
     if (speedLimitRateLimited(getClientIp(req), Date.now())) {
       return send(res, 429, { error: "Too many speed-limit requests; try again later" });
     }
@@ -454,38 +450,6 @@ async function handle(req, res) {
         console.warn("TomTom Snap to Roads request failed", {
           errorType: error instanceof Error ? error.name : "UnknownError"
         });
-      }
-    }
-
-    // HERE remains an optional secondary provider if configured. OSM is still
-    // available through GET /speed-limit and is handled separately by Android.
-    if (hereApiKey) {
-      const csv = "LATITUDE,LONGITUDE\n" + points.map(point => point.latitude + "," + point.longitude).join("\n") + "\n";
-      const query = new URLSearchParams({
-        routeMatch: "1",
-        mode: "fastest;car;traffic:disabled",
-        attributes: "SPEED_LIMITS_FCn(FROM_REF_SPEED_LIMIT,TO_REF_SPEED_LIMIT)",
-        apiKey: hereApiKey
-      });
-      try {
-        const upstream = await fetch("https://routematching.hereapi.com/v8/match/routelinks?" + query.toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream", "Accept": "application/json" },
-          body: csv,
-          signal: AbortSignal.timeout(9000)
-        });
-        const body = await upstream.text();
-        if (!upstream.ok) {
-          console.warn("HERE route matching failed", { status: upstream.status });
-          return send(res, 502, { error: "Speed-limit providers unavailable" });
-        }
-        const speedLimitKmh = parseHereSpeedLimit(body);
-        return send(res, 200, { speedLimitKmh, source: "HERE Route Matching" });
-      } catch (error) {
-        console.warn("HERE route matching request failed", {
-          errorType: error instanceof Error ? error.name : "UnknownError"
-        });
-        return send(res, 502, { error: "Speed-limit providers unavailable" });
       }
     }
 
