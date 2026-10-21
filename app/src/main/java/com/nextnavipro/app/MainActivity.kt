@@ -1128,7 +1128,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Nome assistente vocale"), appText("Voce Jarvis"), appText("Personalità di Jarvis"), appText("Memoria Jarvis • spazio e pulizia"))
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Jarvis • Assistente e impostazioni"))
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1143,12 +1143,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     8 -> showGpxMenu()
                     9 -> showGpsDiagnosticsMenu()
                     10 -> showVehicleProfileMenu()
-                    11 -> showJarvisNameSettings()
-                    12 -> showJarvisVoiceSettings()
-                    13 -> showJarvisPersonalitySettings()
-                    14 -> showJarvisMemorySettings()
+                    11 -> showJarvisMenu()
                 }
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showJarvisMenu() {
+        val choices = arrayOf(
+            appText("Apri Jarvis / parla con l'assistente"),
+            appText("Nome dell'assistente"),
+            appText("Voce di Jarvis"),
+            appText("Personalità di Jarvis"),
+            appText("Memoria Jarvis • spazio e pulizia")
+        )
+        AlertDialog.Builder(this)
+            .setTitle(appText("JARVIS • Assistente"))
+            .setMessage(appText("Voce unica per conversazione, voce, personalità e memoria."))
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> onJarvisButtonPressed()
+                    1 -> showJarvisNameSettings()
+                    2 -> showJarvisVoiceSettings()
+                    3 -> showJarvisPersonalitySettings()
+                    4 -> showJarvisMemorySettings()
+                }
+            }
+            .setNegativeButton(appText("Chiudi"), null)
+            .show()
     }
 
     private fun showVehicleProfileMenu() {
