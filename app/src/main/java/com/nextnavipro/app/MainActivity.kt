@@ -225,6 +225,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var roadEditorRoad: RoadSearchResult? = null
     private var roadEditorStartIndex: Int? = null
     private var roadEditorProposedLimit: Int? = null
+    private var roadEditorProposedSource: String? = null
     private var finishSegmentButton: Button? = null
     private var currentRoadMatch: RoadMatch? = null
     private var lastDisplayedSpeed: Int? = null
@@ -832,7 +833,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             Thread {
                                 val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
                                 runOnUiThread {
-                                    roadEditorProposedLimit = null
+                                    roadEditorProposedLimit = provider.speedLimitKmh
+                                    roadEditorProposedSource = provider.source
                                     finishSegmentButton?.isEnabled = true
                                     val proposal = provider.speedLimitKmh?.let { it.toString() + " km/h (" + (provider.source ?: "provider") + ")" } ?: "nessun limite esplicito restituito"
                                     Toast.makeText(this@MainActivity, "Limite proposto: " + proposal + ". Controlla prima di salvare.", Toast.LENGTH_LONG).show()
@@ -4382,9 +4384,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val fv=f.text.toString().trim().toIntOrNull(); val rv=r.text.toString().trim().toIntOrNull()
                 if ((fv!=null && fv !in 5..200)||(rv!=null && rv !in 5..200)||(fv==null && rv==null)) { Toast.makeText(this,"Inserisci almeno un limite valido da 5 a 200.",Toast.LENGTH_LONG).show(); return@setOnClickListener }
-                manualSpeedLimitSegments.add(ManualSpeedLimitSegment("manual-"+System.currentTimeMillis(), roadEditorRoad?.let { "osm:way:" + it.osmId }, name.text.toString().trim().takeIf { it.isNotBlank() }, manualSegmentDraft.toList(), fv, rv, System.currentTimeMillis()))
+                manualSpeedLimitSegments.add(ManualSpeedLimitSegment("manual-"+System.currentTimeMillis(), roadEditorRoad?.let { "osm:way:" + it.osmId }, name.text.toString().trim().takeIf { it.isNotBlank() }, manualSegmentDraft.toList(), fv, rv, System.currentTimeMillis(), providerSpeedLimitKmh = roadEditorProposedLimit, providerSource = roadEditorProposedSource))
                 manualSpeedLimit=null; getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("manual_speed_limit_kmh").apply()
-                manualSegmentDraft.clear(); manualSegmentEditing=false; roadEditorGeometry=emptyList(); roadEditorRoad=null; roadEditorStartIndex=null; roadEditorProposedLimit=null; finishSegmentButton?.visibility=View.GONE
+                manualSegmentDraft.clear(); manualSegmentEditing=false; roadEditorGeometry=emptyList(); roadEditorRoad=null; roadEditorStartIndex=null; roadEditorProposedLimit=null; roadEditorProposedSource=null; finishSegmentButton?.visibility=View.GONE
                 persistManualSpeedLimitSegments(); d.dismiss()
                 Toast.makeText(this,"Tratto salvato: limite applicato solo vicino alla linea e con direzione coerente.",Toast.LENGTH_LONG).show()
                 currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
@@ -4439,7 +4441,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     roadEditorRoad = road
                     roadEditorGeometry = geometry.geometry
                     roadEditorStartIndex = null
-                    roadEditorProposedLimit = provider.speedLimitKmh
+                    roadEditorProposedLimit = null
+                    roadEditorProposedSource = null
                     manualSegmentDraft.clear()
                     manualSegmentEditing = true
                     selectionMode = false
@@ -4455,7 +4458,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             refreshManualSegmentMarkers()
                             Toast.makeText(this, "Tocca l’inizio del tratto, poi la fine. I punti verranno agganciati alla strada OSM.", Toast.LENGTH_LONG).show()
                         }.setNegativeButton("Annulla") { _, _ ->
-                            manualSegmentEditing = false; roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null
+                            manualSegmentEditing = false; roadEditorGeometry = emptyList(); roadEditorRoad = null; roadEditorStartIndex = null; roadEditorProposedLimit = null; roadEditorProposedSource = null
                             refreshManualSegmentMarkers()
                         }.show()
                     refreshManualSegmentMarkers()
