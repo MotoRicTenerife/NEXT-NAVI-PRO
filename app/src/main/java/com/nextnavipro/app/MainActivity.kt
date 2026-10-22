@@ -158,6 +158,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var gpsUpdatesRequested = false
     private var negativeTheme = true
     private var currentLocation: Location? = null
+    private val speedLimitTrace = mutableListOf<Location>()
     private var approximateLocation: ApproximateLocation? = null
     private var ipFallbackRequested = false
     private var weatherUsesApproximateLocation = false
@@ -4041,6 +4042,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location)
         currentLocation = Location(smoothed)
+        appendSpeedLimitTracePoint(smoothed)
         if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
             pendingJarvisWeather = false
             answerJarvisWeather()
@@ -4114,6 +4116,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return result
     }
 
+    private fun appendSpeedLimitTracePoint(location: Location) {
+        if (!location.latitude.isFinite() || !location.longitude.isFinite()) return
+        synchronized(speedLimitTrace) {
+            val last = speedLimitTrace.lastOrNull()
+            val elapsed = if (last != null && location.elapsedRealtimeNanos > 0L && last.elapsedRealtimeNanos > 0L)
+                (location.elapsedRealtimeNanos - last.elapsedRealtimeNanos) / 1_000_000L else Long.MAX_VALUE
+            if (last == null || last.distanceTo(location) >= 12f || elapsed >= 2500L) {
+                speedLimitTrace.add(Location(location))
+            }
+            val cutoffNs = location.elapsedRealtimeNanos - 60_000_000_000L
+            speedLimitTrace.removeAll { it.elapsedRealtimeNanos > 0L && it.elapsedRealtimeNanos < cutoffNs }
+            while (speedLimitTrace.size > 8) speedLimitTrace.removeAt(0)
+        }
+    }
+
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         // A manual value takes precedence over all providers until the rider explicitly
         // switches back to automatic mode. Never let a late network response replace it.
@@ -4156,52 +4173,48 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
         }
         speedLimitLookupInFlight = true
-        thread(name = "osm-road-match") {
-            // Query the Render OSM proxy first: it centralizes mirror fallback and avoids
-            // waiting through several direct Overpass timeouts before trying the same data.
-            // The direct device query remains a fallback if Render is unavailable or has no limit.
-            val renderMatch = try {
+        val tracePoints = synchronized(speedLimitTrace) {
+            val recent = speedLimitTrace.map { Location(it) }.takeLast(8)
+            if (recent.isEmpty() || recent.last().distanceTo(queryLocation) > 3f) recent + Location(queryLocation) else recent
+        }.takeLast(8)
+        thread(name = "speed-limit-provider-match") {
+            val tomTomResult = try {
+                RenderTomTomSpeedLimitService.findLimit(tracePoints)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "TomTom trace lookup failed", error)
+                null
+            }
+            val tomTomMatch = tomTomResult?.speedLimitKmh?.let { limit ->
+                RoadMatch(tomTomResult.road, tomTomResult.ref, limit, tomTomResult.highwayType, 0f, bearing ?: 0f)
+            }
+            val renderMatch = if (tomTomMatch?.speedLimitKmh == null) try {
                 RenderSpeedLimitService.findRoadMatch(queryLocation)
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Render OSM lookup failed", error)
                 null
-            }
-            val osmMatch = if (renderMatch?.speedLimitKmh == null) {
+            } else null
+            val osmMatch = if (tomTomMatch?.speedLimitKmh == null && renderMatch?.speedLimitKmh == null) {
                 try {
-                    SpeedLimitService.findRoadNear(
-                        point,
-                        bearing,
-                        queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }
-                    )
+                    SpeedLimitService.findRoadNear(point, bearing, queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() })
                 } catch (error: Exception) {
                     android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass direct fallback failed", error)
                     null
                 }
             } else null
             val renderRoadMatch = renderMatch?.let {
-                RoadMatch(
-                    name = it.road,
-                    ref = it.ref,
-                    speedLimitKmh = it.speedLimitKmh,
-                    highwayType = it.highwayType,
-                    distanceMeters = it.distanceMeters ?: 0f,
-                    roadBearing = bearing ?: 0f
-                )
+                RoadMatch(it.road, it.ref, it.speedLimitKmh, it.highwayType, it.distanceMeters ?: 0f, bearing ?: 0f)
             }
-            // Prefer TomTom's trace-matched explicit limit; OSM remains the fallback.
             val match = when {
+                tomTomMatch?.speedLimitKmh != null -> tomTomMatch
                 renderRoadMatch?.speedLimitKmh != null -> renderRoadMatch
                 osmMatch?.speedLimitKmh != null -> osmMatch
                 else -> renderRoadMatch ?: osmMatch
             }
             runOnUiThread {
                 speedLimitLookupInFlight = false
-                // A slow Overpass response must not overwrite a newer road match.
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
                 if (latest != null && latest.distanceTo(queryLocation) > 180f) {
-                    // A slow provider response for a point behind the vehicle must not
-                    // blank the sign indefinitely. Drop it and immediately query the live fix.
                     currentRoadMatch = null
                     currentSpeedLimit = null
                     lastSpeedLimitQueryLocation = null
@@ -4214,23 +4227,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 currentRoadMatch = match
                 currentSpeedLimit = manualSpeedLimit ?: match?.speedLimitKmh
                 if (match == null) {
-                    android.util.Log.i(
-                        "NEXT_NAVI_SPEED_LIMIT",
-                        "No plausible OSM road match for current GPS fix; accuracy=" +
-                            (queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() }?.toInt()?.toString() ?: "unknown") + "m"
-                    )
+                    android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "No plausible road match for current GPS fix")
                 } else if (match.speedLimitKmh == null) {
-                    android.util.Log.i(
-                        "NEXT_NAVI_SPEED_LIMIT",
-                        "Road matched but OSM has no explicit usable maxspeed tag; road=" +
-                            (match.displayName ?: "unnamed") + ", distance=" + match.distanceMeters.toInt() + "m"
-                    )
+                    android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "Road matched but no explicit usable speed limit; road=" + (match.displayName ?: "unnamed"))
                 } else {
-                    android.util.Log.d(
-                        "NEXT_NAVI_SPEED_LIMIT",
-                        "Matched road=" + (match.displayName ?: "unnamed") +
-                            ", limit=" + match.speedLimitKmh + " km/h, distance=" + match.distanceMeters.toInt() + "m"
-                    )
+                    android.util.Log.d("NEXT_NAVI_SPEED_LIMIT", "Matched road=" + (match.displayName ?: "unnamed") +
+                        ", limit=" + match.speedLimitKmh + " km/h, source=" +
+                        (if (tomTomMatch?.speedLimitKmh != null) "TomTom" else "OSM"))
                 }
                 latest?.let { updateGpsStatus(it) }
                 updateSpeedLimitDisplay()
