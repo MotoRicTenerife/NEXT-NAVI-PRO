@@ -615,7 +615,7 @@ async function handle(req, res) {
     let tomtomFailureReason = "no_explicit_speed_limit";
     if (tomtomApiKey) {
       try {
-        const fields = "{route{properties{id,speedLimits{value,unit,type}}}}";
+        const fields = "{route{properties{id,speedLimits{value,unit,type},address{roadName,roadNumbers}}}}";
         const query = new URLSearchParams({
           key: tomtomApiKey,
           fields,
@@ -685,7 +685,11 @@ async function handle(req, res) {
               providerValue: speedLimitKmh.rawValue,
               providerUnit: speedLimitKmh.unit,
               providerType: speedLimitKmh.type,
-              matchedSegments: routeSegments.length
+              matchedSegments: routeSegments.length,
+              road: currentSegment?.properties?.address?.roadName || null,
+              ref: Array.isArray(currentSegment?.properties?.address?.roadNumbers)
+                ? currentSegment.properties.address.roadNumbers.join(" / ")
+                : null
             });
           }
           tomtomFailureReason = routeSegments.length
