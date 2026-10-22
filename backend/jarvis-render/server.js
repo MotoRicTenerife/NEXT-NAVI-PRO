@@ -638,55 +638,62 @@ async function handle(req, res) {
         if (upstream.ok) {
           const data = await upstream.json();
           const routeSegments = Array.isArray(data?.route) ? data.route : [];
-          let speedLimitKmh = null;
-          const observedLimits = new Set();
-          for (const segment of routeSegments) {
-            const rawLimits = segment?.properties?.speedLimits;
-            const limits = Array.isArray(rawLimits) ? rawLimits : rawLimits ? [rawLimits] : [];
-            const parsed = limits.map(limit => {
-              const value = Number(limit?.value);
-              if (!Number.isFinite(value) || value <= 0) return null;
-              const type = String(limit?.type || "").toLowerCase();
-              if (type && type !== "maximum") return null;
-              // Request metric explicitly and never guess an unknown/missing unit.
-              // A silent default here can turn a provider value into a plausible but
-              // incorrect sign (for example, interpreting mph as km/h).
-              const unit = String(limit?.unit || "").trim().toLowerCase();
-              let kmh;
-              if (["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)) {
-                kmh = value;
-              } else if (["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit)) {
-                kmh = value * 1.609344;
-              } else {
-                return null;
-              }
-              const rounded = Math.round(kmh);
-              return rounded >= 5 && rounded <= 200 ? { kmh: rounded, rawValue: value, unit, type: type || null } : null;
-            }).filter(value => value !== null);
-            for (const value of parsed) observedLimits.add(value.kmh);
-            // Never assign one value across a selected section when TomTom reports
-            // different explicit limits along its sampled geometry. The editor can
-            // split the section at the transition instead.
-            if (parsed.length) speedLimitKmh = parsed[0];
-          }
-          if (observedLimits.size > 1) {
+          // The GPS trace is chronological and the final matched road element is
+          // the best provider-backed candidate for the vehicle's current position.
+          // Do not mix limits from earlier elements in the trace: a short trace can
+          // legitimately cross a speed-limit boundary and must not become unknown
+          // solely because an earlier road had a different limit.
+          const currentSegment = routeSegments.length ? routeSegments[routeSegments.length - 1] : null;
+          const rawLimits = currentSegment?.properties?.speedLimits;
+          const limits = Array.isArray(rawLimits) ? rawLimits : rawLimits ? [rawLimits] : [];
+          const parsed = limits.map(limit => {
+            const value = Number(limit?.value);
+            if (!Number.isFinite(value) || value <= 0) return null;
+            const type = String(limit?.type || "").trim().toLowerCase();
+            // Only an explicitly identified maximum limit is suitable for a sign.
+            if (type !== "maximum") return null;
+            // Request metric explicitly and never guess an unknown/missing unit.
+            const unit = String(limit?.unit || "").trim().toLowerCase();
+            let kmh;
+            if (["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)) {
+              kmh = value;
+            } else if (["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit)) {
+              kmh = value * 1.609344;
+            } else {
+              return null;
+            }
+            const rounded = Math.round(kmh);
+            return rounded >= 5 && rounded <= 200
+              ? { kmh: rounded, rawValue: value, unit, type: "Maximum" }
+              : null;
+          }).filter(value => value !== null);
+          const observedLimits = [...new Set(parsed.map(value => value.kmh))];
+          if (observedLimits.length > 1) {
             return send(res, 200, {
               speedLimitKmh: null,
               source: "TomTom Snap to Roads",
-              reason: "multiple_speed_limits_in_selected_segment",
-              observedLimitsKmh: Array.from(observedLimits).sort((a, b) => a - b)
+              reason: "multiple_maximum_limits_on_current_segment",
+              matchedSegments: routeSegments.length,
+              observedLimitsKmh: observedLimits.sort((a, b) => a - b)
             });
           }
-          if (speedLimitKmh !== null) {
+          if (parsed.length) {
+            const speedLimitKmh = parsed[0];
             return send(res, 200, {
               speedLimitKmh: speedLimitKmh.kmh,
               source: "TomTom Snap to Roads",
               providerValue: speedLimitKmh.rawValue,
               providerUnit: speedLimitKmh.unit,
-              providerType: speedLimitKmh.type
+              providerType: speedLimitKmh.type,
+              matchedSegments: routeSegments.length
             });
           }
-          console.warn("TomTom returned no explicit speed limit for matched route");
+          tomtomFailureReason = routeSegments.length
+            ? "no_explicit_maximum_speed_limit_on_current_segment"
+            : "no_matched_road_segments";
+          console.warn("TomTom returned no explicit speed limit for current matched segment", {
+            matchedSegments: routeSegments.length
+          });
         } else {
           tomtomFailureReason = upstream.status === 401 || upstream.status === 403
             ? "tomtom_auth_or_permission_error"
