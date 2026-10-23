@@ -558,7 +558,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.addView(weatherText, params(-1, dp(52)))
         limitValue = TextView(this).apply {
             text = "—"
-            textSize = 28f
+            // 50% larger than the previous 28sp text; keep the sign comfortably tappable.
+            textSize = 42f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -569,7 +570,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             contentDescription = "Limite di velocità. Tocca per impostare o aggiornare manualmente"
             setOnClickListener { showSpeedLimitOptions() }
         }
-        infoColumn.addView(limitValue, params(dp(64), dp(64)))
+        infoColumn.addView(limitValue, params(dp(96), dp(96)))
         gpsText = TextView(this).apply {
             text = appText("RICERCA GPS…")
             textSize = 10f
@@ -709,10 +710,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             // Portrait: center the complete navigation group (arrow + instruction)
             // vertically against the speed-limit sign; avoid translating only the arrow.
-            maneuverIcon.textSize = 88f
+            // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
+            maneuverIcon.textSize = 63f
             maneuverIcon.translationY = 0f
-            navHalf.addView(maneuverIcon, params(-1, dp(88)))
-            routeText.textSize = 15f
+            navHalf.addView(maneuverIcon, params(-1, dp(63)))
+            routeText.textSize = 40f
             routeText.translationY = 0f
             routeText.includeFontPadding = false
             routeText.maxLines = 3
@@ -722,7 +724,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER })
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(weatherText, params(-1, dp(52)))
@@ -746,10 +748,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // whole content row upward caused it to overlap the search/weather/status row.
             content.translationY = 0f
             // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
-            maneuverIcon.textSize = 116f
+            // Landscape physical targets: maneuver glyph and instruction text about 0.75 cm.
+            maneuverIcon.textSize = 47f
             maneuverIcon.translationY = 0f
-            navHalf.addView(maneuverIcon, params(-1, dp(116)))
-            routeText.textSize = 15f
+            navHalf.addView(maneuverIcon, params(-1, dp(47)))
+            routeText.textSize = 47f
             routeText.translationY = 0f
             routeText.includeFontPadding = false
             routeText.maxLines = 3
@@ -1924,7 +1927,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
         if (::routeText.isInitialized) {
             routeText.text = "TRACCIA GPX\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
-            routeText.textSize = 14f
+            routeText.textSize = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 47f else 40f
         }
         if (::routeButton.isInitialized) routeButton.text = appText("ANNULLA TRACCIA GPX")
         announcedManeuverIndex = -1
@@ -5293,7 +5296,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             routeText.text = distanceLabel + "\n" + shortInstruction
             routeText.typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-            routeText.textSize = 18f
+            routeText.textSize = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 47f else 40f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
         val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
