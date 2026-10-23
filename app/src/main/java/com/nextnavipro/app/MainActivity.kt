@@ -557,7 +557,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.addView(weatherText, params(-1, dp(52)))
         limitValue = TextView(this).apply {
             text = "—"
-            textSize = 26f
+            // Slightly larger European speed-limit sign; preserve the existing layout
+            // so the dashboard remains compact in portrait and landscape.
+            textSize = 29f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -568,7 +570,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             contentDescription = "Limite di velocità. Tocca per impostare o aggiornare manualmente"
             setOnClickListener { showSpeedLimitOptions() }
         }
-        infoColumn.addView(limitValue, params(dp(58), dp(58)))
+        infoColumn.addView(limitValue, params(dp(68), dp(68)))
         gpsText = TextView(this).apply {
             text = appText("RICERCA GPS…")
             textSize = 10f
