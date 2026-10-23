@@ -42,6 +42,9 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
+      - name: Test Jarvis backend (rate limiting, TomTom parsing; mocked upstream, no network or keys)
+        working-directory: backend/jarvis-render
+        run: npm test
       # The production Jarvis endpoint is Render. The Cloudflare Worker is legacy code and is not used by this build.
       - name: Prepare persistent debug signing (optional)
         env:

@@ -216,6 +216,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
     private var speedLimitLookupInFlight = false
+    // Where/when the currently displayed provider limit was verified, and the paid-provider backoff.
+    private var speedLimitVerifiedFix: SpeedLimitFix? = null
+    private val tomTomBackoff = ProviderBackoff()
     private var currentSpeedLimit: Int? = null
     // User-confirmed limit override. Persisted independently from automatic road lookup.
     private var manualSpeedLimit: Int? = null
@@ -264,7 +267,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRadarAlertId: Long = -1L
     private var lastRadarAlertMs = 0L
     private var lastRerouteAttemptMs = 0L
-    private var offRouteFixes = 0
+    private var offRouteSinceMs = 0L
+    private var arrivalClosestMeters = Float.MAX_VALUE
+    private var arrivalStopSinceMs = 0L
+    private var navigationArrived = false
     private var lastRawGpsLocation: Location? = null
     private var lastAcceptedFixElapsedMs = 0L
     private var smoothedGpsLocation: Location? = null
@@ -3056,6 +3062,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(235, 239, 241))
         renderSpeedDigits(lastDisplayedSpeed)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
+        currentLocation?.let { updateGpsStatus(it) }
+        updateRadarStatusColor()
     }
 
     private fun android.view.View.walkViews(): List<View> {
@@ -3434,6 +3442,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
+        navigationArrived = false
+        arrivalClosestMeters = Float.MAX_VALUE
+        arrivalStopSinceMs = 0L
+        offRouteSinceMs = 0L
         routePreviewResult = null
         routePreviewDestination = null
         routePreviewFetchedAt = 0L
@@ -3621,6 +3633,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    navigationArrived = false
+                    arrivalClosestMeters = Float.MAX_VALUE
+                    arrivalStopSinceMs = 0L
+                    offRouteSinceMs = 0L
                     routePreviewResult = null
                     routePreviewDestination = null
                     routePreviewFetchedAt = 0L
@@ -4059,6 +4075,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
+        if (checkArrivalAndFinish(smoothed)) return
         checkOffRouteAndReroute(smoothed)
         checkRadarProximityAlert(smoothed)
     }
@@ -4131,6 +4148,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun speedLimitFix(location: Location, timeMs: Long): SpeedLimitFix {
+        // Ignore the course while almost stationary: Android may retain a stale bearing.
+        val reliableBearing = if (location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f &&
+            location.bearing.isFinite()) location.bearing else null
+        return SpeedLimitFix(location.latitude, location.longitude, reliableBearing, timeMs)
+    }
+
+    private fun recordTomTomOutcome(result: TomTomSpeedLimitResult?) {
+        if (result == null) return
+        val nowMs = System.currentTimeMillis()
+        when (result.status) {
+            TomTomLookupStatus.RATE_LIMITED -> tomTomBackoff.onRateLimited(result.retryAfterSec, nowMs)
+            TomTomLookupStatus.TIMEOUT,
+            TomTomLookupStatus.NETWORK_ERROR,
+            TomTomLookupStatus.HTTP_ERROR -> tomTomBackoff.onTransientFailure(nowMs)
+            TomTomLookupStatus.LIMIT,
+            TomTomLookupStatus.NO_LIMIT -> tomTomBackoff.onSuccess()
+        }
+    }
+
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         // A manual value takes precedence over all providers until the rider explicitly
         // switches back to automatic mode. Never let a late network response replace it.
@@ -4142,20 +4179,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             currentSpeedLimit = null
             updateSpeedLimitDisplay()
         } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
-        val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
-        // Refresh often enough to keep up with the vehicle. The previous 20 s / 450 m
-        // gate let the GPS move hundreds of metres while a slow Overpass request was pending.
-        if (previous != null && previous.distanceTo(location) < 150f &&
-            now - lastSpeedLimitQueryMs < 8_000L) {
-            updateSpeedLimitDisplay()
-            return
-        }
-        if (previous != null && previous.distanceTo(location) > 180f) {
+        val nowFix = speedLimitFix(location, now)
+        // A verified limit stays on screen only while the vehicle is still compatible with the place
+        // where it was verified (bounded distance and age, same line of travel, no turn). Otherwise
+        // it becomes unknown. This replaces the old blanket "moved more than 180 m" rule, which
+        // blanked a perfectly valid limit on a straight road yet had no notion of parallel roads.
+        val verifiedFix = speedLimitVerifiedFix
+        if (currentSpeedLimit != null && verifiedFix != null &&
+            !SpeedLimitPolicy.isLimitApplicable(verifiedFix, nowFix)) {
             currentRoadMatch = null
             currentSpeedLimit = null
+            speedLimitVerifiedFix = null
             updateGpsStatus(location)
             updateSpeedLimitDisplay()
+        }
+        // Ask the providers again by distance travelled, not every few seconds: the paid TomTom
+        // quota is limited and the previous 8 s / 150 m cadence also tripped the backend limiter.
+        val previousFix = lastSpeedLimitQueryLocation?.let { speedLimitFix(it, lastSpeedLimitQueryMs) }
+        if (!SpeedLimitPolicy.shouldQuery(previousFix, nowFix)) {
+            updateSpeedLimitDisplay()
+            return
         }
         // Never launch a second slow network lookup while the previous one is running.
         // Otherwise each new GPS fix supersedes the older response and the sign can
@@ -4167,6 +4211,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
         val queryLocation = Location(location)
+        val queryFix = speedLimitFix(queryLocation, now)
         val point = NavPoint(queryLocation.latitude, queryLocation.longitude)
         // Ignore bearing while almost stationary: Android may retain a stale course.
         val bearing = queryLocation.bearing.takeIf {
@@ -4178,12 +4223,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (recent.isEmpty() || recent.last().distanceTo(queryLocation) > 3f) recent + Location(queryLocation) else recent
         }.takeLast(8)
         thread(name = "speed-limit-provider-match") {
-            val tomTomResult = try {
+            val tomTomResult = if (tomTomBackoff.isBlocked(System.currentTimeMillis())) {
+                android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "TomTom lookup skipped: backoff for " +
+                    tomTomBackoff.remainingMs(System.currentTimeMillis()) / 1000L + " s")
+                null
+            } else try {
                 RenderTomTomSpeedLimitService.findLimit(tracePoints)
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "TomTom trace lookup failed", error)
                 null
             }
+            recordTomTomOutcome(tomTomResult)
             val tomTomMatch = tomTomResult?.speedLimitKmh?.let { limit ->
                 RoadMatch(tomTomResult.road, tomTomResult.ref, limit, tomTomResult.highwayType, 0f, bearing ?: 0f)
             }
@@ -4214,9 +4264,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speedLimitLookupInFlight = false
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
-                if (latest != null && latest.distanceTo(queryLocation) > 180f) {
+                // A late answer is still useful if the vehicle is still on the line of travel it was
+                // asked about; it is dropped only when position/course are no longer compatible.
+                val latestFix = latest?.let { speedLimitFix(it, System.currentTimeMillis()) }
+                if (latest != null && latestFix != null && !SpeedLimitPolicy.isLimitApplicable(queryFix, latestFix)) {
                     currentRoadMatch = null
                     currentSpeedLimit = null
+                    speedLimitVerifiedFix = null
                     lastSpeedLimitQueryLocation = null
                     lastSpeedLimitQueryMs = 0L
                     updateGpsStatus(latest)
@@ -4226,6 +4280,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 currentRoadMatch = match
                 currentSpeedLimit = manualSpeedLimit ?: match?.speedLimitKmh
+                speedLimitVerifiedFix = if (manualSpeedLimit == null && match?.speedLimitKmh != null) queryFix else null
                 if (match == null) {
                     android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "No plausible road match for current GPS fix")
                 } else if (match.speedLimitKmh == null) {
@@ -4251,9 +4306,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsText.text = (roadName?.takeIf { it.isNotBlank() } ?: "GPS") +
             " • " + accuracy + satelliteInfo
         gpsText.setTextColor(
-            if (location.hasAccuracy() && location.accuracy <= 15f) Color.rgb(0, 190, 70)
-            else Color.rgb(235, 165, 0)
+            when {
+                !location.hasAccuracy() -> Color.rgb(235, 165, 0)
+                location.accuracy <= 15f -> Color.rgb(0, 190, 70)
+                location.accuracy <= 35f -> Color.rgb(235, 165, 0)
+                else -> Color.rgb(235, 70, 55)
+            }
         )
+    }
+
+    /**
+     * Shared status palette for GPS and Radar OSM:
+     * green = usable/current data, amber = pending or incomplete, red = unavailable/error.
+     * Radar data availability is independent from GPS fix quality.
+     */
+    private fun updateRadarStatusColor() {
+        if (!::radarText.isInitialized) return
+        val label = radarText.text?.toString().orEmpty()
+        val color = when {
+            label.contains("AUTOVELOX", ignoreCase = true) ||
+                radarFetchFailed ||
+                label.contains("server non disponibile", ignoreCase = true) -> Color.rgb(235, 70, 55)
+            label.contains("aggiornamento", ignoreCase = true) ||
+                label.contains("ricerca dati", ignoreCase = true) ||
+                !radarCacheCoversCurrentArea -> Color.rgb(235, 165, 0)
+            else -> Color.rgb(0, 190, 70)
+        }
+        radarText.setTextColor(color)
     }
 
     private fun constellationSummary(): String {
@@ -4529,7 +4608,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun searchRoadForEditor() {
         val query = EditText(this).apply { hint = "Es. TF-82, TF-1, Calle Morro Afonso Alto"; setSingleLine(true) }
         val dialog = AlertDialog.Builder(this).setTitle("Cerca una strada").setMessage("Ricerca online OpenStreetMap. Seleziona il risultato corretto, controllando località e posizione.")
-            .setView(query).setPositiveButton("Cerca", null).setNegativeButton("Annulla", null).create()
+            .setView(query)
+            .setPositiveButton("Cerca", null)
+            .setNeutralButton("Seleziona sulla mappa") { _, _ -> startManualSegmentDraft() }
+            .setNegativeButton("Annulla", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val text = query.text.toString().trim()
@@ -4597,9 +4679,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     refreshManualSegmentMarkers()
                 }
             } catch (error: Exception) {
-                runOnUiThread { if (!isFinishing) AlertDialog.Builder(this).setTitle("Geometria stradale non disponibile")
-                    .setMessage(error.message ?: "Non è stato possibile recuperare la geometria OSM.")
-                    .setPositiveButton("OK", null).show() }
+                runOnUiThread {
+                    if (!isFinishing) AlertDialog.Builder(this)
+                        .setTitle("Geometria stradale non disponibile")
+                        .setMessage((error.message ?: "Non è stato possibile recuperare la geometria OSM.") +
+                            "\n\nPuoi continuare senza la geometria online selezionando manualmente il tratto sulla mappa. " +
+                            "In questo caso dovrai indicare almeno 3 punti reali lungo la strada e verificare tu il limite.")
+                        .setPositiveButton("Seleziona manualmente") { _, _ -> startManualSegmentDraft() }
+                        .setNegativeButton("Chiudi", null)
+                        .show()
+                }
             }
         }.start()
     }
@@ -4782,9 +4871,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speedingVoiceActive = true
                 if (voiceGuideReady) {
                     voiceGuide?.setSpeechRate(0.96f)
+                    // This alert is time-sensitive: replace any queued stale speed warning.
+                    // The values are read from the latest accepted fix when this method runs.
                     voiceGuide?.speak(
                         "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari.",
-                        TextToSpeech.QUEUE_ADD, null, "speed-limit-overspeed"
+                        TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
                     )
                 }
             }
@@ -4875,25 +4966,130 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
         ) }
         radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
+        updateRadarStatusColor()
+    }
+
+    /**
+     * Finish navigation once the rider reaches, passes, or parks just beyond the destination.
+     * Passing is accepted only near the end of the active route, preventing nearby parallel
+     * roads from prematurely completing navigation.
+     */
+    private fun checkArrivalAndFinish(location: Location): Boolean {
+        val route = routeResult ?: run {
+            arrivalClosestMeters = Float.MAX_VALUE
+            arrivalStopSinceMs = 0L
+            navigationArrived = false
+            return false
+        }
+        val target = destination ?: return false
+        if (navigationArrived) return false
+        val targetLocation = Location("destination").apply {
+            latitude = target.point.latitude
+            longitude = target.point.longitude
+        }
+        val distanceToDestination = location.distanceTo(targetLocation)
+        arrivalClosestMeters = minOf(arrivalClosestMeters, distanceToDestination)
+        val speed = if (location.hasSpeed()) location.speed else Float.MAX_VALUE
+        val now = SystemClock.elapsedRealtime()
+        if (speed < 1.0f) {
+            if (arrivalStopSinceMs == 0L) arrivalStopSinceMs = now
+        } else {
+            arrivalStopSinceMs = 0L
+        }
+        val accuracy = if (location.hasAccuracy()) location.accuracy else 20f
+        val arrivalRadius = maxOf(30f, (accuracy * 1.5f).coerceAtMost(60f))
+        val routeMatch = findRouteProgressIndex(route, location)
+        // A failed/low-confidence match returns Float.MAX_VALUE while preserving the last index.
+        // Never interpret that fallback index as proof that the rider reached the route end.
+        val routeMatchConfident = routeMatch.second.isFinite() && routeMatch.second < Float.MAX_VALUE
+        val nearRouteEnd = routeMatchConfident && route.points.size >= 2 &&
+            routeMatch.first >= (route.points.lastIndex * 0.85f).toInt()
+        val movingAwayAfterPassing = nearRouteEnd &&
+            arrivalClosestMeters <= maxOf(70f, arrivalRadius) &&
+            distanceToDestination - arrivalClosestMeters >= 35f &&
+            speed > 2.5f
+        val parkedJustBeyond = nearRouteEnd &&
+            arrivalClosestMeters <= 100f &&
+            arrivalStopSinceMs != 0L && now - arrivalStopSinceMs >= 8_000L &&
+            distanceToDestination <= 120f
+        if (distanceToDestination > arrivalRadius && !movingAwayAfterPassing && !parkedJustBeyond) return false
+
+        navigationArrived = true
+        // Stop the route/recording exactly once, then leave a durable arrival message on screen.
+        clearRoute()
+        routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
+        if (voiceGuideReady) {
+            voiceGuide?.speak("Sei arrivato a destinazione.", TextToSpeech.QUEUE_FLUSH, null, "navigation-arrived")
+        }
+        Toast.makeText(this, "Sei arrivato a destinazione", Toast.LENGTH_LONG).show()
+        return true
+    }
+
+    /**
+     * Compute distance to route LINE SEGMENTS, not only route vertices. Vertex-only distance
+     * overestimates cross-track error on long geometry segments and can trigger false reroutes.
+     */
+    private fun distanceToActiveRouteMeters(location: Location, route: RouteResult): Float {
+        if (route.points.size < 2) return Float.MAX_VALUE
+        val lat0 = Math.toRadians(location.latitude)
+        val metersPerLon = 111_320.0 * kotlin.math.cos(lat0)
+        val metersPerLat = 111_320.0
+        var best = Double.POSITIVE_INFINITY
+        for (i in 0 until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val ax = (a.longitude - location.longitude) * metersPerLon
+            val ay = (a.latitude - location.latitude) * metersPerLat
+            val bx = (b.longitude - location.longitude) * metersPerLon
+            val by = (b.latitude - location.latitude) * metersPerLat
+            val dx = bx - ax
+            val dy = by - ay
+            val denominator = dx * dx + dy * dy
+            val t = if (denominator <= 1e-6) 0.0 else ((-(ax * dx + ay * dy) / denominator).coerceIn(0.0, 1.0))
+            val distance = kotlin.math.hypot(ax + t * dx, ay + t * dy)
+            if (distance < best) best = distance
+        }
+        return best.toFloat()
     }
 
     private fun checkOffRouteAndReroute(location: Location) {
-        val route = routeResult ?: return
-        val target = destination ?: return
-        if (!location.hasAccuracy() || location.accuracy > 25f) return
-        val nearest = route.points.minOfOrNull { point ->
-            val d = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
-            d[0]
-        } ?: return
-        if (nearest > maxOf(65f, location.accuracy * 2.5f)) offRouteFixes++ else offRouteFixes = 0
-        if (offRouteFixes < 3) return
-        val now = System.currentTimeMillis()
-        if (now - lastRerouteAttemptMs < 20_000L || isCalculatingRoute) return
+        val route = routeResult ?: run { offRouteSinceMs = 0L; return }
+        val target = destination ?: run { offRouteSinceMs = 0L; return }
+        if (!location.hasAccuracy() || location.accuracy > 25f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        // Do not initiate a new route while already approaching/serving the destination.
+        val targetLocation = Location("destination").apply {
+            latitude = target.point.latitude
+            longitude = target.point.longitude
+        }
+        if (location.distanceTo(targetLocation) <= 120f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        if (!location.hasSpeed() || location.speed < 2.0f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        val lateralMeters = distanceToActiveRouteMeters(location, route)
+        val threshold = maxOf(25f, location.accuracy * 2.5f)
+        val now = SystemClock.elapsedRealtime()
+        if (lateralMeters <= threshold) {
+            offRouteSinceMs = 0L
+            return
+        }
+        if (offRouteSinceMs == 0L) offRouteSinceMs = now
+        // A single noisy fix or failed route match is not enough. Require sustained departure;
+        // very large departures still need a short confirmation to avoid one-fix GPS jumps.
+        val hardDeparture = lateralMeters >= 60f && now - offRouteSinceMs >= 2_000L
+        val sustainedDeparture = now - offRouteSinceMs >= 6_000L
+        if (!hardDeparture && !sustainedDeparture) return
+        if (now - lastRerouteAttemptMs < 30_000L || isCalculatingRoute) return
         lastRerouteAttemptMs = now
-        offRouteFixes = 0
+        offRouteSinceMs = 0L
         isCalculatingRoute = true
-        if (::routeText.isInitialized) routeText.text = "DEVIAZIONE RILEVATA • RICALCOLO…"
+        if (::routeText.isInitialized) routeText.text = "DEVIAZIONE CONFERMATA • RICALCOLO…"
         thread(name = "valhalla-reroute") {
             try {
                 val recalculated = NavigationServices.calculateRoute(
@@ -4913,12 +5109,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute") }
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_FLUSH, null, "reroute") }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
                     isCalculatingRoute = false
-                    if (::routeText.isInitialized) routeText.text = "DEVIAZIONE • RICALCOLO NON DISPONIBILE"
+                    if (::routeText.isInitialized) routeText.text = "FUORI PERCORSO • RICALCOLO NON DISPONIBILE"
                 }
             }
         }
@@ -5147,6 +5343,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         lastRadarAttemptMs = now
         radarText.text = if (radarCameras.isEmpty()) "RADAR OSM • aggiornamento dati…" else "RADAR OSM: " + radarCameras.size + " • aggiornamento…"
+        updateRadarStatusColor()
         Thread({
             try {
                 val fresh = RadarService.fetchNear(center)
@@ -5181,7 +5378,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             "RADAR OSM: " + radarCameras.size + " • dati comunitari"
         }
-        radarText.setTextColor(Color.rgb(255, 70, 55))
+        updateRadarStatusColor()
     }
 
     private fun drawRadars() {
@@ -5434,7 +5631,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
-        val durationMs = ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        // Animate across nearly the whole interval between accepted fixes. The previous
+        // distance/speed duration often ended early, leaving the marker visibly paused before
+        // the next fix arrived (especially at low speeds or after smoothing).
+        val durationMs = if (movingTimeMs in 180L..2_000L) {
+            movingTimeMs.coerceIn(220L, 1_100L)
+        } else {
+            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        }
         val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
         val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
         val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
