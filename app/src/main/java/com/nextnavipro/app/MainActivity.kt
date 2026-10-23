@@ -753,7 +753,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             maneuverIcon.translationY = -dp(47).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(116)))
             routeText.textSize = 15f
-            routeText.translationY = 0f
+            routeText.translationY = -dp(47).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
