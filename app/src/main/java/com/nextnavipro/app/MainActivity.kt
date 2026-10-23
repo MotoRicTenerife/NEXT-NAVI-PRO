@@ -707,17 +707,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            // Portrait: compact and lift turn guidance so it stays visible on shorter screens.
-            maneuverIcon.textSize = 92f
-            // Preserve the original portrait positioning; only prevent the instruction text from clipping.
-            maneuverIcon.translationY = -dp(24).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(98)))
+            // Portrait: center the complete navigation group (arrow + instruction)
+            // vertically against the speed-limit sign; avoid translating only the arrow.
+            maneuverIcon.textSize = 88f
+            maneuverIcon.translationY = 0f
+            navHalf.addView(maneuverIcon, params(-1, dp(88)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(8).toFloat()
+            routeText.translationY = 0f
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
-            navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -745,12 +745,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Keep the landscape dashboard inside its measured area. Translating the
             // whole content row upward caused it to overlap the search/weather/status row.
             content.translationY = 0f
+            // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
             maneuverIcon.textSize = 116f
             maneuverIcon.translationY = 0f
             navHalf.addView(maneuverIcon, params(-1, dp(116)))
             routeText.textSize = 15f
             routeText.translationY = 0f
-            navHalf.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
+            routeText.includeFontPadding = false
+            routeText.maxLines = 3
+            navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
