@@ -4972,8 +4972,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val accuracy = if (location.hasAccuracy()) location.accuracy else 20f
         val arrivalRadius = maxOf(30f, (accuracy * 1.5f).coerceAtMost(60f))
         val routeMatch = findRouteProgressIndex(route, location)
-        val nearRouteEnd = route.points.isNotEmpty() &&
-            routeMatch.first >= (route.points.lastIndex - maxOf(8, (route.points.lastIndex * 0.08f).toInt())).coerceAtLeast(0)
+        val nearRouteEnd = route.points.size >= 2 &&
+            routeMatch.first >= (route.points.lastIndex * 0.85f).toInt()
         val movingAwayAfterPassing = nearRouteEnd &&
             arrivalClosestMeters <= maxOf(70f, arrivalRadius) &&
             distanceToDestination - arrivalClosestMeters >= 35f &&
@@ -5600,7 +5600,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
-        val durationMs = ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        // Animate across nearly the whole interval between accepted fixes. The previous
+        // distance/speed duration often ended early, leaving the marker visibly paused before
+        // the next fix arrived (especially at low speeds or after smoothing).
+        val durationMs = if (movingTimeMs in 180L..2_000L) {
+            movingTimeMs.coerceIn(220L, 1_100L)
+        } else {
+            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        }
         val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
         val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
         val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
