@@ -27,3 +27,28 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 The Render free web service can sleep after inactivity, causing a cold start delay. Test response time before relying on online Jarvis while riding. The offline app features remain separate. TomTom is optional until `TOMTOM_API_KEY` is set: if no provider is configured, the POST endpoint returns a configuration error; Android's separate OSM fallback remains available. Verify TomTom plan, quotas, and permitted use before relying on the service.
 
 GitHub Actions defaults `NEXT_NAVI_AI_ENDPOINT` to the Render URL above. If the repository variable is set, it must also point to this Render service. Keep the existing APK signing secrets and signing configuration unchanged.
+
+## TomTom quota and rate limiting
+
+`POST /speed-limit` calls TomTom Snap to Roads, which counts against TomTom's free allowance of
+2,500 non-tile requests per day (shared by every non-tile API on the key; Snap to Roads default
+QPS is 5). Admission is decided in `speedLimitGuard.js`, independently from the manual-segment
+archive (`/speed-limit-segments*`, 20 requests / 10 minutes per client, unchanged):
+
+| Control | Default | Environment override |
+| --- | --- | --- |
+| Per-client token bucket (burst) | 30 | `TOMTOM_RATE_BURST` |
+| Per-client refill | 1 token / 5 s | `TOMTOM_RATE_REFILL_MS` |
+| Global upstream calls per UTC day | 2000 | `TOMTOM_DAILY_BUDGET` |
+| Cooldown after TomTom 429 | `Retry-After` (5–300 s, default 30 s) | — |
+| Cooldown after TomTom 401/403 | 300 s | — |
+
+Refusals are `429` with a `Retry-After` header and `{ "reason", "retryAfterSeconds" }` where
+`reason` is `rate_limited`, `daily_budget_exhausted`, `provider_cooldown` or
+`tomtom_quota_or_rate_limit`. Malformed requests (`400`) never consume admission. Counters are in
+memory and reset when the Render free instance restarts, so the daily budget is a safeguard, not
+accounting. `GET /speed-limit/status` reports the guard state (no secrets) and `GET /health`
+reports `revision` (`RENDER_GIT_COMMIT`) to identify the deployed commit.
+
+Run the tests with `npm test`. Set `NEXT_NAVI_TRACE_CSV` to a recorded trip CSV to replay a real ride;
+otherwise a deterministic synthetic trace of the same duration is used.

@@ -216,6 +216,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
     private var speedLimitLookupInFlight = false
+    // Where/when the currently displayed provider limit was verified, and the paid-provider backoff.
+    private var speedLimitVerifiedFix: SpeedLimitFix? = null
+    private val tomTomBackoff = ProviderBackoff()
     private var currentSpeedLimit: Int? = null
     // User-confirmed limit override. Persisted independently from automatic road lookup.
     private var manualSpeedLimit: Int? = null
@@ -4131,6 +4134,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun speedLimitFix(location: Location, timeMs: Long): SpeedLimitFix {
+        // Ignore the course while almost stationary: Android may retain a stale bearing.
+        val reliableBearing = if (location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f &&
+            location.bearing.isFinite()) location.bearing else null
+        return SpeedLimitFix(location.latitude, location.longitude, reliableBearing, timeMs)
+    }
+
+    private fun recordTomTomOutcome(result: TomTomSpeedLimitResult?) {
+        if (result == null) return
+        val nowMs = System.currentTimeMillis()
+        when (result.status) {
+            TomTomLookupStatus.RATE_LIMITED -> tomTomBackoff.onRateLimited(result.retryAfterSec, nowMs)
+            TomTomLookupStatus.TIMEOUT,
+            TomTomLookupStatus.NETWORK_ERROR,
+            TomTomLookupStatus.HTTP_ERROR -> tomTomBackoff.onTransientFailure(nowMs)
+            TomTomLookupStatus.LIMIT,
+            TomTomLookupStatus.NO_LIMIT -> tomTomBackoff.onSuccess()
+        }
+    }
+
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         // A manual value takes precedence over all providers until the rider explicitly
         // switches back to automatic mode. Never let a late network response replace it.
@@ -4142,20 +4165,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             currentSpeedLimit = null
             updateSpeedLimitDisplay()
         } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
-        val previous = lastSpeedLimitQueryLocation
         val now = System.currentTimeMillis()
-        // Refresh often enough to keep up with the vehicle. The previous 20 s / 450 m
-        // gate let the GPS move hundreds of metres while a slow Overpass request was pending.
-        if (previous != null && previous.distanceTo(location) < 150f &&
-            now - lastSpeedLimitQueryMs < 8_000L) {
-            updateSpeedLimitDisplay()
-            return
-        }
-        if (previous != null && previous.distanceTo(location) > 180f) {
+        val nowFix = speedLimitFix(location, now)
+        // A verified limit stays on screen only while the vehicle is still compatible with the place
+        // where it was verified (bounded distance and age, same line of travel, no turn). Otherwise
+        // it becomes unknown. This replaces the old blanket "moved more than 180 m" rule, which
+        // blanked a perfectly valid limit on a straight road yet had no notion of parallel roads.
+        val verifiedFix = speedLimitVerifiedFix
+        if (currentSpeedLimit != null && verifiedFix != null &&
+            !SpeedLimitPolicy.isLimitApplicable(verifiedFix, nowFix)) {
             currentRoadMatch = null
             currentSpeedLimit = null
+            speedLimitVerifiedFix = null
             updateGpsStatus(location)
             updateSpeedLimitDisplay()
+        }
+        // Ask the providers again by distance travelled, not every few seconds: the paid TomTom
+        // quota is limited and the previous 8 s / 150 m cadence also tripped the backend limiter.
+        val previousFix = lastSpeedLimitQueryLocation?.let { speedLimitFix(it, lastSpeedLimitQueryMs) }
+        if (!SpeedLimitPolicy.shouldQuery(previousFix, nowFix)) {
+            updateSpeedLimitDisplay()
+            return
         }
         // Never launch a second slow network lookup while the previous one is running.
         // Otherwise each new GPS fix supersedes the older response and the sign can
@@ -4167,6 +4197,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
         val queryLocation = Location(location)
+        val queryFix = speedLimitFix(queryLocation, now)
         val point = NavPoint(queryLocation.latitude, queryLocation.longitude)
         // Ignore bearing while almost stationary: Android may retain a stale course.
         val bearing = queryLocation.bearing.takeIf {
@@ -4178,12 +4209,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (recent.isEmpty() || recent.last().distanceTo(queryLocation) > 3f) recent + Location(queryLocation) else recent
         }.takeLast(8)
         thread(name = "speed-limit-provider-match") {
-            val tomTomResult = try {
+            val tomTomResult = if (tomTomBackoff.isBlocked(System.currentTimeMillis())) {
+                android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "TomTom lookup skipped: backoff for " +
+                    tomTomBackoff.remainingMs(System.currentTimeMillis()) / 1000L + " s")
+                null
+            } else try {
                 RenderTomTomSpeedLimitService.findLimit(tracePoints)
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "TomTom trace lookup failed", error)
                 null
             }
+            recordTomTomOutcome(tomTomResult)
             val tomTomMatch = tomTomResult?.speedLimitKmh?.let { limit ->
                 RoadMatch(tomTomResult.road, tomTomResult.ref, limit, tomTomResult.highwayType, 0f, bearing ?: 0f)
             }
@@ -4214,9 +4250,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speedLimitLookupInFlight = false
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
                 val latest = currentLocation
-                if (latest != null && latest.distanceTo(queryLocation) > 180f) {
+                // A late answer is still useful if the vehicle is still on the line of travel it was
+                // asked about; it is dropped only when position/course are no longer compatible.
+                val latestFix = latest?.let { speedLimitFix(it, System.currentTimeMillis()) }
+                if (latest != null && latestFix != null && !SpeedLimitPolicy.isLimitApplicable(queryFix, latestFix)) {
                     currentRoadMatch = null
                     currentSpeedLimit = null
+                    speedLimitVerifiedFix = null
                     lastSpeedLimitQueryLocation = null
                     lastSpeedLimitQueryMs = 0L
                     updateGpsStatus(latest)
@@ -4226,6 +4266,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 currentRoadMatch = match
                 currentSpeedLimit = manualSpeedLimit ?: match?.speedLimitKmh
+                speedLimitVerifiedFix = if (manualSpeedLimit == null && match?.speedLimitKmh != null) queryFix else null
                 if (match == null) {
                     android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "No plausible road match for current GPS fix")
                 } else if (match.speedLimitKmh == null) {

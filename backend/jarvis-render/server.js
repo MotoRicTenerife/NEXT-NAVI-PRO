@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -6,21 +7,29 @@ const MAX_REQUEST_CHARS = clampInt(process.env.MAX_REQUEST_CHARS, 500, 1, 4000);
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 const ipWindows = new Map();
-const speedLimitIpWindows = new Map();
 const roadSearchIpWindows = new Map();
+// The manual-segment archive (Firestore) and the TomTom proxy have independent budgets:
+// syncing riders' manual segments must never consume TomTom admission, and vice versa.
+const archiveLimiter = createFixedWindowLimiter({ max: 20, windowMs: WINDOW_MS });
+const speedLimitGuard = createSpeedLimitGuard({
+  burst: clampInt(process.env.TOMTOM_RATE_BURST, 30, 1, 500),
+  refillMs: clampInt(process.env.TOMTOM_RATE_REFILL_MS, 5000, 500, 600000),
+  dailyBudget: clampInt(process.env.TOMTOM_DAILY_BUDGET, 2000, 1, 1000000)
+});
 
 function clampInt(raw, fallback, min, max) {
   const value = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
-function send(res, status, body) {
+function send(res, status, body, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
-    "content-length": Buffer.byteLength(payload)
+    "content-length": Buffer.byteLength(payload),
+    ...extraHeaders
   });
   res.end(payload);
 }
@@ -63,22 +72,6 @@ function roadSearchRateLimited(ip, now) {
   if (roadSearchIpWindows.size > 5000) {
     for (const [key, value] of roadSearchIpWindows) {
       if (now - value.startedAt >= WINDOW_MS) roadSearchIpWindows.delete(key);
-    }
-  }
-  return false;
-}
-
-function speedLimitRateLimited(ip, now) {
-  let window = speedLimitIpWindows.get(ip);
-  if (!window || now - window.startedAt >= WINDOW_MS) {
-    window = { startedAt: now, count: 0 };
-    speedLimitIpWindows.set(ip, window);
-  }
-  if (window.count >= 20) return true;
-  window.count += 1;
-  if (speedLimitIpWindows.size > 5000) {
-    for (const [key, value] of speedLimitIpWindows) {
-      if (now - value.startedAt >= WINDOW_MS) speedLimitIpWindows.delete(key);
     }
   }
   return false;
@@ -329,7 +322,12 @@ function firestoreDocumentToSegment(doc) {
 }
 async function handleCloudSpeedSegments(req, res, url) {
   const ip = getClientIp(req);
-  if (speedLimitRateLimited(ip, Date.now())) return send(res, 429, { error: "Too many speed-limit archive requests; try again later" });
+  const archiveCheck = archiveLimiter.check(ip, Date.now());
+  if (!archiveCheck.allowed) {
+    const retryAfterSeconds = Math.max(1, Math.ceil(archiveCheck.retryAfterMs / 1000));
+    return send(res, 429, { error: "Too many speed-limit archive requests; try again later", retryAfterSeconds },
+      { "retry-after": String(retryAfterSeconds) });
+  }
   try {
     if (req.method === "GET" && url.pathname === "/speed-limit-segments") {
       const segments = [];
@@ -476,6 +474,7 @@ async function handle(req, res) {
       ok: true,
       osmDiagnostic: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
+      tomtomGuard: speedLimitGuard.snapshot(),
       revision: process.env.RENDER_GIT_COMMIT || "unknown"
     });
   }
@@ -593,10 +592,6 @@ async function handle(req, res) {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
     if (!tomtomApiKey) return send(res, 503, { error: "TomTom speed-limit provider not configured" });
-    if (speedLimitRateLimited(getClientIp(req), Date.now())) {
-      return send(res, 429, { error: "Too many speed-limit requests; try again later" });
-    }
-
     let input;
     try {
       input = await readJson(req);
@@ -608,6 +603,17 @@ async function handle(req, res) {
       !point || !Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90 ||
       !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180)) {
       return send(res, 400, { error: "At least two valid GPS points are required" });
+    }
+
+    // Admission is decided only for well-formed requests, right before the paid upstream call.
+    const admission = speedLimitGuard.admit(getClientIp(req));
+    if (!admission.allowed) {
+      console.warn("TomTom speed-limit request refused", { reason: admission.reason, retryAfterSeconds: admission.retryAfterSeconds });
+      return send(res, 429, {
+        error: "Speed-limit requests are temporarily limited; try again later",
+        reason: admission.reason,
+        retryAfterSeconds: admission.retryAfterSeconds
+      }, { "retry-after": String(admission.retryAfterSeconds) });
     }
 
     // Prefer TomTom Snap to Roads. Keep the API key exclusively on the server.
@@ -635,6 +641,7 @@ async function handle(req, res) {
           body: JSON.stringify({ points: tomtomPoints }),
           signal: AbortSignal.timeout(9000)
         });
+        speedLimitGuard.noteUpstreamStatus(upstream.status, upstream.headers?.get?.("retry-after"));
         if (upstream.ok) {
           const data = await upstream.json();
           const routeSegments = Array.isArray(data?.route) ? data.route : [];
@@ -704,6 +711,13 @@ async function handle(req, res) {
             : upstream.status === 429 ? "tomtom_quota_or_rate_limit"
             : "tomtom_http_" + upstream.status;
           console.warn("TomTom Snap to Roads failed", { status: upstream.status });
+          if (upstream.status === 429) {
+            // TomTom itself is refusing: tell the app to back off for the cooldown instead of
+            // answering "no limit", which would make it ask again within seconds.
+            const retryAfterSeconds = Math.max(1, speedLimitGuard.cooldown().seconds);
+            return send(res, 429, { error: "TomTom quota or rate limit reached", reason: tomtomFailureReason, retryAfterSeconds },
+              { "retry-after": String(retryAfterSeconds) });
+          }
         }
       } catch (error) {
         tomtomFailureReason = error?.name === "TimeoutError" ? "tomtom_timeout" : "tomtom_network_error";
@@ -959,3 +973,5 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log("NEXT NAVI PRO Jarvis proxy listening", { host: HOST, port: PORT });
 });
+
+export { server };
