@@ -856,13 +856,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                 Thread {
                                     val provider = RenderRoadEditorService.proposeSpeedLimit(selected)
                                     runOnUiThread {
-                                        val osmTags = roadEditorGeometryTags
-                                        val osmLimit = if (provider.reason == "multiple_speed_limits_in_selected_segment") null else
-                                            parseExplicitSpeedLimit(osmTags?.optString(if (selectedReverse) "maxspeed:backward" else "maxspeed:forward"))
-                                                ?: parseExplicitSpeedLimit(osmTags?.optString("maxspeed"))
-                                        roadEditorProposedLimit = provider.speedLimitKmh ?: osmLimit
-                                        roadEditorProposedSource = provider.source?.takeIf { provider.speedLimitKmh != null || provider.reason == "multiple_speed_limits_in_selected_segment" }
-                                            ?: if (osmLimit != null) "OpenStreetMap maxspeed" else provider.source
+                                        // OSM geometry/tags may guide road direction, but never supply a legal speed limit.
+                                        // Automatic proposals in the editor must come from TomTom only.
+                                        roadEditorProposedLimit = provider.speedLimitKmh
+                                        roadEditorProposedSource = provider.source
                                         finishSegmentButton?.isEnabled = true
                                         val proposal = roadEditorProposedLimit?.let { it.toString() + " km/h (" + (roadEditorProposedSource ?: "fonte non specificata") + ")" }
                                             ?: when (provider.reason) {
@@ -4590,7 +4587,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showManualSpeedLimitSegmentsMenu() {
-        val labels = mutableListOf("⌕ Cerca strada online (OSM + limite provider)", "＋ Crea tratto manualmente sulla mappa")
+        val labels = mutableListOf("⌕ Cerca strada online (geometria OSM + limite TomTom)", "＋ Crea tratto manualmente sulla mappa")
         labels += manualSpeedLimitSegments.mapIndexed { i, s -> (s.roadName ?: "Tratto " + (i + 1)) + " • → " + (s.forwardLimitKmh ?: "—") + " / ← " + (s.reverseLimitKmh ?: "—") + " km/h" }
         // Android AlertDialog cannot reliably display setMessage() and setItems() together.
         // Keeping both caused the explanatory message to replace the actionable editor choices.
@@ -4691,8 +4688,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(road.latitude, road.longitude), 15.5))
                     finishSegmentButton?.visibility = View.VISIBLE
                     val direction = geometry.tags.optString("oneway").takeIf { it.isNotBlank() && it != "null" } ?: "non specificato"
-                    val osmLimit = geometry.tags.optString("maxspeed").takeIf { it.isNotBlank() && it != "null" } ?: "non presente"
-                    val limitText = "OSM maxspeed: " + osmLimit + "; il provider verrà interrogato dopo aver selezionato il tratto"
+                    val limitText = "Limite automatico: solo TomTom; verrà verificato dopo aver selezionato il tratto"
                     AlertDialog.Builder(this).setTitle(geometry.name ?: road.name)
                         .setMessage("Geometria reale OSM caricata (" + geometry.geometry.size + " punti). Limite proposto: " + limitText + ". OSM oneway: " + direction + ". Tocca INIZIO e poi FINE del tratto sulla strada. La geometria viene mostrata sulla mappa.")
                         .setPositiveButton("Seleziona tratto") { _, _ ->
@@ -4892,7 +4888,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val limit = currentSpeedLimit
         val speedKmh = location?.takeIf { it.hasSpeed() }?.speed?.times(3.6f)?.roundToInt()
 
-        // Announce once per overspeed episode and only when an explicit OSM limit is known.
+        // Announce once per overspeed episode and only when a verified automatic TomTom or explicit user-set manual limit is known.
         if (limit != null && speedKmh != null && speedKmh > limit + 3) {
             if (!speedingVoiceActive) {
                 speedingVoiceActive = true
