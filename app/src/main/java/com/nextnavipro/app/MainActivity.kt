@@ -4966,6 +4966,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
         ) }
         radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
+        updateRadarStatusColor()
     }
 
     /**
