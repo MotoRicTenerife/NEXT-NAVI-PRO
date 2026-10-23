@@ -3062,6 +3062,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(235, 239, 241))
         renderSpeedDigits(lastDisplayedSpeed)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
+        currentLocation?.let { updateGpsStatus(it) }
+        updateRadarStatusColor()
     }
 
     private fun android.view.View.walkViews(): List<View> {
@@ -4304,9 +4306,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsText.text = (roadName?.takeIf { it.isNotBlank() } ?: "GPS") +
             " • " + accuracy + satelliteInfo
         gpsText.setTextColor(
-            if (location.hasAccuracy() && location.accuracy <= 15f) Color.rgb(0, 190, 70)
-            else Color.rgb(235, 165, 0)
+            when {
+                !location.hasAccuracy() -> Color.rgb(235, 165, 0)
+                location.accuracy <= 15f -> Color.rgb(0, 190, 70)
+                location.accuracy <= 35f -> Color.rgb(235, 165, 0)
+                else -> Color.rgb(235, 70, 55)
+            }
         )
+    }
+
+    /**
+     * Shared status palette for GPS and Radar OSM:
+     * green = usable/current data, amber = pending or incomplete, red = unavailable/error.
+     * Radar data availability is independent from GPS fix quality.
+     */
+    private fun updateRadarStatusColor() {
+        if (!::radarText.isInitialized) return
+        val label = radarText.text?.toString().orEmpty()
+        val color = when {
+            label.contains("AUTOVELOX", ignoreCase = true) ||
+                radarFetchFailed ||
+                label.contains("server non disponibile", ignoreCase = true) -> Color.rgb(235, 70, 55)
+            label.contains("aggiornamento", ignoreCase = true) ||
+                label.contains("ricerca dati", ignoreCase = true) ||
+                !radarCacheCoversCurrentArea -> Color.rgb(235, 165, 0)
+            else -> Color.rgb(0, 190, 70)
+        }
+        radarText.setTextColor(color)
     }
 
     private fun constellationSummary(): String {
@@ -5316,6 +5342,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         lastRadarAttemptMs = now
         radarText.text = if (radarCameras.isEmpty()) "RADAR OSM • aggiornamento dati…" else "RADAR OSM: " + radarCameras.size + " • aggiornamento…"
+        updateRadarStatusColor()
         Thread({
             try {
                 val fresh = RadarService.fetchNear(center)
@@ -5350,7 +5377,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             "RADAR OSM: " + radarCameras.size + " • dati comunitari"
         }
-        radarText.setTextColor(Color.rgb(255, 70, 55))
+        updateRadarStatusColor()
     }
 
     private fun drawRadars() {
