@@ -4570,7 +4570,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun searchRoadForEditor() {
         val query = EditText(this).apply { hint = "Es. TF-82, TF-1, Calle Morro Afonso Alto"; setSingleLine(true) }
         val dialog = AlertDialog.Builder(this).setTitle("Cerca una strada").setMessage("Ricerca online OpenStreetMap. Seleziona il risultato corretto, controllando località e posizione.")
-            .setView(query).setPositiveButton("Cerca", null).setNegativeButton("Annulla", null).create()
+            .setView(query)
+            .setPositiveButton("Cerca", null)
+            .setNeutralButton("Seleziona sulla mappa") { _, _ -> startManualSegmentDraft() }
+            .setNegativeButton("Annulla", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val text = query.text.toString().trim()
