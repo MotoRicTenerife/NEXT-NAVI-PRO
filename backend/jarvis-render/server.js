@@ -588,6 +588,103 @@ async function handle(req, res) {
     }
   }
 
+  if (url.pathname === "/speed-limit-route") {
+    if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    const tomtomApiKey = process.env.TOMTOM_API_KEY;
+    if (!tomtomApiKey) return send(res, 503, { error: "TomTom speed-limit provider not configured" });
+    let input;
+    try { input = await readJson(req); }
+    catch (error) { return send(res, error.statusCode || 400, { error: "Invalid route speed-limit request" }); }
+    const points = Array.isArray(input?.points) ? input.points : [];
+    if (points.length < 2 || points.length > 80 || points.some(point =>
+      !point || !Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90 ||
+      !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180 ||
+      (point.bearing !== undefined && (!Number.isFinite(point.bearing) || point.bearing < 0 || point.bearing >= 360)))) {
+      return send(res, 400, { error: "Between 2 and 80 valid route sample points are required" });
+    }
+    const admission = speedLimitGuard.admit(getClientIp(req));
+    if (!admission.allowed) {
+      return send(res, 429, {
+        error: "Speed-limit requests are temporarily limited; try again later",
+        reason: admission.reason,
+        retryAfterSeconds: admission.retryAfterSeconds
+      }, { "retry-after": String(admission.retryAfterSeconds) });
+    }
+    try {
+      const fields = "{route{properties{id,speedLimits{value,unit,type},address{roadName,roadNumbers}}}}";
+      const query = new URLSearchParams({
+        key: tomtomApiKey, fields, vehicleType: "PassengerCar", measurementSystem: "metric"
+      });
+      const tomtomPoints = points.map(point => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
+        properties: Number.isFinite(point.bearing) ? { heading: point.bearing } : {}
+      }));
+      const upstream = await fetch("https://api.tomtom.com/snapToRoads/1?" + query.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ points: tomtomPoints }),
+        signal: AbortSignal.timeout(12000)
+      });
+      speedLimitGuard.noteUpstreamStatus(upstream.status, upstream.headers?.get?.("retry-after"));
+      if (!upstream.ok) {
+        const status = upstream.status === 429 ? 429 : 502;
+        const retryAfterSeconds = status === 429 ? Math.max(1, speedLimitGuard.cooldown().seconds) : undefined;
+        return send(res, status, {
+          error: "TomTom route speed-limit lookup failed",
+          reason: status === 429 ? "tomtom_quota_or_rate_limit" : "tomtom_http_" + upstream.status,
+          ...(retryAfterSeconds ? { retryAfterSeconds } : {})
+        }, retryAfterSeconds ? { "retry-after": String(retryAfterSeconds) } : {});
+      }
+      const data = await upstream.json();
+      const segments = Array.isArray(data?.route) ? data.route : [];
+      // Snap-to-Roads may omit unmatched route samples. Do not guess which road owns a
+      // returned limit: only accept a one-to-one or adjacent-segment mapping.
+      if (segments.length !== points.length && segments.length !== points.length - 1) {
+        return send(res, 200, {
+          source: "TomTom Snap to Roads",
+          limits: [],
+          reason: "route_sample_mapping_unavailable",
+          requestedPoints: points.length,
+          matchedSegments: segments.length
+        });
+      }
+      const limits = segments.map((segment, index) => {
+        const raw = segment?.properties?.speedLimits;
+        const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        const parsed = values.map(value => {
+          const number = Number(value?.value);
+          if (!Number.isFinite(number) || number <= 0 || String(value?.type || "").trim().toLowerCase() !== "maximum") return null;
+          const unit = String(value?.unit || "").trim().toLowerCase();
+          const kmh = ["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)
+            ? number
+            : ["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit) ? number * 1.609344 : NaN;
+          const rounded = Math.round(kmh);
+          return Number.isFinite(rounded) && rounded >= 5 && rounded <= 200 ? rounded : null;
+        }).filter(value => value !== null);
+        const unique = [...new Set(parsed)];
+        const address = segment?.properties?.address;
+        const routeIndex = segments.length === points.length ? index : index + 1;
+        return {
+          routeIndex,
+          speedLimitKmh: unique.length === 1 ? unique[0] : null,
+          reason: unique.length > 1 ? "multiple_maximum_limits_on_segment" : unique.length === 0 ? "no_explicit_maximum_speed_limit" : null,
+          road: address?.roadName || null,
+          ref: Array.isArray(address?.roadNumbers) ? address.roadNumbers.join(" / ") : null
+        };
+      });
+      return send(res, 200, {
+        source: "TomTom Snap to Roads",
+        requestedPoints: points.length,
+        matchedSegments: segments.length,
+        limits
+      });
+    } catch (error) {
+      console.warn("TomTom route speed-limit lookup failed", { errorType: error instanceof Error ? error.name : "UnknownError" });
+      return send(res, 502, { error: "TomTom route speed-limit provider unavailable" });
+    }
+  }
+
   if (url.pathname === "/speed-limit") {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
