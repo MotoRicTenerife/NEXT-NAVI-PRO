@@ -101,8 +101,8 @@ object SpeedLimitPolicy {
 
 /**
  * Backoff for the paid provider path. A 429 honours the server's Retry-After; timeouts and network
- * errors back off 8, 16, 32, then 60 seconds. While blocked the app skips TomTom (the OSM fallbacks
- * still run) instead of hammering a service that already said no.
+ * errors back off 8, 16, 32, then 60 seconds. While blocked the app skips TomTom rather than
+ * hammering a service that already said no; automatic limits remain unknown until verified again.
  */
 class ProviderBackoff {
     private var failures = 0
