@@ -35,7 +35,7 @@ Android navigation prototype for cars and motorcycles, with a high-contrast dash
 - **OpenFreeMap:** https://openfreemap.org/ — map styles, including `https://tiles.openfreemap.org/styles/liberty`.
 - **Photon:** https://photon.komoot.io/ — OpenStreetMap-based geocoding; subject to fair-use policies.
 - **Valhalla demo:** https://valhalla.openstreetmap.de/ — public routing demo; the app requests Italian instructions.
-- **Overpass API:** https://overpass-api.de/ — public OpenStreetMap query service for road matching, explicit speed-limit values and community camera points.
+- **Overpass API:** https://overpass-api.de/ — public OpenStreetMap query service for community camera points and road metadata. Automatic speed limits in the app are obtained exclusively from TomTom through the Render backend.
 - **OpenStreetMap tagging for speed limits:** https://wiki.openstreetmap.org/wiki/Key:maxspeed — numeric and contextual `maxspeed` conventions.
 - **Cabildo de Tenerife road network:** https://datos.tenerife.es/datos/conjuntos-de-datos/vias-competencia-del-cabildo-insular-de-tenerife — official road-axis GeoJSON/GeoPackage/CSV distributions, CC BY. This source is under review for a local or cached cross-check of road identifiers and names.
 - **OpenStreetMap:** https://www.openstreetmap.org/ — community-maintained data. Keep attribution visible and review ODbL obligations before redistributing derived datasets.
