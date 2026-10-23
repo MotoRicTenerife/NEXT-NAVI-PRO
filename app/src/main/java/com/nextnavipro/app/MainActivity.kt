@@ -175,6 +175,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastGpxPointTimeMs = 0L
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
+    @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
     private var routeProgressInitialized = false
     private var lastRouteProgressIndex = 0
     private var voiceGuide: TextToSpeech? = null
@@ -1960,6 +1961,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.text = appText("ANNULLA PERCORSO GPX")
                     }
                     routeResult = result
+                    prefetchedRouteLimits = emptyList()
+                    prefetchRouteSpeedLimits(result)
                     resetRouteProgress()
                     announcedManeuverIndex = -1
                     announcedStage = 0
@@ -3633,6 +3636,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    prefetchedRouteLimits = emptyList()
+                    prefetchRouteSpeedLimits(result)
                     navigationArrived = false
                     arrivalClosestMeters = Float.MAX_VALUE
                     arrivalStopSinceMs = 0L
@@ -3698,6 +3703,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         finishGpxRecording(save = true)
         stopAndSaveGpsDiagnosticRecording("percorso terminato")
         routeResult = null
+        prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
         routePreviewFetchedAt = 0L
@@ -4168,6 +4174,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun prefetchRouteSpeedLimits(route: RouteResult) {
+        prefetchedRouteLimits = emptyList()
+        if (route.points.size < 2) return
+        thread(name = "tomtom-route-prefetch") {
+            val samples = RenderTomTomSpeedLimitService.prefetchRouteLimits(route.points)
+                .filter { it.routeIndex in route.points.indices && it.speedLimitKmh != null }
+            runOnUiThread {
+                // A route may have been replaced while the network request was running.
+                if (routeResult === route || routeResult == route) {
+                    prefetchedRouteLimits = samples
+                    android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "TomTom route prefetch cached ${samples.size} explicit limits")
+                    currentLocation?.let { refreshSpeedLimitIfNeeded(it) }
+                }
+            }
+        }
+    }
+
     private fun refreshSpeedLimitIfNeeded(location: Location) {
         // A manual value takes precedence over all providers until the rider explicitly
         // switches back to automatic mode. Never let a late network response replace it.
@@ -4181,6 +4204,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
         val now = System.currentTimeMillis()
         val nowFix = speedLimitFix(location, now)
+        // Prefer a prefetched TomTom result only after the rider has reached its route sample.
+        // This avoids showing a future limit early and keeps live GPS lookups as the safe fallback.
+        val activeRoute = routeResult
+        if (activeRoute != null && prefetchedRouteLimits.isNotEmpty()) {
+            val progress = findRouteProgressIndex(activeRoute, location)
+            if (progress.second.isFinite() && progress.second < Float.MAX_VALUE) {
+                val eligible = prefetchedRouteLimits.asSequence()
+                    .filter { it.routeIndex <= progress.first && it.routeIndex in activeRoute.points.indices }
+                    .mapNotNull { sample ->
+                        val point = activeRoute.points[sample.routeIndex]
+                        val distance = FloatArray(1)
+                        Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, distance)
+                        if (distance[0] <= 180f) sample to distance[0] else null
+                    }
+                    .minByOrNull { it.second }
+                val cachedLimit = eligible?.first
+                if (cachedLimit?.speedLimitKmh != null) {
+                    currentRoadMatch = RoadMatch(cachedLimit.road, cachedLimit.ref, cachedLimit.speedLimitKmh,
+                        null, eligible.second, location.bearing.takeIf { location.hasBearing() } ?: 0f)
+                    currentSpeedLimit = cachedLimit.speedLimitKmh
+                    speedLimitVerifiedFix = nowFix
+                    updateSpeedLimitDisplay()
+                    return
+                }
+            }
+        }
         // A verified limit stays on screen only while the vehicle is still compatible with the place
         // where it was verified (bounded distance and age, same line of travel, no turn). Otherwise
         // it becomes unknown. This replaces the old blanket "moved more than 180 m" rule, which
