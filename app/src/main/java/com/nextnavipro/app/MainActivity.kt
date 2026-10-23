@@ -267,7 +267,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRadarAlertId: Long = -1L
     private var lastRadarAlertMs = 0L
     private var lastRerouteAttemptMs = 0L
-    private var offRouteFixes = 0
+    private var offRouteSinceMs = 0L
+    private var arrivalClosestMeters = Float.MAX_VALUE
+    private var arrivalStopSinceMs = 0L
+    private var navigationArrived = false
     private var lastRawGpsLocation: Location? = null
     private var lastAcceptedFixElapsedMs = 0L
     private var smoothedGpsLocation: Location? = null
@@ -3437,6 +3440,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
+        navigationArrived = false
+        arrivalClosestMeters = Float.MAX_VALUE
+        arrivalStopSinceMs = 0L
+        offRouteSinceMs = 0L
         routePreviewResult = null
         routePreviewDestination = null
         routePreviewFetchedAt = 0L
@@ -3624,6 +3631,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    navigationArrived = false
+                    arrivalClosestMeters = Float.MAX_VALUE
+                    arrivalStopSinceMs = 0L
+                    offRouteSinceMs = 0L
                     routePreviewResult = null
                     routePreviewDestination = null
                     routePreviewFetchedAt = 0L
@@ -4062,6 +4073,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
+        if (checkArrivalAndFinish(smoothed)) return
         checkOffRouteAndReroute(smoothed)
         checkRadarProximityAlert(smoothed)
     }
@@ -4833,9 +4845,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speedingVoiceActive = true
                 if (voiceGuideReady) {
                     voiceGuide?.setSpeechRate(0.96f)
+                    // This alert is time-sensitive: replace any queued stale speed warning.
+                    // The values are read from the latest accepted fix when this method runs.
                     voiceGuide?.speak(
                         "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari.",
-                        TextToSpeech.QUEUE_ADD, null, "speed-limit-overspeed"
+                        TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
                     )
                 }
             }
@@ -4928,23 +4942,124 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
     }
 
+    /**
+     * Finish navigation once the rider reaches, passes, or parks just beyond the destination.
+     * Passing is accepted only near the end of the active route, preventing nearby parallel
+     * roads from prematurely completing navigation.
+     */
+    private fun checkArrivalAndFinish(location: Location): Boolean {
+        val route = routeResult ?: run {
+            arrivalClosestMeters = Float.MAX_VALUE
+            arrivalStopSinceMs = 0L
+            navigationArrived = false
+            return false
+        }
+        val target = destination ?: return false
+        if (navigationArrived) return false
+        val targetLocation = Location("destination").apply {
+            latitude = target.point.latitude
+            longitude = target.point.longitude
+        }
+        val distanceToDestination = location.distanceTo(targetLocation)
+        arrivalClosestMeters = minOf(arrivalClosestMeters, distanceToDestination)
+        val speed = if (location.hasSpeed()) location.speed else Float.MAX_VALUE
+        val now = SystemClock.elapsedRealtime()
+        if (speed < 1.0f) {
+            if (arrivalStopSinceMs == 0L) arrivalStopSinceMs = now
+        } else {
+            arrivalStopSinceMs = 0L
+        }
+        val accuracy = if (location.hasAccuracy()) location.accuracy else 20f
+        val arrivalRadius = maxOf(30f, (accuracy * 1.5f).coerceAtMost(60f))
+        val routeMatch = findRouteProgressIndex(route, location)
+        val nearRouteEnd = route.points.isNotEmpty() &&
+            routeMatch.first >= (route.points.lastIndex - maxOf(8, (route.points.lastIndex * 0.08f).toInt())).coerceAtLeast(0)
+        val movingAwayAfterPassing = nearRouteEnd &&
+            arrivalClosestMeters <= maxOf(70f, arrivalRadius) &&
+            distanceToDestination - arrivalClosestMeters >= 35f &&
+            speed > 2.5f
+        val parkedJustBeyond = nearRouteEnd &&
+            arrivalClosestMeters <= 100f &&
+            arrivalStopSinceMs != 0L && now - arrivalStopSinceMs >= 8_000L &&
+            distanceToDestination <= 120f
+        if (distanceToDestination > arrivalRadius && !movingAwayAfterPassing && !parkedJustBeyond) return false
+
+        navigationArrived = true
+        // Stop the route/recording exactly once, then leave a durable arrival message on screen.
+        clearRoute()
+        routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
+        if (voiceGuideReady) {
+            voiceGuide?.speak("Sei arrivato a destinazione.", TextToSpeech.QUEUE_FLUSH, null, "navigation-arrived")
+        }
+        Toast.makeText(this, "Sei arrivato a destinazione", Toast.LENGTH_LONG).show()
+        return true
+    }
+
+    /**
+     * Compute distance to route LINE SEGMENTS, not only route vertices. Vertex-only distance
+     * overestimates cross-track error on long geometry segments and can trigger false reroutes.
+     */
+    private fun distanceToActiveRouteMeters(location: Location, route: RouteResult): Float {
+        if (route.points.size < 2) return Float.MAX_VALUE
+        val lat0 = Math.toRadians(location.latitude)
+        val metersPerLon = 111_320.0 * kotlin.math.cos(lat0)
+        val metersPerLat = 111_320.0
+        var best = Double.POSITIVE_INFINITY
+        for (i in 0 until route.points.lastIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val ax = (a.longitude - location.longitude) * metersPerLon
+            val ay = (a.latitude - location.latitude) * metersPerLat
+            val bx = (b.longitude - location.longitude) * metersPerLon
+            val by = (b.latitude - location.latitude) * metersPerLat
+            val dx = bx - ax
+            val dy = by - ay
+            val denominator = dx * dx + dy * dy
+            val t = if (denominator <= 1e-6) 0.0 else ((-(ax * dx + ay * dy) / denominator).coerceIn(0.0, 1.0))
+            val distance = kotlin.math.hypot(ax + t * dx, ay + t * dy)
+            if (distance < best) best = distance
+        }
+        return best.toFloat()
+    }
+
     private fun checkOffRouteAndReroute(location: Location) {
-        val route = routeResult ?: return
-        val target = destination ?: return
-        if (!location.hasAccuracy() || location.accuracy > 25f) return
-        val nearest = route.points.minOfOrNull { point ->
-            val d = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
-            d[0]
-        } ?: return
-        if (nearest > maxOf(65f, location.accuracy * 2.5f)) offRouteFixes++ else offRouteFixes = 0
-        if (offRouteFixes < 3) return
-        val now = System.currentTimeMillis()
-        if (now - lastRerouteAttemptMs < 20_000L || isCalculatingRoute) return
+        val route = routeResult ?: run { offRouteSinceMs = 0L; return }
+        val target = destination ?: run { offRouteSinceMs = 0L; return }
+        if (!location.hasAccuracy() || location.accuracy > 25f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        // Do not initiate a new route while already approaching/serving the destination.
+        val targetLocation = Location("destination").apply {
+            latitude = target.point.latitude
+            longitude = target.point.longitude
+        }
+        if (location.distanceTo(targetLocation) <= 120f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        if (!location.hasSpeed() || location.speed < 2.0f) {
+            offRouteSinceMs = 0L
+            return
+        }
+        val lateralMeters = distanceToActiveRouteMeters(location, route)
+        val threshold = maxOf(25f, location.accuracy * 2.5f)
+        val now = SystemClock.elapsedRealtime()
+        if (lateralMeters <= threshold) {
+            offRouteSinceMs = 0L
+            return
+        }
+        if (offRouteSinceMs == 0L) offRouteSinceMs = now
+        // A single noisy fix or failed route match is not enough. Require sustained departure;
+        // very large departures still need a short confirmation to avoid one-fix GPS jumps.
+        val hardDeparture = lateralMeters >= 60f && now - offRouteSinceMs >= 2_000L
+        val sustainedDeparture = now - offRouteSinceMs >= 6_000L
+        if (!hardDeparture && !sustainedDeparture) return
+        if (now - lastRerouteAttemptMs < 30_000L || isCalculatingRoute) return
         lastRerouteAttemptMs = now
-        offRouteFixes = 0
+        offRouteSinceMs = 0L
         isCalculatingRoute = true
-        if (::routeText.isInitialized) routeText.text = "DEVIAZIONE RILEVATA • RICALCOLO…"
+        if (::routeText.isInitialized) routeText.text = "DEVIAZIONE CONFERMATA • RICALCOLO…"
         thread(name = "valhalla-reroute") {
             try {
                 val recalculated = NavigationServices.calculateRoute(
@@ -4964,12 +5079,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_ADD, null, "reroute") }
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_FLUSH, null, "reroute") }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
                     isCalculatingRoute = false
-                    if (::routeText.isInitialized) routeText.text = "DEVIAZIONE • RICALCOLO NON DISPONIBILE"
+                    if (::routeText.isInitialized) routeText.text = "FUORI PERCORSO • RICALCOLO NON DISPONIBILE"
                 }
             }
         }
