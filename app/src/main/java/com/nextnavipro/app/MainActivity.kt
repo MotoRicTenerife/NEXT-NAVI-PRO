@@ -4222,7 +4222,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val cachedLimit = eligible?.first
                 if (cachedLimit?.speedLimitKmh != null) {
                     currentRoadMatch = RoadMatch(cachedLimit.road, cachedLimit.ref, cachedLimit.speedLimitKmh,
-                        null, eligible.second, location.bearing.takeIf { location.hasBearing() } ?: 0f)
+                        null, (eligible?.second ?: 0f), location.bearing.takeIf { location.hasBearing() } ?: 0f)
                     currentSpeedLimit = cachedLimit.speedLimitKmh
                     speedLimitVerifiedFix = nowFix
                     updateSpeedLimitDisplay()
