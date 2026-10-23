@@ -426,7 +426,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setBackgroundColor(Color.rgb(26, 26, 26))
             setOnClickListener { launchDashboard() }
         }
-        splash.addView(start, LinearLayout.LayoutParams(-1, dp(58)).apply {
+        splash.addView(start, LinearLayout.LayoutParams(-1, dp(64)).apply {
             setMargins(dp(12), dp(28), dp(12), dp(12))
         })
         setContentView(splash)
@@ -557,7 +557,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.addView(weatherText, params(-1, dp(52)))
         limitValue = TextView(this).apply {
             text = "—"
-            textSize = 26f
+            textSize = 28f
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -4237,29 +4237,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val tomTomMatch = tomTomResult?.speedLimitKmh?.let { limit ->
                 RoadMatch(tomTomResult.road, tomTomResult.ref, limit, tomTomResult.highwayType, 0f, bearing ?: 0f)
             }
-            val renderMatch = if (tomTomMatch?.speedLimitKmh == null) try {
-                RenderSpeedLimitService.findRoadMatch(queryLocation)
-            } catch (error: Exception) {
-                android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Render OSM lookup failed", error)
-                null
-            } else null
-            val osmMatch = if (tomTomMatch?.speedLimitKmh == null && renderMatch?.speedLimitKmh == null) {
-                try {
-                    SpeedLimitService.findRoadNear(point, bearing, queryLocation.accuracy.takeIf { queryLocation.hasAccuracy() })
-                } catch (error: Exception) {
-                    android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "OSM/Overpass direct fallback failed", error)
-                    null
-                }
-            } else null
-            val renderRoadMatch = renderMatch?.let {
-                RoadMatch(it.road, it.ref, it.speedLimitKmh, it.highwayType, it.distanceMeters ?: 0f, bearing ?: 0f)
-            }
-            val match = when {
-                tomTomMatch?.speedLimitKmh != null -> tomTomMatch
-                renderRoadMatch?.speedLimitKmh != null -> renderRoadMatch
-                osmMatch?.speedLimitKmh != null -> osmMatch
-                else -> renderRoadMatch ?: osmMatch
-            }
+            // TomTom is the sole automatic speed-limit provider. Do not silently mix
+            // OSM values with TomTom: conflicting datasets can display a plausible but wrong limit.
+            val match = tomTomMatch
             runOnUiThread {
                 speedLimitLookupInFlight = false
                 if (lastSpeedLimitQueryMs != now) return@runOnUiThread
