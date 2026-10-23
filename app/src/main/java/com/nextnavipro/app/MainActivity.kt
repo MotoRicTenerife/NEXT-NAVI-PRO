@@ -4638,9 +4638,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     refreshManualSegmentMarkers()
                 }
             } catch (error: Exception) {
-                runOnUiThread { if (!isFinishing) AlertDialog.Builder(this).setTitle("Geometria stradale non disponibile")
-                    .setMessage(error.message ?: "Non è stato possibile recuperare la geometria OSM.")
-                    .setPositiveButton("OK", null).show() }
+                runOnUiThread {
+                    if (!isFinishing) AlertDialog.Builder(this)
+                        .setTitle("Geometria stradale non disponibile")
+                        .setMessage((error.message ?: "Non è stato possibile recuperare la geometria OSM.") +
+                            "\n\nPuoi continuare senza la geometria online selezionando manualmente il tratto sulla mappa. " +
+                            "In questo caso dovrai indicare almeno 3 punti reali lungo la strada e verificare tu il limite.")
+                        .setPositiveButton("Seleziona manualmente") { _, _ -> startManualSegmentDraft() }
+                        .setNegativeButton("Chiudi", null)
+                        .show()
+                }
             }
         }.start()
     }
