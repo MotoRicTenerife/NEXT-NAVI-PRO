@@ -4212,7 +4212,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastSpeedLimitQueryMs = now
         val queryLocation = Location(location)
         val queryFix = speedLimitFix(queryLocation, now)
-        val point = NavPoint(queryLocation.latitude, queryLocation.longitude)
         // Ignore bearing while almost stationary: Android may retain a stale course.
         val bearing = queryLocation.bearing.takeIf {
             queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
