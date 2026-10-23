@@ -761,7 +761,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER })
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             val navAndLimit = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
