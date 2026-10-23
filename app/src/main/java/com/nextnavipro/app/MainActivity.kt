@@ -568,7 +568,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             contentDescription = "Limite di velocità. Tocca per impostare o aggiornare manualmente"
             setOnClickListener { showSpeedLimitOptions() }
         }
-        infoColumn.addView(limitValue, params(dp(58), dp(58)))
+        infoColumn.addView(limitValue, params(dp(64), dp(64)))
         gpsText = TextView(this).apply {
             text = appText("RICERCA GPS…")
             textSize = 10f
@@ -721,7 +721,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(58), dp(58)).apply { gravity = Gravity.CENTER })
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(weatherText, params(-1, dp(52)))
@@ -754,7 +754,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(58), dp(58)).apply { gravity = Gravity.CENTER })
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER })
             val navAndLimit = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
@@ -4267,8 +4267,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "Road matched but no explicit usable speed limit; road=" + (match.displayName ?: "unnamed"))
                 } else {
                     android.util.Log.d("NEXT_NAVI_SPEED_LIMIT", "Matched road=" + (match.displayName ?: "unnamed") +
-                        ", limit=" + match.speedLimitKmh + " km/h, source=" +
-                        (if (tomTomMatch?.speedLimitKmh != null) "TomTom" else "OSM"))
+                        ", limit=" + match.speedLimitKmh + " km/h, source=TomTom")
                 }
                 latest?.let { updateGpsStatus(it) }
                 updateSpeedLimitDisplay()
