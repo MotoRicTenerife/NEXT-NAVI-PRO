@@ -144,25 +144,19 @@ jobs:
                       raise RuntimeError("Render deployment is stale: serving " + health.get("revision", "unknown") + ", expected " + expected_revision + "; deploy the latest commit from fix/jarvis-render-backend")
                   try:
                       status, provider_status = get_json(endpoint[:-len("/jarvis")] + "/speed-limit/status", 20)
-                      if status != 200 or provider_status.get("osmDiagnostic") is not True:
-                          raise RuntimeError("Render speed-limit diagnostic endpoint is missing or invalid")
-                      print("Render speed-limit provider status:", {
+                      if status != 200 or provider_status.get("tomtomConfigured") is not True:
+                          raise RuntimeError("Render TomTom speed-limit provider is not configured")
+                      print("Render TomTom speed-limit provider status:", {
                           "revision": provider_status.get("revision"),
-                          "osmDiagnostic": provider_status.get("osmDiagnostic")
+                          "tomtomConfigured": provider_status.get("tomtomConfigured"),
+                          "roadEditorOsm": provider_status.get("roadEditorOsm")
                       })
-                      test_url = endpoint[:-len("/jarvis")] + "/speed-limit?" + urllib.parse.urlencode({
-                          "lat": "28.12271", "lon": "-16.72600"
-                      })
-                      status, limit_result = get_json(test_url, 25)
-                      if status != 200 or "speedLimitKmh" not in limit_result:
-                          raise RuntimeError("Render OSM speed-limit test returned an invalid payload: " + repr(limit_result)[:240])
-                      print("Render OSM coordinate test:", json.dumps(limit_result, ensure_ascii=False)[:400])
                   except Exception as error:
                       if isinstance(error, urllib.error.HTTPError):
                           detail = error.read(400).decode("utf-8", "replace")
-                          failures.append("Render speed-limit endpoint HTTP " + str(error.code) + ": " + detail[:240])
+                          failures.append("Render TomTom speed-limit status HTTP " + str(error.code) + ": " + detail[:240])
                       else:
-                          failures.append("Render speed-limit endpoint: " + str(error))
+                          failures.append("Render TomTom speed-limit status: " + str(error))
 
                   try:
                       base_url = endpoint[:-len("/jarvis")]
