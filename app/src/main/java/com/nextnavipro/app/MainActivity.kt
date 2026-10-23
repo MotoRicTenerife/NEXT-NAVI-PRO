@@ -4972,7 +4972,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val accuracy = if (location.hasAccuracy()) location.accuracy else 20f
         val arrivalRadius = maxOf(30f, (accuracy * 1.5f).coerceAtMost(60f))
         val routeMatch = findRouteProgressIndex(route, location)
-        val nearRouteEnd = route.points.size >= 2 &&
+        // A failed/low-confidence match returns Float.MAX_VALUE while preserving the last index.
+        // Never interpret that fallback index as proof that the rider reached the route end.
+        val routeMatchConfident = routeMatch.second.isFinite() && routeMatch.second < Float.MAX_VALUE
+        val nearRouteEnd = routeMatchConfident && route.points.size >= 2 &&
             routeMatch.first >= (route.points.lastIndex * 0.85f).toInt()
         val movingAwayAfterPassing = nearRouteEnd &&
             arrivalClosestMeters <= maxOf(70f, arrivalRadius) &&
