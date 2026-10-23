@@ -469,125 +469,16 @@ async function handle(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/speed-limit/status") {
-    // Safe diagnostic: report configuration state, never reveal credentials.
+    // Safe provider diagnostic: TomTom is the only automatic speed-limit source.
+    // OSM remains separate and is used only for road-editor search/geometry.
     return send(res, 200, {
       ok: true,
-      osmDiagnostic: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
+      roadEditorOsm: true,
       tomtomGuard: speedLimitGuard.snapshot(),
       revision: process.env.RENDER_GIT_COMMIT || "unknown"
     });
   }
-  if (url.pathname === "/speed-limit" && req.method === "GET") {
-    // Diagnostic endpoint for a single point. It deliberately uses OSM/Overpass,
-    // so it can be tested in a browser without HERE credentials or a GPS trace.
-    const latRaw = url.searchParams.get("lat");
-    const lonRaw = url.searchParams.get("lon");
-    const lat = Number(latRaw);
-    const lon = Number(lonRaw);
-    if (latRaw === null || lonRaw === null || !Number.isFinite(lat) || lat < -90 || lat > 90 ||
-        !Number.isFinite(lon) || lon < -180 || lon > 180) {
-      return send(res, 400, { error: "Valid lat and lon query parameters are required" });
-    }
-    const query = '[out:json][timeout:15];way[highway](around:80,' +
-      lat + ',' + lon + ');out tags geom;';
-    try {
-      // Public Overpass mirrors can rate-limit independently. Retry mirrors before
-      // reporting an outage, and never interpret a timeout/remark as an empty map.
-      // Use genuinely independent public instances. kumi.systems now aliases
-      // private.coffee, so listing both does not provide meaningful redundancy.
-      const endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter"
-      ];
-      let osm = null;
-      const providerErrors = [];
-      for (const endpoint of endpoints) {
-        try {
-          const upstream = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", "Accept": "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3" },
-            body: new URLSearchParams({ data: query }),
-            signal: AbortSignal.timeout(12000)
-          });
-          const body = await upstream.text();
-          if (!upstream.ok) {
-            providerErrors.push(endpoint + " HTTP " + upstream.status);
-            continue;
-          }
-          const candidate = JSON.parse(body);
-          if (candidate.remark || !Array.isArray(candidate.elements)) {
-            providerErrors.push(endpoint + " returned a remark or malformed elements");
-            continue;
-          }
-          osm = candidate;
-          break;
-        } catch (error) {
-          providerErrors.push(endpoint + " " + (error instanceof Error ? error.name : "error"));
-        }
-      }
-      if (!osm) {
-        console.warn("All Overpass speed-limit providers failed", { providerErrors });
-        return send(res, 502, { error: "OSM/Overpass providers unavailable", providersTried: providerErrors.length });
-      }
-      const elements = osm.elements;
-      const distanceToSegment = (a, b) => {
-        const metersPerLat = 111320;
-        const metersPerLon = 111320 * Math.cos(lat * Math.PI / 180);
-        const ax = (a.lon - lon) * metersPerLon, ay = (a.lat - lat) * metersPerLat;
-        const bx = (b.lon - lon) * metersPerLon, by = (b.lat - lat) * metersPerLat;
-        const dx = bx - ax, dy = by - ay, denom = dx * dx + dy * dy;
-        const t = denom < 0.001 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom));
-        return Math.hypot(ax + t * dx, ay + t * dy);
-      };
-      const parseLimit = raw => {
-        const match = String(raw ?? "").trim().toLowerCase().match(/^(\d{1,3})(?:\s*(km\/h|kmh|kph|mph))?$/);
-        if (!match) return null;
-        const number = Number(match[1]);
-        const kmh = match[2] === "mph" ? Math.round(number * 1.609344) : number;
-        return Number.isInteger(kmh) && kmh >= 5 && kmh <= 200 ? kmh : null;
-      };
-      const candidates = [];
-      for (const way of elements) {
-        const tags = way?.tags;
-        const geometry = way?.geometry;
-        if (!tags || !Array.isArray(geometry) || geometry.length < 2) continue;
-        const limit = parseLimit(tags.maxspeed);
-        let distance = Infinity;
-        for (let i = 0; i < geometry.length - 1; i++) {
-          const a = geometry[i], b = geometry[i + 1];
-          if ([a?.lat, a?.lon, b?.lat, b?.lon].every(Number.isFinite)) {
-            distance = Math.min(distance, distanceToSegment(a, b));
-          }
-        }
-        if (Number.isFinite(distance) && distance <= 45) candidates.push({ way, limit, distance });
-      }
-      candidates.sort((a, b) => a.distance - b.distance);
-      const nearest = candidates[0] ?? null;
-      // No guessed default: return null when the closest tagged road is too far
-      // or when multiple parallel roads are too close to disambiguate safely.
-      if (nearest && candidates.length > 1 &&
-          Math.abs(candidates[1].distance - nearest.distance) < 4 &&
-          candidates[1].limit !== nearest.limit) {
-        return send(res, 200, { speedLimitKmh: null, reason: "ambiguous_nearby_roads" });
-      }
-      return send(res, 200, {
-        speedLimitKmh: nearest?.limit ?? null,
-        road: nearest?.way?.tags?.name ?? null,
-        ref: nearest?.way?.tags?.ref ?? null,
-        highwayType: nearest?.way?.tags?.highway ?? null,
-        distanceMeters: nearest ? Math.round(nearest.distance) : null,
-        source: "OpenStreetMap/Overpass"
-      });
-    } catch (error) {
-      console.warn("Overpass speed-limit diagnostic request failed", {
-        errorType: error instanceof Error ? error.name : "UnknownError"
-      });
-      return send(res, 502, { error: "OSM/Overpass provider unavailable" });
-    }
-  }
-
   if (url.pathname === "/speed-limit-route") {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
