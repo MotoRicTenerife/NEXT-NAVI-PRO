@@ -611,7 +611,7 @@ async function handle(req, res) {
       }, { "retry-after": String(admission.retryAfterSeconds) });
     }
     try {
-      const fields = "{route{properties{id,speedLimits{value,unit,type},address{roadName,roadNumbers}}}}";
+      const fields = "{projectedPoints{properties{routeIndex,snapResult}},route{properties{id,speedLimits{value,unit,type},address{roadName,roadNumbers}}}}";
       const query = new URLSearchParams({
         key: tomtomApiKey, fields, vehicleType: "PassengerCar", measurementSystem: "metric"
       });
@@ -637,19 +637,15 @@ async function handle(req, res) {
         }, retryAfterSeconds ? { "retry-after": String(retryAfterSeconds) } : {});
       }
       const data = await upstream.json();
-      const segments = Array.isArray(data?.route) ? data.route : [];
-      // Snap-to-Roads may omit unmatched route samples. Do not guess which road owns a
-      // returned limit: only accept a one-to-one or adjacent-segment mapping.
-      if (segments.length !== points.length && segments.length !== points.length - 1) {
-        return send(res, 200, {
-          source: "TomTom Snap to Roads",
-          limits: [],
-          reason: "route_sample_mapping_unavailable",
-          requestedPoints: points.length,
-          matchedSegments: segments.length
-        });
-      }
-      const limits = segments.map((segment, index) => {
+      const roadElements = Array.isArray(data?.route) ? data.route : [];
+      const projectedPoints = Array.isArray(data?.projectedPoints) ? data.projectedPoints : [];
+      // TomTom explicitly maps each input point to a road element through projectedPoints.routeIndex.
+      // Use that association; route elements are not one-to-one with input points.
+      const limits = points.map((_, sampleIndex) => {
+        const projected = projectedPoints[sampleIndex];
+        const properties = projected?.properties;
+        const roadIndex = Number.isInteger(properties?.routeIndex) ? properties.routeIndex : -1;
+        const segment = properties?.snapResult === "Matched" && roadIndex >= 0 ? roadElements[roadIndex] : null;
         const raw = segment?.properties?.speedLimits;
         const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
         const parsed = values.map(value => {
@@ -664,11 +660,10 @@ async function handle(req, res) {
         }).filter(value => value !== null);
         const unique = [...new Set(parsed)];
         const address = segment?.properties?.address;
-        const routeIndex = segments.length === points.length ? index : index + 1;
         return {
-          routeIndex,
+          routeIndex: sampleIndex,
           speedLimitKmh: unique.length === 1 ? unique[0] : null,
-          reason: unique.length > 1 ? "multiple_maximum_limits_on_segment" : unique.length === 0 ? "no_explicit_maximum_speed_limit" : null,
+          reason: !segment ? "point_not_matched" : unique.length > 1 ? "multiple_maximum_limits_on_segment" : unique.length === 0 ? "no_explicit_maximum_speed_limit" : null,
           road: address?.roadName || null,
           ref: Array.isArray(address?.roadNumbers) ? address.roadNumbers.join(" / ") : null
         };
@@ -676,7 +671,7 @@ async function handle(req, res) {
       return send(res, 200, {
         source: "TomTom Snap to Roads",
         requestedPoints: points.length,
-        matchedSegments: segments.length,
+        matchedSegments: roadElements.length,
         limits
       });
     } catch (error) {
