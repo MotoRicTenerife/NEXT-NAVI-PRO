@@ -711,11 +711,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Portrait: center the complete navigation group (arrow + instruction)
             // vertically against the speed-limit sign; avoid translating only the arrow.
             // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
-            maneuverIcon.textSize = 63f
-            maneuverIcon.translationY = 0f
-            navHalf.addView(maneuverIcon, params(-1, dp(63)))
-            routeText.textSize = 40f
-            routeText.translationY = 0f
+            maneuverIcon.textSize = 88f
+            maneuverIcon.translationY = -dp(63).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dp(88)))
+            routeText.textSize = 15f
+            routeText.translationY = -dp(41).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
@@ -749,10 +749,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.translationY = 0f
             // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
             // Landscape physical targets: maneuver glyph and instruction text about 0.75 cm.
-            maneuverIcon.textSize = 47f
-            maneuverIcon.translationY = 0f
-            navHalf.addView(maneuverIcon, params(-1, dp(47)))
-            routeText.textSize = 47f
+            maneuverIcon.textSize = 116f
+            maneuverIcon.translationY = -dp(47).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dp(116)))
+            routeText.textSize = 15f
             routeText.translationY = 0f
             routeText.includeFontPadding = false
             routeText.maxLines = 3
@@ -1927,7 +1927,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
         if (::routeText.isInitialized) {
             routeText.text = "TRACCIA GPX\nSegui la linea sulla mappa • svolte vocali non disponibili per questa traccia"
-            routeText.textSize = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 47f else 40f
+            routeText.textSize = 14f
         }
         if (::routeButton.isInitialized) routeButton.text = appText("ANNULLA TRACCIA GPX")
         announcedManeuverIndex = -1
@@ -5296,7 +5296,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             routeText.text = distanceLabel + "\n" + shortInstruction
             routeText.typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-            routeText.textSize = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) 47f else 40f
+            routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
         val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
