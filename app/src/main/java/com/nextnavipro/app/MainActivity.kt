@@ -712,10 +712,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // vertically against the speed-limit sign; avoid translating only the arrow.
             // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
             maneuverIcon.textSize = 88f
-            maneuverIcon.translationY = -dp(13).toFloat()
+            maneuverIcon.translationY = -dp(38).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(88)))
             routeText.textSize = 15f
-            routeText.translationY = dp(9).toFloat()
+            routeText.translationY = -dp(16).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
@@ -725,10 +725,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 gravity = Gravity.CENTER
             }
             limitValue.translationY = 0f
+            // Portrait: keep weather directly above the speed-limit sign, leaving the
+            // navigation side free of a full-width weather row.
+            limitHalf.addView(weatherText, params(-1, dp(52)))
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(weatherText, params(-1, dp(52)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
@@ -770,9 +772,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             navAndLimit.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             navAndLimit.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            left.addView(weatherText, params(-1, dp(52)))
             left.addView(navAndLimit, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
+            // Landscape: group weather immediately above GPS and OSM radar status.
+            mapColumn.addView(weatherText, 0, params(-1, dp(52)))
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
