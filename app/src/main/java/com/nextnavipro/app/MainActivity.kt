@@ -1098,7 +1098,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 android.graphics.drawable.ColorDrawable(panelBackground), 0, dp(31), 0, dp(31)
             )
         } else {
-            updateSpeedGaugeBackground()
+            speedText.setBackgroundColor(panelBackground)
         }
     }
 
@@ -3063,7 +3063,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val panelBackground = if (negativeTheme) negativeBackground else positiveBackground
         applySpeedLimitSignStyle(limitValue)
         routeText.setBackgroundColor(panelBackground)
-        speedText.setBackgroundColor(panelBackground)
+        updateSpeedGaugeBackground()
         if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
