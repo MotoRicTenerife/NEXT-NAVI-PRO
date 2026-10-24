@@ -650,10 +650,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // ETA and remaining distance stay below both; landscape order remains unchanged.
         if (isPortrait) {
             // Keep unit and clock visually close to the tachometer; avoid extra gaps.
-            speedColumn.addView(unit, params(-1, dp(30)))
-            speedColumn.addView(clockText, params(-1, dp(32)))
+            // Pull the unit, clock and GPS warning closer to the tachometer to
+            // reclaim a little vertical space for the map.
+            speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                topMargin = -dp(7)
+            })
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
+                topMargin = -dp(5)
+            })
             speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = dp(1)
+                topMargin = -dp(4)
             })
         } else {
             speedColumn.addView(unit, params(-1, dp(34)))
@@ -691,7 +697,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
-        mapColumn.addView(mapStatus, params(-1, dp(22)))
+        mapColumn.addView(mapStatus, params(-1, dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
@@ -700,10 +706,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 gravity = Gravity.CENTER
             }
             portraitControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                marginEnd = dp(4)
+                setMargins(dp(2), dp(2), dp(2), dp(2))
             })
             portraitControls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                marginStart = dp(4)
+                setMargins(dp(2), dp(2), dp(2), dp(2))
             })
             mapColumn.addView(portraitControls, params(-1, dp(44)))
         }
@@ -756,10 +762,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             // Rebalance portrait height: move GPS/radar status upward and give
             // the map a little more vertical space without squeezing the controls.
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.48f).apply {
-                topMargin = dp(8)
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.34f).apply {
+                topMargin = 0
             })
-            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.82f))
+            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.96f))
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
@@ -815,25 +821,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Theme selection remains available in Settings; the dashboard control is now an explicit exit.
         exitButton = makeButton("ESCI") { showExitConfirmation() }
         val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
-        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            controls.addView(exitButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(1))
-            })
-            controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(1))
-            })
-            controls.addView(routeButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(1))
-            })
-        } else {
-            controls.addView(exitButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(1))
-            })
-            controls.addView(navigatorButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(1))
+        // Use one shared size and identical margins for every dashboard control.
+        // In portrait this keeps the two map-row buttons aligned with EXIT/NAVIGATORE.
+        val controlHeight = dp(40)
+        fun addBottomControl(button: Button) {
+            controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                setMargins(dp(2), dp(2), dp(2), dp(2))
             })
         }
-        root.addView(controls, params(-1, dp(48)))
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            addBottomControl(exitButton)
+            addBottomControl(navigatorButton)
+            addBottomControl(routeButton)
+        } else {
+            addBottomControl(exitButton)
+            addBottomControl(navigatorButton)
+        }
+        root.addView(controls, params(-1, dp(44)))
 
         setContentView(root)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
