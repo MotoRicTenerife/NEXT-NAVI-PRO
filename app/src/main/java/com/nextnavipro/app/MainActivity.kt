@@ -239,17 +239,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var speedAlertFlashRed = false
     private var speedingVoiceActive = false
     private var speedAlertFlashesRemaining = 0
+    private var lastSpeedingVoiceMs = 0L
+    private var lastSpeedingValidLimitMs = 0L
+    private var speedingEpisodeStartMs = 0L
     private val speedAlertHandler = Handler(Looper.getMainLooper())
     private val speedAlertRunnable = object : Runnable {
         override fun run() {
-            if (!isMotorwaySpeeding()) {
+            if (!isSpeedingWithKnownLimit()) {
                 speedAlertActive = false
                 speedAlertFlashRed = false
                 speedAlertFlashesRemaining = 0
                 renderSpeedDigits(lastDisplayedSpeed)
                 return
             }
-            if (speedAlertFlashesRemaining == 0) {
+            // Three gentle red flashes: six on/off phases, one second apart.
+            if (speedAlertFlashesRemaining <= 0) {
                 speedAlertFlashesRemaining = 6
                 speedAlertFlashRed = true
             }
@@ -257,11 +261,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedAlertFlashesRemaining--
             if (speedAlertFlashesRemaining > 0) {
                 speedAlertFlashRed = !speedAlertFlashRed
-                speedAlertHandler.postDelayed(this, 250L)
+                speedAlertHandler.postDelayed(this, 1_000L)
             } else {
                 speedAlertFlashRed = false
                 renderSpeedDigits(lastDisplayedSpeed)
-                speedAlertHandler.postDelayed(this, 3500L)
+                // Visual reminder no more than every 30 seconds while still speeding.
+                speedAlertHandler.postDelayed(this, 30_000L)
             }
         }
     }
@@ -1122,20 +1127,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         renderSpeedDigits(speed)
     }
 
-    private fun isMotorwaySpeeding(): Boolean {
-        val road = currentRoadMatch ?: return false
-        if (road.highwayType != "motorway") return false
+    private fun isSpeedingWithKnownLimit(): Boolean {
         val location = currentLocation ?: return false
-        if (!location.hasSpeed()) return false
-        // A mapped legal limit takes priority. If missing, this is only the user's
-        // configurable alarm threshold; the legal-limit display remains unknown.
-        val threshold = currentSpeedLimit
-            ?: getSharedPreferences(PREFS, MODE_PRIVATE).getInt("motorway_alert_speed", 120)
-        return location.speed * 3.6f > threshold + 3f
+        val limit = currentSpeedLimit ?: return false
+        if (!location.hasSpeed() || !location.hasAccuracy() || location.accuracy > 35f) return false
+        return location.speed * 3.6f > limit + 3f
     }
 
     private fun updateSpeedingAlertState() {
-        if (isMotorwaySpeeding()) {
+        if (isSpeedingWithKnownLimit()) {
             if (!speedAlertActive) {
                 speedAlertActive = true
                 speedAlertFlashesRemaining = 0
@@ -1143,12 +1143,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speedAlertHandler.removeCallbacks(speedAlertRunnable)
                 speedAlertHandler.post(speedAlertRunnable)
             }
-        } else if (speedAlertActive || speedAlertFlashRed) {
-            speedAlertHandler.removeCallbacks(speedAlertRunnable)
-            speedAlertActive = false
-            speedAlertFlashRed = false
-            speedAlertFlashesRemaining = 0
-            renderSpeedDigits(lastDisplayedSpeed)
+        } else {
+            // Keep the alert state through brief TomTom/GPS gaps; a confirmed return
+            // below the limit is handled by updateSpeedLimitDisplay().
+            if (speedAlertActive && SystemClock.elapsedRealtime() - lastSpeedingValidLimitMs > 10_000L) {
+                speedAlertHandler.removeCallbacks(speedAlertRunnable)
+                speedAlertActive = false
+                speedAlertFlashRed = false
+                speedAlertFlashesRemaining = 0
+                renderSpeedDigits(lastDisplayedSpeed)
+            }
         }
     }
 
@@ -4924,22 +4928,42 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val limit = currentSpeedLimit
         val speedKmh = location?.takeIf { it.hasSpeed() }?.speed?.times(3.6f)?.roundToInt()
 
-        // Announce once per overspeed episode and only when a verified automatic TomTom or explicit user-set manual limit is known.
-        if (limit != null && speedKmh != null && speedKmh > limit + 3) {
-            if (!speedingVoiceActive) {
-                speedingVoiceActive = true
-                if (voiceGuideReady) {
-                    voiceGuide?.setSpeechRate(0.96f)
-                    // This alert is time-sensitive: replace any queued stale speed warning.
-                    // The values are read from the latest accepted fix when this method runs.
-                    voiceGuide?.speak(
-                        "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari.",
-                        TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
-                    )
+        // Speak on first confirmed overspeed, then at most once every 120 seconds.
+        // A short missing-limit interval must not reset the episode and cause repeated speech.
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (limit != null && speedKmh != null) {
+            if (speedKmh > limit + 3) {
+                lastSpeedingValidLimitMs = nowElapsed
+                val firstWarning = !speedingVoiceActive
+                val repeatDue = speedingVoiceActive && (lastSpeedingVoiceMs == 0L || nowElapsed - lastSpeedingVoiceMs >= 120_000L)
+                if (firstWarning || repeatDue) {
+                    speedingVoiceActive = true
+                    lastSpeedingVoiceMs = nowElapsed
+                    if (voiceGuideReady) {
+                        voiceGuide?.setSpeechRate(0.96f)
+                        voiceGuide?.speak(
+                            if (firstWarning) "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari."
+                            else "Attenzione, sei ancora sopra il limite di $limit chilometri orari.",
+                            TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
+                        )
+                    }
                 }
+            } else if (speedKmh <= limit + 1) {
+                // Clear only on a confirmed return to the limit, not when the provider
+                // temporarily has no answer.
+                speedingVoiceActive = false
+                lastSpeedingVoiceMs = 0L
+                lastSpeedingValidLimitMs = 0L
+                speedingEpisodeStartMs = 0L
+                speedAlertHandler.removeCallbacks(speedAlertRunnable)
+                speedAlertActive = false
+                speedAlertFlashRed = false
+                speedAlertFlashesRemaining = 0
+                renderSpeedDigits(lastDisplayedSpeed)
             }
-        } else if (limit == null || speedKmh == null || speedKmh <= limit + 1) {
-            speedingVoiceActive = false
+        } else if (speedingVoiceActive && nowElapsed - lastSpeedingValidLimitMs > 10_000L) {
+            // The limit provider may drop out briefly; do not announce from stale/unknown data.
+            lastSpeedingValidLimitMs = 0L
         }
 
         if (!::limitValue.isInitialized) return
