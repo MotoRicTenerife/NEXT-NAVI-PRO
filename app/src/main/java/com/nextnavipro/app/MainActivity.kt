@@ -550,9 +550,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(dp(2), 0, dp(2), 0)
-            // Keep the positive-mode ETA/distance strip consistent with the white dashboard.
-            setTextColor(if (negativeTheme) yellow else Color.BLACK)
-            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.WHITE)
+            // Keep ETA/distance strip strictly monochrome in both themes and orientations.
+            setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
+            setBackgroundColor(if (negativeTheme) Color.BLACK else Color.WHITE)
         }
         weatherText = TextView(this).apply {
             text = appText("🌤️ METEO in attesa GPS")
@@ -3087,6 +3087,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         applySpeedLimitSignStyle(limitValue)
         routeText.setBackgroundColor(panelBackground)
         speedText.setBackgroundColor(panelBackground)
+        if (::routeMetricsText.isInitialized) {
+            routeMetricsText.setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
+            routeMetricsText.setBackgroundColor(if (negativeTheme) Color.BLACK else Color.WHITE)
+        }
         if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
@@ -3096,7 +3100,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     view === speedText -> textColor
                     view === limitValue -> Color.BLACK
                     view === clockText -> if (negativeTheme) Color.WHITE else Color.BLACK
-                    view === routeMetricsText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
+                    view === routeMetricsText -> if (negativeTheme) Color.WHITE else Color.BLACK
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
                     view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 85, 105)
                     view === radarText -> Color.rgb(255, 70, 55)
