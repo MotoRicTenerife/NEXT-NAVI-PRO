@@ -623,12 +623,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        val speedometerBackgroundColor = if (negativeTheme) negativeBackground else positiveBackground
-        speedText.setBackgroundColor(speedometerBackgroundColor)
-        // Keep the tachometer at the top of the portrait stack. The live clock
-        // follows it; km/h and route ETA/distance sit below, away from the route button.
-        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
+        // The digits are drawn directly on the dashboard surface; no opaque panel
+        // may cover the navigation instructions above them.
+        speedText.setBackgroundColor(Color.TRANSPARENT)
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        // In portrait, reduce the top spacer to lift the tachometer slightly.
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.65f else 1.2f))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
@@ -649,9 +649,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // In portrait, show km/h directly below the tachometer, then the clock.
         // ETA and remaining distance stay below both; landscape order remains unchanged.
         if (isPortrait) {
-            speedColumn.addView(unit, params(-1, dp(30)))
-            speedColumn.addView(clockText, params(-1, dp(32)))
-            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+            speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                topMargin = dp(4)
+            })
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
+                topMargin = dp(3)
+            })
+            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
+                topMargin = dp(2)
+            })
         } else {
             speedColumn.addView(unit, params(-1, dp(34)))
             speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
@@ -747,12 +753,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 topMargin = dp(31)
             })
             speedText.textSize = 158f
-            // In portrait, shorten only the painted background at its top by about 1 cm.
-            // The TextView bounds, text size, gravity and tachometer layout stay unchanged.
-            speedText.background = android.graphics.drawable.InsetDrawable(
-                android.graphics.drawable.ColorDrawable(speedometerBackgroundColor),
-                0, dp(38), 0, 0
-            )
+            // Keep the tachometer transparent in portrait so it cannot visually
+            // obscure the navigation row. The colored outline remains on each digit.
+            speedText.background = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f).apply {
                 topMargin = dp(12)
@@ -1108,7 +1111,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun updateSpeedGaugeBorder(speed: Int?) {
         if (!::speedText.isInitialized) return
         // The gauge color outlines the glyphs themselves; no rectangular frame.
-        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
+        // Never paint a rectangular tachometer panel; only the digit outlines are colored.
+        speedText.setBackgroundColor(Color.TRANSPARENT)
         renderSpeedDigits(speed)
     }
 
