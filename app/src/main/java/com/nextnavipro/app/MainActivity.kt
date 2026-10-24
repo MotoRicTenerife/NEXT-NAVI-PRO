@@ -314,7 +314,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val black = Color.BLACK
     private val positiveBackground = Color.WHITE
     private val positiveText = Color.rgb(25, 30, 34)
-    private val negativeBackground = Color.rgb(28, 33, 38)
+    private val negativeBackground = Color.BLACK
     private val inactiveDigitColor = Color.rgb(105, 112, 118)
 
     override fun onConfigurationChanged(newConfig: Configuration) {
