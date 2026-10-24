@@ -623,14 +623,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
+        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         // Keep the tachometer at the top of the portrait stack. The live clock
         // follows it; km/h and route ETA/distance sit below, away from the route button.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)).apply {
-            if (isPortrait) topMargin = dp(31)
-        })
-        updateSpeedGaugeBackground()
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -650,9 +648,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // In portrait, show km/h directly below the tachometer, then the clock.
         // ETA and remaining distance stay below both; landscape order remains unchanged.
         if (isPortrait) {
-            speedColumn.addView(unit, params(-1, dp(30)).apply { topMargin = dp(31) })
-            speedColumn.addView(clockText, params(-1, dp(32)).apply { topMargin = dp(31) })
-            speedColumn.addView(routeMetricsText, params(-1, dp(34)).apply { topMargin = dp(31) })
+            speedColumn.addView(unit, params(-1, dp(30)))
+            speedColumn.addView(clockText, params(-1, dp(32)))
+            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
         } else {
             speedColumn.addView(unit, params(-1, dp(34)))
             speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
@@ -734,9 +732,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f))
-            // Keep navigation guidance above the speedometer if their drawing areas touch.
-            upper.elevation = dp(8).toFloat()
-            upper.bringToFront()
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f))
@@ -1089,23 +1084,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun updateSpeedGaugeBackground() {
-        if (!::speedText.isInitialized) return
-        val panelBackground = if (negativeTheme) negativeBackground else positiveBackground
-        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            // Preserve the full text area while shortening the painted backdrop by 1 cm.
-            speedText.background = android.graphics.drawable.InsetDrawable(
-                android.graphics.drawable.ColorDrawable(panelBackground), 0, dp(31), 0, dp(31)
-            )
-        } else {
-            speedText.setBackgroundColor(panelBackground)
-        }
-    }
-
     private fun updateSpeedGaugeBorder(speed: Int?) {
         if (!::speedText.isInitialized) return
         // The gauge color outlines the glyphs themselves; no rectangular frame.
-        updateSpeedGaugeBackground()
+        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         renderSpeedDigits(speed)
     }
 
@@ -3063,7 +3045,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val panelBackground = if (negativeTheme) negativeBackground else positiveBackground
         applySpeedLimitSignStyle(limitValue)
         routeText.setBackgroundColor(panelBackground)
-        updateSpeedGaugeBackground()
+        speedText.setBackgroundColor(panelBackground)
         if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
