@@ -975,18 +975,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             else -> Style.Builder().fromUri(if (negativeTheme) STYLE_URL else "https://tiles.openfreemap.org/styles/positron")
         }
         readyMap.setStyle(builder) { style ->
-            if (mapLayer != "satellite" && (mapLayer == "light" || !negativeTheme)) {
+            if (mapLayer != "satellite") {
                 style.layers.forEach { layer ->
                     when (layer) {
                         is SymbolLayer -> layer.setProperties(
-                            PropertyFactory.textColor("#111111"),
-                            PropertyFactory.textHaloColor("#FFFFFF"),
+                            PropertyFactory.textColor(if (negativeTheme) "#FFFFFF" else "#111111"),
+                            PropertyFactory.textHaloColor(if (negativeTheme) "#000000" else "#FFFFFF"),
                             PropertyFactory.textHaloWidth(1.2f)
                         )
-                        is LineLayer -> layer.setProperties(PropertyFactory.lineColor("#111111"))
-                        // In positive/light mode, make the map canvas match the white dashboard.
-                        // Roads, labels and the active route remain separately styled layers.
-                        is BackgroundLayer -> layer.setProperties(PropertyFactory.backgroundColor("#FFFFFF"))
+                        is LineLayer -> layer.setProperties(
+                            PropertyFactory.lineColor(if (negativeTheme) "#FFFFFF" else "#111111")
+                        )
+                        // Invert the vector-map contrast with the dashboard theme:
+                        // black canvas and white roads/labels in negative mode,
+                        // white canvas and dark roads/labels in positive mode.
+                        is BackgroundLayer -> layer.setProperties(
+                            PropertyFactory.backgroundColor(if (negativeTheme) "#000000" else "#FFFFFF")
+                        )
                     }
                 }
             }
