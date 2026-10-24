@@ -51,6 +51,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.BackgroundLayer
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
@@ -670,6 +671,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 topMargin = -dp(4)
             })
         } else {
+            // Landscape: lift the speed unit, clock and ETA/distance row together by
+            // roughly half a centimetre so the bottom row stays clear of the controls.
+            unit.translationY = -dp(20).toFloat()
+            clockText.translationY = -dp(20).toFloat()
+            routeMetricsText.translationY = -dp(20).toFloat()
             speedColumn.addView(unit, params(-1, dp(30)))
             speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(30)).apply {
                 topMargin = -dp(4)
@@ -977,6 +983,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             PropertyFactory.textHaloWidth(1.2f)
                         )
                         is LineLayer -> layer.setProperties(PropertyFactory.lineColor("#111111"))
+                        // In positive/light mode, make the map canvas match the white dashboard.
+                        // Roads, labels and the active route remain separately styled layers.
+                        is BackgroundLayer -> layer.setProperties(PropertyFactory.backgroundColor("#FFFFFF"))
                     }
                 }
             }
