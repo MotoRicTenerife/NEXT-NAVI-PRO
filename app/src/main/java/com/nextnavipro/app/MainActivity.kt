@@ -623,7 +623,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
             includeFontPadding = false
         }
-        speedText.setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
+        val speedometerBackgroundColor = if (negativeTheme) negativeBackground else positiveBackground
+        speedText.setBackgroundColor(speedometerBackgroundColor)
         // Keep the tachometer at the top of the portrait stack. The live clock
         // follows it; km/h and route ETA/distance sit below, away from the route button.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1.2f))
@@ -735,16 +736,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 gravity = Gravity.CENTER
             }
             limitValue.translationY = 0f
-            // Portrait: keep weather directly above the speed-limit sign, leaving the
-            // navigation side free of a full-width weather row.
-            limitHalf.addView(weatherText, params(-1, dp(52)))
+            // Portrait: weather occupies one full-width strip above navigation and speed limit.
+            // Keep the maneuver/instruction and speed-limit sign in their own measured row.
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
+            content.addView(weatherText, params(-1, dp(52)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f).apply {
-                topMargin = dp(12)
+                // Lower the navigation instruction and speed-limit area by about 0.5 cm.
+                topMargin = dp(31)
             })
             speedText.textSize = 158f
+            // In portrait, shorten only the painted background at its top by about 1 cm.
+            // The TextView bounds, text size, gravity and tachometer layout stay unchanged.
+            speedText.background = android.graphics.drawable.InsetDrawable(
+                android.graphics.drawable.ColorDrawable(speedometerBackgroundColor),
+                0, dp(38), 0, 0
+            )
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f).apply {
                 topMargin = dp(12)
