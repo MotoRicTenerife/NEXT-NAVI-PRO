@@ -385,7 +385,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
-        motorcycleProfile = preferences.getBoolean("motorcycle_profile", false)
+        // This release is the motorcycle/scooter edition. Keep routing in motorcycle
+        // mode until the dedicated car layout and behavior are implemented.
+        motorcycleProfile = true
+        preferences.edit().putBoolean("motorcycle_profile", true).apply()
         manualSpeedLimit = preferences.getInt("manual_speed_limit_kmh", -1).takeIf { it in 5..200 }
         currentSpeedLimit = manualSpeedLimit
         runCatching { val a = org.json.JSONArray(preferences.getString("manual_speed_limit_segments_json", "[]") ?: "[]"); for (i in 0 until a.length()) manualSpeedLimitSegments.add(ManualSpeedLimitSegment.fromJson(a.getJSONObject(i))) }.onFailure { android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "Manual segments unreadable", it) }
@@ -1261,7 +1264,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Profilo veicolo: ") + if (motorcycleProfile) appText("MOTO") else appText("AUTO"), appText("Jarvis • Assistente e impostazioni"))
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Modalità veicolo: MOTO (attiva)"), appText("Jarvis • Assistente e impostazioni"))
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1306,20 +1309,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showVehicleProfileMenu() {
-        val current = if (motorcycleProfile) "MOTO" else "AUTO"
+        // The current app is deliberately motorcycle-only. A car profile will be
+        // introduced later together with its own dashboard layout and behavior.
+        motorcycleProfile = true
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("motorcycle_profile", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("Profilo di navigazione")
-            .setMessage("Profilo attuale: $current\nIl profilo moto usa il costing motorcycle di Valhalla e penalizza i sentieri non asfaltati. I dati di accesso stradale possono comunque essere incompleti.")
-            .setSingleChoiceItems(arrayOf("Auto", "Moto / scooter stradale"), if (motorcycleProfile) 1 else 0) { dialog, which ->
-                val newValue = which == 1
-                val changed = motorcycleProfile != newValue
-                motorcycleProfile = newValue
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("motorcycle_profile", newValue).apply()
-                dialog.dismiss()
-                Toast.makeText(this, "Profilo salvato: " + if (newValue) "MOTO" else "AUTO", Toast.LENGTH_SHORT).show()
-                if (changed && routeResult != null) Toast.makeText(this, "Il profilo scelto verrà usato al prossimo calcolo del percorso; il percorso attuale non è stato modificato.", Toast.LENGTH_LONG).show()
-            }
-            .setNegativeButton(appText("Annulla"), null)
+            .setTitle(appText("Modalità veicolo"))
+            .setMessage(appText("Modalità attiva: MOTO / SCOOTER.\nLa navigazione usa il profilo stradale per moto. La modalità AUTO verrà aggiunta successivamente con un layout e caratteristiche dedicate; per ora non è selezionabile."))
+            .setPositiveButton(appText("OK"), null)
             .show()
     }
 
