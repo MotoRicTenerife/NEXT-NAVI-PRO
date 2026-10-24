@@ -712,10 +712,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // vertically against the speed-limit sign; avoid translating only the arrow.
             // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
             maneuverIcon.textSize = 88f
-            maneuverIcon.translationY = -dp(38).toFloat()
+            maneuverIcon.translationY = -dp(13).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(88)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(16).toFloat()
+            routeText.translationY = dp(9).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
@@ -751,7 +751,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
             // Landscape physical targets: maneuver glyph and instruction text about 0.75 cm.
             maneuverIcon.textSize = 116f
-            maneuverIcon.translationY = -dp(60).toFloat()
+            maneuverIcon.translationY = -dp(73).toFloat()
             navHalf.addView(maneuverIcon, params(-1, dp(116)))
             routeText.textSize = 15f
             routeText.translationY = -dp(47).toFloat()
@@ -762,7 +762,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitValue.translationY = -dp(25).toFloat()
+            limitValue.translationY = -dp(50).toFloat()
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             val navAndLimit = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
