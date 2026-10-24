@@ -550,8 +550,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(dp(2), 0, dp(2), 0)
-            setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
-            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
+            // Keep the positive-mode ETA/distance strip consistent with the white dashboard.
+            setTextColor(if (negativeTheme) yellow else Color.BLACK)
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.WHITE)
         }
         weatherText = TextView(this).apply {
             text = appText("🌤️ METEO in attesa GPS")
