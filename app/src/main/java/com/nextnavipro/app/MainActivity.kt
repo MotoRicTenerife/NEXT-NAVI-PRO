@@ -311,7 +311,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private val cyan = Color.rgb(0, 229, 255)
     private val white = Color.WHITE
     private val black = Color.BLACK
-    private val positiveBackground = Color.rgb(220, 224, 227)
+    private val positiveBackground = Color.WHITE
     private val positiveText = Color.rgb(25, 30, 34)
     private val negativeBackground = Color.rgb(28, 33, 38)
     private val inactiveDigitColor = Color.rgb(105, 112, 118)
@@ -636,7 +636,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         speedText.setBackgroundColor(Color.TRANSPARENT)
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         // In portrait, reduce the top spacer to lift the tachometer slightly.
-        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.65f else 1.2f))
+        speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.65f else 0.75f))
         speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
@@ -652,7 +652,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
-            setTextColor(Color.WHITE)
+            setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
         }
         // In portrait, show km/h directly below the tachometer, then the clock.
         // ETA and remaining distance stay below both; landscape order remains unchanged.
@@ -670,14 +670,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 topMargin = -dp(4)
             })
         } else {
-            speedColumn.addView(unit, params(-1, dp(34)))
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = dp(2)
+            speedColumn.addView(unit, params(-1, dp(30)))
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                topMargin = -dp(4)
             })
-            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                topMargin = -dp(5)
+            })
         }
         val centerSpacer = View(this)
-        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
+        speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.8f else 0.25f))
         routeButton = makeButton(appText(if (routeResult != null) "TERMINA NAVIGAZIONE" else "AVVIA PERCORSO")) {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
@@ -3083,7 +3085,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 view.setTextColor(when {
                     view === speedText -> textColor
                     view === limitValue -> Color.BLACK
-                    view === clockText -> Color.WHITE
+                    view === clockText -> if (negativeTheme) Color.WHITE else Color.BLACK
                     view === routeMetricsText -> if (negativeTheme) yellow else Color.rgb(0, 105, 110)
                     view === gpsText -> if (listOf("GPS INSUFFICIENTE", "GPS SALTO SCARTATO", "PERMESSO GPS NEGATO", "GPS NON DISPONIBILE", "LOCALIZZAZIONE DISATTIVATA").any { gpsText.text.toString().contains(it) }) Color.rgb(235, 45, 45) else Color.rgb(0, 190, 70)
                     view === routeText -> if (negativeTheme) cyan else Color.rgb(0, 85, 105)
@@ -3093,13 +3095,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 })
             }
             if (view is Button) {
-                view.setTextColor(textColor)
-                view.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(205, 216, 222))
+                view.setTextColor(if (negativeTheme) Color.WHITE else Color.rgb(0, 48, 54))
+                view.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(0, 174, 190))
             }
         }
         destinationInput.setTextColor(textColor)
         destinationInput.setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
-        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(235, 239, 241))
+        destinationInput.setBackgroundColor(if (negativeTheme) Color.rgb(0, 115, 135) else Color.rgb(229, 249, 250))
         renderSpeedDigits(lastDisplayedSpeed)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         currentLocation?.let { updateGpsStatus(it) }
