@@ -691,7 +691,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            mapColumn.addView(recenterButton, params(-1, dp(36)))
+            val portraitControls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            portraitControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                marginEnd = dp(4)
+            })
+            portraitControls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+                marginStart = dp(4)
+            })
+            mapColumn.addView(portraitControls, params(-1, dp(44)))
         }
 
         // Keep the map in the dashboard in both orientations. The speedometer stays
@@ -731,11 +741,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f))
+            content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f).apply {
+                topMargin = dp(12)
+            })
             speedText.textSize = 158f
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f))
-            content.addView(routeButton, params(-1, dp(44)))
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f).apply {
+                topMargin = dp(12)
+            })
             content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.65f))
         } else {
             content.orientation = LinearLayout.HORIZONTAL
