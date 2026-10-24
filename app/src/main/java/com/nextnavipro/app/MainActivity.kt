@@ -1698,9 +1698,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun toggleDashboardGpxRecording() {
-        if (recordingGpx || gpsDiagnosticRecording) {
+        if (recordingGpx) {
             // Tapping the green GPX control stops and saves the paired GPX + CSV session.
             finishGpxRecording(save = true)
+            return
+        }
+        if (gpsDiagnosticRecording) {
+            Toast.makeText(this, "Termina prima la registrazione diagnostica CSV dal menu Debug.", Toast.LENGTH_LONG).show()
             return
         }
         recordingIndependentOfNavigation = true
@@ -1710,7 +1714,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateGpxButtonState() {
         if (!::gpxButton.isInitialized) return
-        val active = recordingGpx || gpsDiagnosticRecording
+        val active = recordingGpx
         gpxButton.text = if (active) "GPX • REC" else "GPX"
         gpxButton.setTextColor(Color.WHITE)
         gpxButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
@@ -3137,7 +3141,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeMetricsText.setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
             routeMetricsText.setBackgroundColor(if (negativeTheme) Color.BLACK else Color.WHITE)
         }
-        updateGpxButtonState()
         if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
@@ -3167,6 +3170,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         currentLocation?.let { updateGpsStatus(it) }
         updateRadarStatusColor()
+        // Reapply after generic theme styling so GPX keeps its unmistakable red/green state.
+        updateGpxButtonState()
     }
 
     private fun android.view.View.walkViews(): List<View> {
