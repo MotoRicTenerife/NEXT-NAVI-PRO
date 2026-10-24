@@ -1,0 +1,15 @@
+{
+  "name": "next-navi-pro-jarvis-render",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server-side Gemini proxy for NEXT NAVI PRO, compatible with Render Web Services",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js",
+    "test": "node --test"
+  }
+}

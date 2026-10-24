@@ -1,7 +1,11 @@
 name: Android CI
+
+concurrency:
+  group: android-ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, fix/jarvis-render-backend ]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -15,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -29,6 +35,16 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - name: Run offline GPS trace analysis tests
         run: python -m unittest discover -s roadtools -p 'test_*.py'
+      - name: Stress-test live Render backend (bounded GET-only; no Gemini spend)
+        env:
+          RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+        run: python roadtools/render_stress_test.py
+      - name: Check Jarvis backend JavaScript syntax
+        working-directory: backend/jarvis-render
+        run: npm run check
+      - name: Test Jarvis backend (rate limiting, TomTom parsing; mocked upstream, no network or keys)
+        working-directory: backend/jarvis-render
+        run: npm test
       - name: Prepare persistent debug signing (optional)
         env:
           NEXT_NAVI_KEYSTORE_BASE64: ${{ secrets.NEXT_NAVI_KEYSTORE_BASE64 }}
@@ -45,7 +61,7 @@ jobs:
           fi
       - name: Build debug APK
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT }}
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
@@ -56,9 +72,22 @@ jobs:
           else
             echo "Stable APK signing is enabled."
           fi
+      - name: Verify APK signature fingerprint
+        run: |
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          CERT_OUTPUT="$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK")"
+          printf '%s\n' "$CERT_OUTPUT"
+          EXPECTED_SHA256="3a75fc419a09b05b36ed5d1a514abd84d9d56b7ed5e19daec9d306887e35b654"
+          ACTUAL_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]' | head -n 1)"
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::APK signing certificate SHA-256 does not match the installed-app certificate. Expected $EXPECTED_SHA256; got ${ACTUAL_SHA256:-missing}."
+            exit 1
+          fi
+          echo "APK signing certificate matches the expected NEXT NAVI PRO certificate."
       - name: Run unit tests
         env:
-          NEXT_NAVI_AI_ENDPOINT: ${{ vars.NEXT_NAVI_AI_ENDPOINT }}
+          NEXT_NAVI_AI_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
           NEXT_NAVI_KEYSTORE_PASSWORD: ${{ secrets.NEXT_NAVI_KEYSTORE_PASSWORD }}
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
@@ -70,3 +99,200 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
+        env:
+          JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
+            # Render's service is rooted in backend/jarvis-render and may not redeploy
+            # for later Android-only commits. Compare against the last commit that
+            # actually changed backend files, not the current repository HEAD.
+            export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+            if [ -z "$EXPECTED_RENDER_REVISION" ]; then
+              echo "::error::Could not identify the last backend commit."
+              exit 1
+            fi
+            echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
+          else
+            export EXPECTED_RENDER_REVISION=""
+            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+          fi
+          python - <<'PY'
+          import json, os, sys, urllib.error, urllib.parse, urllib.request
+          endpoint = os.environ.get("JARVIS_ENDPOINT", "").strip()
+          def get_json(url, timeout=25):
+              req = urllib.request.Request(url, headers={"Accept":"application/json","Accept-Language":"it","User-Agent":"NEXT-NAVI-PRO/0.3 (CI smoke test)"})
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return response.status, json.loads(response.read().decode("utf-8", "replace"))
+          def post_json(url, payload, timeout=25):
+              req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"NEXT-NAVI-PRO-CI/1.0"})
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return response.status, json.loads(response.read().decode("utf-8", "replace"))
+          failures = []
+          if endpoint.startswith("https://") and endpoint.endswith(".onrender.com/jarvis"):
+              try:
+                  status, health = get_json(endpoint[:-len("/jarvis")] + "/health", 35)
+                  if status != 200 or health.get("ok") is not True:
+                      raise RuntimeError("Unexpected health response")
+                  expected_revision = os.environ.get("EXPECTED_RENDER_REVISION", "").strip()
+                  if not health.get("revision") or health.get("revision") == "unknown":
+                      raise RuntimeError("Render is serving a backend without deployment revision")
+                  if expected_revision and health.get("revision") != expected_revision:
+                      raise RuntimeError("Render deployment is stale: serving " + health.get("revision", "unknown") + ", expected " + expected_revision + "; deploy the latest commit from fix/jarvis-render-backend")
+                  try:
+                      status, provider_status = get_json(endpoint[:-len("/jarvis")] + "/speed-limit/status", 20)
+                      if status != 200 or provider_status.get("tomtomConfigured") is not True:
+                          raise RuntimeError("Render TomTom speed-limit provider is not configured")
+                      print("Render TomTom speed-limit provider status:", {
+                          "revision": provider_status.get("revision"),
+                          "tomtomConfigured": provider_status.get("tomtomConfigured"),
+                          "roadEditorOsm": provider_status.get("roadEditorOsm")
+                      })
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Render TomTom speed-limit status HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Render TomTom speed-limit status: " + str(error))
+
+                  try:
+                      base_url = endpoint[:-len("/jarvis")]
+                      road_url = base_url + "/roads/search?" + urllib.parse.urlencode({"q":"TF-82"})
+                      status, road_search = get_json(road_url, 25)
+                      roads = road_search.get("roads", []) if isinstance(road_search, dict) else []
+                      if status != 200 or road_search.get("ok") is not True or not isinstance(roads, list):
+                          raise RuntimeError("Render OSM road-search endpoint returned an invalid payload: " + repr(road_search)[:240])
+                      if not roads:
+                          raise RuntimeError("Render OSM road search returned no TF-82 candidates")
+                      selected_road = roads[0]
+                      geometry_url = base_url + "/roads/geometry?" + urllib.parse.urlencode({
+                          "type": selected_road.get("osmType", "way"), "id": str(selected_road.get("osmId", ""))
+                      })
+                      status, road_geometry = get_json(geometry_url, 25)
+                      points = road_geometry.get("geometry", []) if isinstance(road_geometry, dict) else []
+                      if status != 200 or road_geometry.get("ok") is not True or not isinstance(points, list) or len(points) < 2:
+                          raise RuntimeError("Render OSM road-geometry endpoint returned an invalid payload: " + repr(road_geometry)[:240])
+                      print("Render road editor OSM search/geometry PASSED:", {
+                          "road": selected_road.get("name"), "osmId": selected_road.get("osmId"),
+                          "geometryPoints": len(points), "source": road_geometry.get("source")
+                      })
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Render road editor OSM endpoint HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Render road editor OSM search/geometry: " + str(error))
+
+                  try:
+                      status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
+                      reply = result.get("reply", "")
+                      if status != 200 or not reply.strip():
+                          raise RuntimeError("No reply in HTTP 200 response")
+                      print("Render Jarvis Gemini chat check PASSED:", reply[:180])
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Jarvis chat/API key/model: " + str(error))
+                  try:
+                      status, weather_reply = post_json(endpoint, {
+                          "message":"Che condizioni meteo ci sono?",
+                          "language":"it-IT",
+                          "location":{"latitude":28.05,"longitude":-16.68}
+                      }, 30)
+                      reply = weather_reply.get("reply", "")
+                      if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
+                          raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
+                      print("Render Jarvis weather check PASSED:", reply[:180])
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(400).decode("utf-8", "replace")
+                          failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
+                      else:
+                          failures.append("Render Jarvis weather: " + str(error))
+              except Exception as error:
+                  failures.append("Render Jarvis health: " + str(error))
+          else:
+              failures.append("NEXT_NAVI_AI_ENDPOINT must be the Render HTTPS /jarvis URL")
+          try:
+              weather_url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+                  "latitude":"28.0","longitude":"-16.7","current":"temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m","timezone":"auto"
+              })
+              status, weather = get_json(weather_url, 20)
+              current = weather.get("current", {})
+              if status != 200 or not all(key in current for key in ("temperature_2m","weather_code","wind_speed_10m","wind_gusts_10m","time")):
+                  raise RuntimeError("Open-Meteo response missing required current fields")
+              print("Open-Meteo live data check PASSED: time=", current.get("time"), "temperature=", current.get("temperature_2m"), "wind=", current.get("wind_speed_10m"), "gusts=", current.get("wind_gusts_10m"))
+          except Exception as error:
+              failures.append("Open-Meteo weather source: " + str(error))
+          try:
+              attempts = [
+                  ("Photon app-like Guazza search with Tenerife location bias", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guazza","limit":"20","lat":"28.1","lon":"-16.7","zoom":"14"})),
+                  ("Photon phonetic fallback Guaza with Tenerife location bias", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza","limit":"20","lat":"28.1","lon":"-16.7","zoom":"14"})),
+                  ("Photon Guaza Tenerife", "https://photon.komoot.io/api/?" + urllib.parse.urlencode({"q":"Guaza Tenerife","limit":"20"})),
+                  ("Nominatim Guaza Tenerife", "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({"q":"Guaza Tenerife","format":"jsonv2","limit":"20","addressdetails":"1","accept-language":"it"}))
+              ]
+              found = False
+              provider_errors = []
+              for provider_name, provider_url in attempts:
+                  try:
+                      status, payload = get_json(provider_url, 20)
+                      exact_tenerife_matches = []
+                      if provider_name.startswith("Photon"):
+                          features = payload.get("features", [])
+                          names = [str(item.get("properties", {}).get("name", "")) for item in features]
+                          for item in features:
+                              props = item.get("properties", {})
+                              coords = item.get("geometry", {}).get("coordinates", [])
+                              name = str(props.get("name", "")).strip().casefold()
+                              if name == "guaza" and len(coords) >= 2 and -17.0 <= float(coords[0]) <= -16.0 and 27.5 <= float(coords[1]) <= 29.5:
+                                  exact_tenerife_matches.append({
+                                      "name": props.get("name"),
+                                      "city": props.get("city") or props.get("district"),
+                                      "state": props.get("state"),
+                                      "country": props.get("country"),
+                                      "coordinates": coords[:2]
+                                  })
+                      else:
+                          features = []
+                          names = [str(item.get("name", "") or item.get("display_name", "").split(",")[0]) for item in payload if isinstance(item, dict)]
+                          for item in payload:
+                              if not isinstance(item, dict):
+                                  continue
+                              name = str(item.get("name", "") or item.get("display_name", "").split(",")[0]).strip().casefold()
+                              try:
+                                  lat, lon = float(item.get("lat")), float(item.get("lon"))
+                              except (TypeError, ValueError):
+                                  continue
+                              if name == "guaza" and -17.0 <= lon <= -16.0 and 27.5 <= lat <= 29.5:
+                                  exact_tenerife_matches.append({
+                                      "name": item.get("name"),
+                                      "display_name": item.get("display_name"),
+                                      "coordinates": [lon, lat]
+                                  })
+                      if status == 200 and exact_tenerife_matches:
+                          print(provider_name + " exact Guaza-in-Tenerife geocoder check PASSED:", exact_tenerife_matches[:8])
+                          found = True
+                          break
+                      provider_errors.append(provider_name + " returned no exact Guaza in Tenerife; candidates: " + repr(names[:8]))
+                  except Exception as error:
+                      if isinstance(error, urllib.error.HTTPError):
+                          detail = error.read(300).decode("utf-8", "replace")
+                          provider_errors.append(provider_name + " HTTP " + str(error.code) + ": " + detail[:180])
+                      else:
+                          provider_errors.append(provider_name + ": " + str(error))
+              if not found:
+                  raise RuntimeError("No geocoder returned Guaza. " + " | ".join(provider_errors))
+          except Exception as error:
+              failures.append("Guaza geocoder provider: " + str(error))
+          if failures:
+              for failure in failures:
+                  print("::warning::Live diagnostic failed: " + failure)
+              print("Live third-party integrations are NOT fully verified. This is a warning, not a code-build failure; inspect Render configuration/provider availability separately.")
+          else:
+              print("All configured live integration diagnostics passed.")
+          PY
