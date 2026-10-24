@@ -455,12 +455,34 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }, 8000L)
     }
 
+
+    /**
+     * Scales dashboard geometry for compact and large phones while respecting the
+     * short side in landscape. The scale is deliberately bounded so controls remain
+     * usable with gloves and the existing S22 Ultra layout stays close to its current size.
+     */
+    private fun dashboardScale(): Float {
+        val density = resources.displayMetrics.density.coerceAtLeast(0.1f)
+        val widthDp = resources.displayMetrics.widthPixels / density
+        val heightDp = resources.displayMetrics.heightPixels / density
+        val portrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val widthReference = if (portrait) 393f else 800f
+        val heightReference = if (portrait) 800f else 393f
+        return (minOf(widthDp / widthReference, heightDp / heightReference)).coerceIn(0.82f, 1.12f)
+    }
+
+    private fun dashboardDp(value: Int): Int =
+        (value * dashboardScale()).toInt().coerceAtLeast(if (value > 0) 1 else value)
+
+    private fun dashboardSp(value: Float): Float =
+        (value * dashboardScale()).coerceAtLeast(8f)
+
     private fun buildDashboard(savedState: Bundle?) {
         MapLibre.getInstance(this)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(5), dp(4), dp(5), dp(4))
+            setPadding(dashboardDp(5), dashboardDp(4), dashboardDp(5), dashboardDp(4))
         }
 
         val searchRow = LinearLayout(this).apply {
@@ -469,10 +491,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         destinationInput = EditText(this).apply {
             hint = appText("Cerca indirizzo o località")
-            textSize = 12f
+            textSize = dashboardSp(12f)
             setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_SEARCH
-            setPadding(dp(10), 0, dp(8), 0)
+            setPadding(dashboardDp(10), 0, dashboardDp(8), 0)
             setTextColor(if (negativeTheme) white else positiveText)
             setHintTextColor(if (negativeTheme) Color.LTGRAY else Color.DKGRAY)
             setBackgroundColor(if (negativeTheme) Color.rgb(32, 36, 40) else Color.rgb(220, 227, 230))
@@ -483,20 +505,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 } else false
             }
         }
-        searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dp(46), 1f))
+        searchRow.addView(destinationInput, LinearLayout.LayoutParams(0, dashboardDp(46), 1f))
         searchButton = makeButton(appText("CERCA")) { searchDestination() }
-        searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
-            setMargins(dp(4), 0, 0, 0)
+        searchRow.addView(searchButton, LinearLayout.LayoutParams(dashboardDp(76), dashboardDp(46)).apply {
+            setMargins(dashboardDp(4), 0, 0, 0)
         })
         val homeButton = makeButton(appText("CASA")) { showHomeOptions() }
-        searchRow.addView(homeButton, LinearLayout.LayoutParams(dp(70), dp(46)).apply {
-            setMargins(dp(4), 0, 0, 0)
+        searchRow.addView(homeButton, LinearLayout.LayoutParams(dashboardDp(70), dashboardDp(46)).apply {
+            setMargins(dashboardDp(4), 0, 0, 0)
         })
         menuButton = makeButton(appText("MENU")) { showMainMenu() }
-        searchRow.addView(menuButton, LinearLayout.LayoutParams(dp(76), dp(46)).apply {
-            setMargins(dp(4), 0, 0, 0)
+        searchRow.addView(menuButton, LinearLayout.LayoutParams(dashboardDp(76), dashboardDp(46)).apply {
+            setMargins(dashboardDp(4), 0, 0, 0)
         })
-        root.addView(searchRow, params(-1, dp(50)))
+        root.addView(searchRow, params(-1, dashboardDp(50)))
 
         // Explicit push-to-talk only: no wake word and no background microphone.
         val jarvisRow = LinearLayout(this).apply {
@@ -504,19 +526,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         jarvisButton = makeButton(jarvisButtonIdleLabel()) { onJarvisButtonPressed() }
-        jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dp((72 + jarvisAssistantName().length * 8).coerceIn(116, 220)), dp(38)).apply {
-            setMargins(dp(2), 0, dp(8), 0)
+        jarvisRow.addView(jarvisButton, LinearLayout.LayoutParams(dashboardDp((72 + jarvisAssistantName().length * 8).coerceIn(116, 220)), dashboardDp(38)).apply {
+            setMargins(dashboardDp(2), 0, dashboardDp(8), 0)
         })
         jarvisStatusText = TextView(this).apply {
             text = appText("Premi il microfono e parla")
-            textSize = 11f
+            textSize = dashboardSp(11f)
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(if (negativeTheme) cyan else Color.rgb(0, 85, 105))
         }
-        jarvisRow.addView(jarvisStatusText, LinearLayout.LayoutParams(0, dp(38), 1f))
-        root.addView(jarvisRow, params(-1, dp(40)))
+        jarvisRow.addView(jarvisStatusText, LinearLayout.LayoutParams(0, dashboardDp(38), 1f))
+        root.addView(jarvisRow, params(-1, dashboardDp(40)))
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -525,44 +547,44 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val infoColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setPadding(dashboardDp(2), dashboardDp(2), dashboardDp(2), dashboardDp(2))
         }
         val brand = TextView(this).apply {
             text = "NEXT NAVI PRO"
-            textSize = 12f
+            textSize = dashboardSp(12f)
             letterSpacing = 0.04f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
         }
-        infoColumn.addView(brand, params(-1, dp(34)))
+        infoColumn.addView(brand, params(-1, dashboardDp(34)))
         routeMetricsText = TextView(this).apply {
             text = "— km  •  ARRIVO —"
-            textSize = 12f
+            textSize = dashboardSp(12f)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             maxLines = 1
             includeFontPadding = false
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(2), 0, dp(2), 0)
+            setPadding(dashboardDp(2), 0, dashboardDp(2), 0)
             setTextColor(if (negativeTheme) yellow else Color.rgb(0, 105, 110))
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         weatherText = TextView(this).apply {
             text = appText("🌤️ METEO in attesa GPS")
-            textSize = 12f
+            textSize = dashboardSp(12f)
             gravity = Gravity.CENTER
             maxLines = 2
             includeFontPadding = false
-            setLineSpacing(dp(2).toFloat(), 1.0f)
-            setPadding(dp(8), dp(3), dp(8), dp(3))
+            setLineSpacing(dashboardDp(2).toFloat(), 1.0f)
+            setPadding(dashboardDp(8), dashboardDp(3), dashboardDp(8), dashboardDp(3))
             // Match the dashboard surface exactly; the weather strip is not a separate card.
             setBackgroundColor(if (negativeTheme) negativeBackground else positiveBackground)
         }
-        infoColumn.addView(weatherText, params(-1, dp(52)))
+        infoColumn.addView(weatherText, params(-1, dashboardDp(52)))
         limitValue = TextView(this).apply {
             text = "—"
             // 50% larger than the previous 28sp text; keep the sign comfortably tappable.
-            textSize = 42f
+            textSize = dashboardSp(42f)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -573,55 +595,55 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             contentDescription = "Limite di velocità. Tocca per impostare o aggiornare manualmente"
             setOnClickListener { showSpeedLimitOptions() }
         }
-        infoColumn.addView(limitValue, params(dp(96), dp(96)))
+        infoColumn.addView(limitValue, params(dashboardDp(96), dashboardDp(96)))
         gpsText = TextView(this).apply {
             text = appText("RICERCA GPS…")
-            textSize = 10f
+            textSize = dashboardSp(10f)
             gravity = Gravity.CENTER
         }
-        infoColumn.addView(gpsText, params(-1, dp(38)))
+        infoColumn.addView(gpsText, params(-1, dashboardDp(38)))
         routeText = TextView(this).apply {
             text = appText("Nessun percorso attivo")
-            textSize = 11f
+            textSize = dashboardSp(11f)
             gravity = Gravity.CENTER
-            setPadding(dp(3), dp(2), dp(3), dp(3))
+            setPadding(dashboardDp(3), dashboardDp(2), dashboardDp(3), dashboardDp(3))
             setBackgroundColor(if (negativeTheme) Color.rgb(28, 33, 38) else Color.rgb(205, 216, 222))
         }
         infoColumn.addView(routeText, LinearLayout.LayoutParams(-1, 0, 1f))
         radarText = TextView(this).apply {
             text = appText("RADAR OSM")
-            textSize = 10f
+            textSize = dashboardSp(10f)
             gravity = Gravity.CENTER
         }
-        infoColumn.addView(radarText, params(-1, dp(36)))
+        infoColumn.addView(radarText, params(-1, dashboardDp(36)))
 
         maneuverIcon = TextView(this).apply {
             text = "↑"
             // Oversized, heavy navigation symbol; the container below is enlarged too
             // so the glyph is not clipped on portrait screens.
-            textSize = 160f
+            textSize = dashboardSp(160f)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
             setTextColor(if (negativeTheme) white else positiveText)
         }
         routeText.apply {
-            textSize = 18f
+            textSize = dashboardSp(18f)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
             maxLines = 3
-            setPadding(dp(8), dp(6), dp(8), dp(6))
+            setPadding(dashboardDp(8), dashboardDp(6), dashboardDp(8), dashboardDp(6))
         }
 
         val speedColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(2), 0, dp(2), 0)
+            setPadding(dashboardDp(2), 0, dashboardDp(2), 0)
         }
         speedText = SpeedometerTextView(this).apply {
             text = "000"
-            textSize = 132f
+            textSize = dashboardSp(132f)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -632,18 +654,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         // In portrait, reduce the top spacer to lift the tachometer slightly.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.65f else 1.2f))
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dashboardDp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
-            textSize = 18f
+            textSize = dashboardSp(18f)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             letterSpacing = 0.03f
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, dp(8))
+            setPadding(0, 0, 0, dashboardDp(8))
         }
         clockText = TextView(this).apply {
             text = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
-            textSize = 25f
+            textSize = dashboardSp(25f)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             includeFontPadding = false
@@ -655,21 +677,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Keep unit and clock visually close to the tachometer; avoid extra gaps.
             // Pull the unit, clock and GPS warning closer to the tachometer to
             // reclaim a little vertical space for the map.
-            speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dp(30)).apply {
-                topMargin = -dp(7)
+            speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dashboardDp(30)).apply {
+                topMargin = -dashboardDp(7)
             })
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
-                topMargin = -dp(5)
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dashboardDp(32)).apply {
+                topMargin = -dashboardDp(5)
             })
-            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = -dp(4)
+            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dashboardDp(34)).apply {
+                topMargin = -dashboardDp(4)
             })
         } else {
-            speedColumn.addView(unit, params(-1, dp(34)))
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = dp(2)
+            speedColumn.addView(unit, params(-1, dashboardDp(34)))
+            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dashboardDp(34)).apply {
+                topMargin = dashboardDp(2)
             })
-            speedColumn.addView(routeMetricsText, params(-1, dp(34)))
+            speedColumn.addView(routeMetricsText, params(-1, dashboardDp(34)))
         }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, 0.8f))
@@ -687,20 +709,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        gpsText.textSize = 9f
+        gpsText.textSize = dashboardSp(9f)
         gpsText.maxLines = 1
-        gpsText.setPadding(dp(2), 0, dp(2), 0)
-        radarText.textSize = 9f
+        gpsText.setPadding(dashboardDp(2), 0, dashboardDp(2), 0)
+        radarText.textSize = dashboardSp(9f)
         radarText.maxLines = 1
-        radarText.setPadding(dp(2), 0, dp(2), 0)
+        radarText.setPadding(dashboardDp(2), 0, dashboardDp(2), 0)
         infoColumn.removeView(gpsText)
         infoColumn.removeView(radarText)
-        mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
-        mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
+        mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dashboardDp(22), 1f))
+        mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dashboardDp(22), 1f))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
-        mapColumn.addView(mapStatus, params(-1, dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
+        mapColumn.addView(mapStatus, params(-1, dashboardDp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
         if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
@@ -708,13 +730,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
             }
-            portraitControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                setMargins(dp(2), dp(2), dp(2), dp(2))
+            portraitControls.addView(routeButton, LinearLayout.LayoutParams(0, dashboardDp(40), 1f).apply {
+                setMargins(dashboardDp(2), dashboardDp(2), dashboardDp(2), dashboardDp(2))
             })
-            portraitControls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                setMargins(dp(2), dp(2), dp(2), dp(2))
+            portraitControls.addView(recenterButton, LinearLayout.LayoutParams(0, dashboardDp(40), 1f).apply {
+                setMargins(dashboardDp(2), dashboardDp(2), dashboardDp(2), dashboardDp(2))
             })
-            mapColumn.addView(portraitControls, params(-1, dp(44)))
+            mapColumn.addView(portraitControls, params(-1, dashboardDp(44)))
         }
 
         // Keep the map in the dashboard in both orientations. The speedometer stays
@@ -734,14 +756,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Portrait: center the complete navigation group (arrow + instruction)
             // vertically against the speed-limit sign; avoid translating only the arrow.
             // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
-            maneuverIcon.textSize = 88f
-            maneuverIcon.translationY = -dp(38).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(88)))
-            routeText.textSize = 15f
-            routeText.translationY = -dp(16).toFloat()
+            maneuverIcon.textSize = dashboardSp(88f)
+            maneuverIcon.translationY = -dashboardDp(38).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dashboardDp(88)))
+            routeText.textSize = dashboardSp(15f)
+            routeText.translationY = -dashboardDp(16).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
-            routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
+            routeText.setPadding(dashboardDp(8), dashboardDp(2), dashboardDp(8), dashboardDp(2))
             navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
             val limitHalf = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -750,19 +772,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             limitValue.translationY = 0f
             // Portrait: weather occupies one full-width strip above navigation and speed limit.
             // Keep the maneuver/instruction and speed-limit sign in their own measured row.
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dashboardDp(96), dashboardDp(96)).apply { gravity = Gravity.CENTER })
             upper.addView(navHalf, LinearLayout.LayoutParams(0, -1, 1f))
             upper.addView(limitHalf, LinearLayout.LayoutParams(0, -1, 1f))
-            content.addView(weatherText, params(-1, dp(52)))
+            content.addView(weatherText, params(-1, dashboardDp(52)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f).apply {
                 // Lower the navigation instruction and speed-limit area by about 0.5 cm.
-                topMargin = dp(31)
+                topMargin = dashboardDp(31)
             })
-            speedText.textSize = 158f
+            speedText.textSize = dashboardSp(158f)
             // Keep the tachometer transparent in portrait so it cannot visually
             // obscure the navigation row. The colored outline remains on each digit.
             speedText.background = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
-            speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
+            speedText.setShadowLayer(dashboardDp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             // Rebalance portrait height: move GPS/radar status upward and give
             // the map a little more vertical space without squeezing the controls.
             content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.34f).apply {
@@ -784,11 +806,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.translationY = 0f
             // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
             // Landscape physical targets: maneuver glyph and instruction text about 0.75 cm.
-            maneuverIcon.textSize = 116f
-            maneuverIcon.translationY = -dp(73).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(116)))
-            routeText.textSize = 15f
-            routeText.translationY = -dp(47).toFloat()
+            maneuverIcon.textSize = dashboardSp(116f)
+            maneuverIcon.translationY = -dashboardDp(73).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, dashboardDp(116)))
+            routeText.textSize = dashboardSp(15f)
+            routeText.translationY = -dashboardDp(47).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -796,8 +818,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitValue.translationY = -dp(50).toFloat()
-            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
+            limitValue.translationY = -dashboardDp(50).toFloat()
+            limitHalf.addView(limitValue, LinearLayout.LayoutParams(dashboardDp(96), dashboardDp(96)).apply { gravity = Gravity.CENTER })
             val navAndLimit = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
@@ -807,9 +829,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             left.addView(navAndLimit, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
             // Landscape: group weather immediately above GPS and OSM radar status.
-            mapColumn.addView(weatherText, 0, params(-1, dp(52)))
-            speedText.textSize = 158f
-            speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
+            mapColumn.addView(weatherText, 0, params(-1, dashboardDp(52)))
+            speedText.textSize = dashboardSp(158f)
+            speedText.setShadowLayer(dashboardDp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
@@ -826,10 +848,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
         // Use one shared size and identical margins for every dashboard control.
         // In portrait this keeps the two map-row buttons aligned with EXIT/NAVIGATORE.
-        val controlHeight = dp(40)
+        val controlHeight = dashboardDp(40)
         fun addBottomControl(button: Button) {
             controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                setMargins(dp(2), dp(2), dp(2), dp(2))
+                setMargins(dashboardDp(2), dashboardDp(2), dashboardDp(2), dashboardDp(2))
             })
         }
         if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
@@ -840,7 +862,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             addBottomControl(exitButton)
             addBottomControl(navigatorButton)
         }
-        root.addView(controls, params(-1, dp(44)))
+        root.addView(controls, params(-1, dashboardDp(44)))
 
         setContentView(root)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
