@@ -132,6 +132,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var routeButton: Button
     private lateinit var themeButton: Button
     private lateinit var exitButton: Button
+    private lateinit var gpxButton: Button
     private lateinit var menuButton: Button
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
@@ -171,6 +172,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var pendingGpsDiagnosticCsv: String? = null
     private var pendingGpxExportPoints: List<NavPoint>? = null
     private var recordingGpx = false
+    // True when recording was explicitly started from the dashboard, independently of navigation.
+    private var recordingIndependentOfNavigation = false
     private val gpxRecordingPoints = ArrayList<NavPoint>()
     private var lastRecordedGpxPoint: NavPoint? = null
     private var lastGpxPointTimeMs = 0L
@@ -835,26 +838,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        // Theme selection remains available in Settings; the dashboard control is now an explicit exit.
+        // Exit and GPX share the space previously occupied by the single EXIT button.
         exitButton = makeButton("ESCI") { showExitConfirmation() }
+        gpxButton = makeButton("GPX") { toggleDashboardGpxRecording() }
         val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
-        // Use one shared size and identical margins for every dashboard control.
-        // In portrait this keeps the two map-row buttons aligned with EXIT/NAVIGATORE.
         val controlHeight = dp(40)
         fun addBottomControl(button: Button) {
             controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
                 setMargins(dp(2), dp(2), dp(2), dp(2))
             })
         }
+        val exitAndGpx = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun addHalfExitControl(button: Button) {
+            exitAndGpx.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                setMargins(dp(2), dp(2), dp(2), dp(2))
+            })
+        }
+        addHalfExitControl(exitButton)
+        addHalfExitControl(gpxButton)
+        controls.addView(exitAndGpx, LinearLayout.LayoutParams(0, controlHeight, 1f))
         if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            addBottomControl(exitButton)
             addBottomControl(navigatorButton)
             addBottomControl(routeButton)
         } else {
-            addBottomControl(exitButton)
             addBottomControl(navigatorButton)
         }
         root.addView(controls, params(-1, dp(44)))
+        updateGpxButtonState()
 
         setContentView(root)
         mapFollowHandler.removeCallbacks(mapFollowRunnable)
@@ -1676,9 +1689,34 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         AlertDialog.Builder(this)
             .setTitle("Memorizzare il viaggio?")
             .setMessage("Vuoi registrare il viaggio in GPX? Se confermi, verrà registrato anche il CSV GPS associato. Eliminando il GPX, verrà eliminato anche il suo CSV.")
-            .setPositiveButton("Sì, registra") { _, _ -> startGpxRecording() }
+            .setPositiveButton("Sì, registra") { _, _ ->
+                recordingIndependentOfNavigation = false
+                startGpxRecording()
+            }
             .setNegativeButton("No", null)
             .show()
+    }
+
+    private fun toggleDashboardGpxRecording() {
+        if (recordingGpx || gpsDiagnosticRecording) {
+            // Tapping the green GPX control stops and saves the paired GPX + CSV session.
+            finishGpxRecording(save = true)
+            return
+        }
+        recordingIndependentOfNavigation = true
+        startGpxRecording()
+        updateGpxButtonState()
+    }
+
+    private fun updateGpxButtonState() {
+        if (!::gpxButton.isInitialized) return
+        val active = recordingGpx || gpsDiagnosticRecording
+        gpxButton.text = if (active) "GPX • REC" else "GPX"
+        gpxButton.setTextColor(Color.WHITE)
+        gpxButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+            if (active) Color.rgb(20, 145, 65) else Color.rgb(190, 35, 35)
+        ))
+        gpxButton.contentDescription = if (active) "Registrazione GPX attiva. Tocca per fermare e salvare." else "Registrazione GPX ferma. Tocca per iniziare."
     }
 
     private fun startGpxRecording() {
@@ -1688,6 +1726,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticSamples.clear()
         gpsDiagnosticRecording = true
         recordingGpx = true
+        updateGpxButtonState()
         try {
             startForegroundService(
                 Intent(this, GpsRecordingForegroundService::class.java)
@@ -1752,6 +1791,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         saveGpxRecordingCheckpoint()
         saveGpsDiagnosticCheckpoint()
         recordingGpx = false
+        recordingIndependentOfNavigation = false
+        updateGpxButtonState()
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
         gpsDiagnosticRecording = false
@@ -3096,6 +3137,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeMetricsText.setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
             routeMetricsText.setBackgroundColor(if (negativeTheme) Color.BLACK else Color.WHITE)
         }
+        updateGpxButtonState()
         if (::weatherText.isInitialized) weatherText.setBackgroundColor(panelBackground)
         updateSpeedGaugeBorder(lastDisplayedSpeed)
         val textColor = if (negativeTheme) white else positiveText
@@ -3758,8 +3800,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun clearRoute() {
-        finishGpxRecording(save = true)
-        stopAndSaveGpsDiagnosticRecording("percorso terminato")
+        // A dashboard-started recording is a standalone trip log and must survive
+        // arrival, route cancellation, or clearing a destination.
+        if (!recordingIndependentOfNavigation) {
+            finishGpxRecording(save = true)
+            stopAndSaveGpsDiagnosticRecording("percorso terminato")
+        }
         routeResult = null
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
