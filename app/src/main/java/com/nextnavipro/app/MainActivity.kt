@@ -649,14 +649,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // In portrait, show km/h directly below the tachometer, then the clock.
         // ETA and remaining distance stay below both; landscape order remains unchanged.
         if (isPortrait) {
-            speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dp(30)).apply {
-                topMargin = dp(4)
-            })
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
-                topMargin = dp(3)
-            })
+            // Keep unit and clock visually close to the tachometer; avoid extra gaps.
+            speedColumn.addView(unit, params(-1, dp(30)))
+            speedColumn.addView(clockText, params(-1, dp(32)))
             speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = dp(2)
+                topMargin = dp(1)
             })
         } else {
             speedColumn.addView(unit, params(-1, dp(34)))
@@ -757,10 +754,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // obscure the navigation row. The colored outline remains on each digit.
             speedText.background = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
-            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.6f).apply {
-                topMargin = dp(12)
+            // Rebalance portrait height: move GPS/radar status upward and give
+            // the map a little more vertical space without squeezing the controls.
+            content.addView(speedColumn, LinearLayout.LayoutParams(-1, 0, 1.48f).apply {
+                topMargin = dp(8)
             })
-            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.65f))
+            content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 0.82f))
         } else {
             content.orientation = LinearLayout.HORIZONTAL
             val left = LinearLayout(this).apply {
