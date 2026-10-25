@@ -1465,29 +1465,75 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showMotorcycleSpeedOffsetDialog() {
-        val input = EditText(this).apply {
-            hint = appText("Scarto in km/h (es. 6)")
+        val tachometerInput = EditText(this).apply {
+            hint = appText("Tachimetro moto (km/h)")
             inputType = InputType.TYPE_CLASS_NUMBER
-            setText(motorcycleSpeedOffsetKmh.toString())
-            selectAll()
+            setSingleLine(true)
+        }
+        val gpsInput = EditText(this).apply {
+            hint = appText("Velocità GPS telefono (km/h)")
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+        }
+        val resultText = TextView(this).apply {
+            text = appText("Inserisci entrambe le velocità per calcolare lo scarto.")
+            textSize = 16f
+            setPadding(0, dp(12), 0, dp(4))
         }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(4))
             addView(TextView(this@MainActivity).apply {
-                text = appText("Confronta il tachimetro della moto con il GPS a velocità costante e inserisci di quanto segna in più. Lo scarto si applica solo agli avvisi in modalità Moto; il tachimetro GPS e le altre funzioni restano invariati.")
+                text = appText("Inserisci le due velocità rilevate nello stesso momento, mantenendo un'andatura costante. NEXT NAVI PRO calcolerà automaticamente la differenza.")
                 textSize = 14f
             })
-            addView(input, params(-1, dp(52)))
+            addView(tachometerInput, params(-1, dp(52)))
+            addView(gpsInput, params(-1, dp(52)))
+            addView(resultText, params(-1, -2))
         }
-        AlertDialog.Builder(this)
+
+        fun updateCalculatedOffset() {
+            val tachometer = tachometerInput.text.toString().toIntOrNull()
+            val gps = gpsInput.text.toString().toIntOrNull()
+            if (tachometer == null || gps == null || tachometer <= 0 || gps <= 0) {
+                resultText.text = appText("Inserisci entrambe le velocità per calcolare lo scarto.")
+                return
+            }
+            val offset = tachometer - gps
+            resultText.text = if (offset >= 0) {
+                appText("Scarto calcolato: +$offset km/h")
+            } else {
+                appText("Scarto calcolato: $offset km/h (il tachimetro indica meno del GPS)")
+            }
+        }
+        val watcher = object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                updateCalculatedOffset()
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        }
+        tachometerInput.addTextChangedListener(watcher)
+        gpsInput.addTextChangedListener(watcher)
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle(appText("Calibrazione tachimetro moto"))
             .setView(panel)
-            .setPositiveButton(appText("Salva")) { _, _ ->
-                val offset = input.text.toString().toIntOrNull()
-                if (offset == null || offset !in 0..30) {
-                    Toast.makeText(this, appText("Inserisci uno scarto tra 0 e 30 km/h."), Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+            .setPositiveButton(appText("Calcola e salva"), null)
+            .setNegativeButton(appText("Annulla"), null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val tachometer = tachometerInput.text.toString().toIntOrNull()
+                val gps = gpsInput.text.toString().toIntOrNull()
+                if (tachometer == null || gps == null || tachometer <= 0 || gps <= 0) {
+                    Toast.makeText(this, appText("Inserisci entrambe le velocità in km/h."), Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                val offset = tachometer - gps
+                if (offset !in 0..30) {
+                    Toast.makeText(this, appText("Lo scarto deve essere compreso tra 0 e 30 km/h: controlla i due valori."), Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
                 }
                 motorcycleSpeedOffsetKmh = offset
                 alertSpeedSource = "motorcycle"
@@ -1497,10 +1543,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .apply()
                 updateSpeedingAlertState()
                 updateSpeedLimitDisplay()
-                Toast.makeText(this, appText("Avvisi Moto attivi: GPS + $offset km/h."), Toast.LENGTH_LONG).show()
+                Toast.makeText(this, appText("Scarto salvato: +$offset km/h. Avvisi Moto attivi."), Toast.LENGTH_LONG).show()
+                dialog.dismiss()
             }
-            .setNegativeButton(appText("Annulla"), null)
-            .show()
+        }
+        dialog.show()
     }
 
     private fun rebuildDashboardForDisplayMode() {
