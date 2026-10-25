@@ -303,6 +303,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var ambientWeatherStationId: String? = null
     private var ambientWeatherStationDistanceKm: Double? = null
     private var ambientWeatherObservationTime: String? = null
+    private var ambientWeatherModelUpdatedAt: String? = null
     private var lastAmbientTemperatureUpdateMs = 0L
     private var lastAmbientTemperatureLocation: Location? = null
     private val mapFollowHandler = Handler(Looper.getMainLooper())
@@ -1421,7 +1422,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         deviceStatusText.contentDescription = buildString {
             if (temperature != null) {
                 when {
-                    temperatureIsEstimated -> append("Temperatura stimata dal modello meteorologico ")
+                    temperatureIsEstimated -> {
+                        append("Temperatura stimata dal modello meteorologico ")
+                        ambientWeatherModelUpdatedAt?.let { append(", modello aggiornato " + it + " ") }
+                    }
                     measuredTemperature != null -> append("Temperatura ambientale misurata dal sensore del telefono ")
                     ambientWeatherTemperatureIsObserved -> {
                         append("Temperatura misurata dalla stazione meteorologica ")
@@ -4872,6 +4876,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     ambientWeatherStationId = result.stationId
                     ambientWeatherStationDistanceKm = result.distanceKm
                     ambientWeatherObservationTime = result.observationTime
+                    ambientWeatherModelUpdatedAt = result.modelUpdatedAt
                     updateDeviceStatusText()
                 }
             }
