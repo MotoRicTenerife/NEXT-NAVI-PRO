@@ -715,6 +715,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.8f else 0.25f))
         routeButton = makeButton(appText(if (routeResult != null) "TERMINA NAVIGAZIONE" else "AVVIA NAVIGAZIONE")) {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
+        }.apply {
+            // Keep the full label vertically visible on compact portrait controls.
+            textSize = if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 10f else 11f
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            setPadding(dp(2), 0, dp(2), 0)
+            minHeight = 0
+            minWidth = 0
+            maxLines = 1
+            isSingleLine = true
         }
         // The route button is placed in the lower control row in landscape and
         // between the speed display and map in portrait, so it never covers the map.
@@ -911,8 +921,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpxButton = makeButton("GPX") { toggleDashboardGpxRecording() }
         val gpsButton = makeButton(appText("⌖ GPS")) { recenterMapToGps() }
         val controlHeight = dp(40)
-        fun addBottomControl(button: Button) {
-            controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+        fun addBottomControl(button: Button, weight: Float = 1f) {
+            controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, weight).apply {
                 setMargins(dp(2), dp(2), dp(2), dp(2))
             })
         }
@@ -928,8 +938,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         addHalfExitControl(exitButton)
         addHalfExitControl(gpxButton)
         controls.addView(exitAndGpx, LinearLayout.LayoutParams(0, controlHeight, 1f))
-        addBottomControl(gpsButton)
-        addBottomControl(routeButton)
+        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            // Give GPS a little less width and let the navigation action breathe.
+            addBottomControl(gpsButton, 0.78f)
+            addBottomControl(routeButton, 1.22f)
+        } else {
+            addBottomControl(gpsButton)
+            addBottomControl(routeButton)
+        }
         if (navigationMapMode && isMapPanelPortrait) {
             // Portrait map-panel mode keeps every control above the map.
             root.addView(controls, params(-1, dp(44)))
@@ -1376,8 +1392,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val manager = getSystemService(BATTERY_SERVICE) as? BatteryManager
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
         } catch (_: Exception) { null }
+        // The Galaxy S22 Ultra exposes a barometer but no ambient-temperature sensor.
+        // Only show temperature when Android actually exposes a usable ambient sensor reading.
         val temperature = if (ambientTemperatureSensor != null) {
-            ambientTemperatureC?.let { String.format(Locale.getDefault(), "%.1f°C", it) } ?: "--°C"
+            ambientTemperatureC?.let { String.format(Locale.getDefault(), "%.1f°C", it) }
         } else null
         val parts = mutableListOf<String>()
         if (temperature != null) parts.add("🌡 $temperature")
