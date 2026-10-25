@@ -91,6 +91,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val PREF_NEGATIVE = "negative_theme"
         private const val PREF_THEME_MODE = "theme_mode"
         private const val PREF_MAP_LAYER = "map_layer"
+        private const val PREF_NAVIGATION_MAP_MODE = "navigation_map_panel_mode"
+        private const val PREF_ALERT_SPEED_SOURCE = "alert_speed_source"
+        private const val PREF_MOTORCYCLE_SPEED_OFFSET = "motorcycle_speed_offset_kmh"
         private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
         private const val PERMISSION_LOCATION = 100
         private const val PERMISSION_AUDIO = 101
@@ -137,6 +140,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
     private var themeMode: String = "negative"
+    private var navigationMapMode = false
+    private var alertSpeedSource = "gps"
+    private var motorcycleSpeedOffsetKmh = 0
     private var motorcycleProfile = false
     private lateinit var limitValue: TextView
     private var mapView: MapView? = null
@@ -394,6 +400,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
+        navigationMapMode = preferences.getBoolean(PREF_NAVIGATION_MAP_MODE, false)
+        alertSpeedSource = preferences.getString(PREF_ALERT_SPEED_SOURCE, "gps") ?: "gps"
+        motorcycleSpeedOffsetKmh = preferences.getInt(PREF_MOTORCYCLE_SPEED_OFFSET, 0).coerceIn(0, 30)
         // This release is the motorcycle/scooter edition. Keep routing in motorcycle
         // mode until the dedicated car layout and behavior are implemented.
         motorcycleProfile = true
@@ -720,7 +729,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         mapColumn.addView(mapStatus, params(-1, dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
-        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT && !navigationMapMode) {
             val portraitControls = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
@@ -734,11 +743,72 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             mapColumn.addView(portraitControls, params(-1, dp(44)))
         }
 
-        // Keep the map in the dashboard in both orientations. The speedometer stays
-        // in the central column/band; the map is the right-hand (landscape) or lower
-        // (portrait) pane rather than being used to position the speedometer.
+        // Keep the existing dashboard untouched by default. The optional map-panel
+        // view reuses the same live map, speed-limit sign, guidance, weather and status views.
         listOf(brand, weatherText, limitValue, gpsText, routeText, radarText, routeMetricsText).forEach { infoColumn.removeView(it) }
-        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+        val isMapPanelPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        if (navigationMapMode) {
+            speedColumn.removeView(routeMetricsText)
+            mapColumn.removeView(mapStatus)
+            val infoPanel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(3), dp(2), dp(3), dp(2))
+            }
+            weatherText.maxLines = 2
+            infoPanel.addView(weatherText, LinearLayout.LayoutParams(-1, dp(if (isMapPanelPortrait) 38 else 42)))
+            val navigationInfo = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val maneuverAndText = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            maneuverIcon.textSize = if (isMapPanelPortrait) 48f else 54f
+            maneuverIcon.translationY = 0f
+            maneuverIcon.includeFontPadding = false
+            routeText.textSize = if (isMapPanelPortrait) 13f else 14f
+            routeText.translationY = 0f
+            routeText.includeFontPadding = false
+            routeText.maxLines = 3
+            routeText.setPadding(dp(4), dp(2), dp(4), dp(2))
+            maneuverAndText.addView(maneuverIcon, LinearLayout.LayoutParams(dp(if (isMapPanelPortrait) 52 else 58), dp(if (isMapPanelPortrait) 58 else 64)))
+            maneuverAndText.addView(routeText, LinearLayout.LayoutParams(0, -2, 1f))
+            navigationInfo.addView(maneuverAndText, LinearLayout.LayoutParams(0, -1, 1f))
+            limitValue.translationY = 0f
+            navigationInfo.addView(limitValue, LinearLayout.LayoutParams(dp(if (isMapPanelPortrait) 76 else 84), dp(if (isMapPanelPortrait) 76 else 84)))
+            infoPanel.addView(navigationInfo, LinearLayout.LayoutParams(-1, 0, 1f))
+            routeMetricsText.translationY = 0f
+            infoPanel.addView(routeMetricsText, params(-1, dp(if (isMapPanelPortrait) 28 else 30)))
+            val statusRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            statusRow.addView(gpsText, LinearLayout.LayoutParams(0, dp(20), 1f))
+            statusRow.addView(radarText, LinearLayout.LayoutParams(0, dp(20), 1f))
+            infoPanel.addView(statusRow, params(-1, dp(20)))
+            val panelControls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            panelControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                setMargins(dp(2), dp(1), dp(2), dp(1))
+            })
+            panelControls.addView(makeButton(appText("⌖ GPS")) { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(38), 0.72f).apply {
+                setMargins(dp(2), dp(1), dp(2), dp(1))
+            })
+            infoPanel.addView(panelControls, params(-1, dp(40)))
+            if (isMapPanelPortrait) {
+                content.orientation = LinearLayout.VERTICAL
+                content.addView(infoPanel, LinearLayout.LayoutParams(-1, 0, 0.88f))
+                content.addView(mapColumn, LinearLayout.LayoutParams(-1, 0, 1.12f))
+            } else {
+                content.orientation = LinearLayout.HORIZONTAL
+                content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 2f))
+                content.addView(infoPanel, LinearLayout.LayoutParams(0, -1, 1f))
+            }
+        } else if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
             content.orientation = LinearLayout.VERTICAL
             val upper = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -830,7 +900,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (!(navigationMapMode && isMapPanelPortrait)) {
+            root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
         clockHandler.removeCallbacks(clockRunnable)
         clockRunnable.run()
 
@@ -866,7 +938,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             addBottomControl(navigatorButton)
         }
-        root.addView(controls, params(-1, dp(44)))
+        if (navigationMapMode && isMapPanelPortrait) {
+            // Portrait map-panel mode keeps every control above the map.
+            root.addView(controls, params(-1, dp(44)))
+            root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        } else {
+            root.addView(controls, params(-1, dp(44)))
+        }
         updateGpxButtonState()
 
         setContentView(root)
@@ -1158,10 +1236,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun isSpeedingWithKnownLimit(): Boolean {
-        val location = currentLocation ?: return false
         val limit = currentSpeedLimit ?: return false
-        if (!location.hasSpeed() || !location.hasAccuracy() || location.accuracy > 35f) return false
-        return location.speed * 3.6f > limit + 3f
+        val speedKmh = speedForLimitAlertsKmh() ?: return false
+        return speedKmh > limit + 3f
     }
 
     private fun updateSpeedingAlertState() {
@@ -1298,7 +1375,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Modalità veicolo: MOTO (attiva)"), appText("Jarvis • Assistente e impostazioni"))
+        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Modalità veicolo: MOTO (attiva)"), appText("Jarvis • Assistente e impostazioni"), appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"), appText("Velocità per avvisi: " + if (alertSpeedSource == "motorcycle") "Moto calibrata" else "GPS"))
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
                 when (which) {
@@ -1314,6 +1391,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     9 -> showGpsDiagnosticsMenu()
                     10 -> showVehicleProfileMenu()
                     11 -> showJarvisMenu()
+                    12 -> showNavigationMapModeSettings()
+                    13 -> showAlertSpeedSourceSettings()
                 }
             }.setNegativeButton("Chiudi", null).show()
     }
@@ -1340,6 +1419,123 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             .setNegativeButton(appText("Chiudi"), null)
             .show()
+    }
+
+    private fun showNavigationMapModeSettings() {
+        val labels = arrayOf(appText("Cruscotto tachimetro (attuale)"), appText("Mappa + pannello informazioni"))
+        AlertDialog.Builder(this)
+            .setTitle(appText("Visualizzazione navigazione"))
+            .setSingleChoiceItems(labels, if (navigationMapMode) 1 else 0) { dialog, which ->
+                val enabled = which == 1
+                navigationMapMode = enabled
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(PREF_NAVIGATION_MAP_MODE, enabled).apply()
+                dialog.dismiss()
+                rebuildDashboardForDisplayMode()
+            }
+            .setNegativeButton(appText("Annulla"), null)
+            .show()
+    }
+
+    private fun showAlertSpeedSourceSettings() {
+        val labels = arrayOf(
+            appText("GPS — velocità GPS senza correzioni"),
+            appText("Moto — velocità stimata GPS + scarto del tachimetro")
+        )
+        AlertDialog.Builder(this)
+            .setTitle(appText("Velocità usata per gli avvisi"))
+            .setMessage(appText("Il telefono non può leggere direttamente il tachimetro della moto. In modalità Moto stima la velocità indicata sommando al GPS lo scarto calibrato. Esempio: GPS 74 + scarto 6 = stima tachimetro 80 km/h."))
+            .setSingleChoiceItems(labels, if (alertSpeedSource == "motorcycle") 1 else 0) { dialog, which ->
+                if (which == 0) {
+                    alertSpeedSource = "gps"
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(PREF_ALERT_SPEED_SOURCE, alertSpeedSource).apply()
+                    dialog.dismiss()
+                    updateSpeedingAlertState()
+                    updateSpeedLimitDisplay()
+                } else {
+                    dialog.dismiss()
+                    showMotorcycleSpeedOffsetDialog()
+                }
+            }
+            .setNegativeButton(appText("Annulla"), null)
+            .show()
+    }
+
+    private fun showMotorcycleSpeedOffsetDialog() {
+        val input = EditText(this).apply {
+            hint = appText("Scarto in km/h (es. 6)")
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(motorcycleSpeedOffsetKmh.toString())
+            selectAll()
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+            addView(TextView(this@MainActivity).apply {
+                text = appText("Confronta il tachimetro della moto con il GPS a velocità costante e inserisci di quanto segna in più. Lo scarto si applica solo agli avvisi in modalità Moto; il tachimetro GPS e le altre funzioni restano invariati.")
+                textSize = 14f
+            })
+            addView(input, params(-1, dp(52)))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(appText("Calibrazione tachimetro moto"))
+            .setView(panel)
+            .setPositiveButton(appText("Salva")) { _, _ ->
+                val offset = input.text.toString().toIntOrNull()
+                if (offset == null || offset !in 0..30) {
+                    Toast.makeText(this, appText("Inserisci uno scarto tra 0 e 30 km/h."), Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                motorcycleSpeedOffsetKmh = offset
+                alertSpeedSource = "motorcycle"
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putInt(PREF_MOTORCYCLE_SPEED_OFFSET, offset)
+                    .putString(PREF_ALERT_SPEED_SOURCE, alertSpeedSource)
+                    .apply()
+                updateSpeedingAlertState()
+                updateSpeedLimitDisplay()
+                Toast.makeText(this, appText("Avvisi Moto attivi: GPS + $offset km/h."), Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton(appText("Annulla"), null)
+            .show()
+    }
+
+    private fun rebuildDashboardForDisplayMode() {
+        if (!dashboardStarted) return
+        gpsMarkerAnimator?.cancel()
+        gpsMarkerAnimator = null
+        val oldMapView = mapView
+        try {
+            oldMapView?.onPause()
+            oldMapView?.onStop()
+            oldMapView?.onDestroy()
+        } catch (_: Exception) { }
+        mapView = null
+        map = null
+        mapStyleReady = false
+        fullScreenMap = false
+        fullScreenRoot = null
+        mapOriginalParent = null
+        mapOriginalIndex = -1
+        mapOriginalParams = null
+        lastCameraLocation = null
+        buildDashboard(null)
+        latestWeather?.let { updateWeatherDisplay(it) }
+        updateSpeedLimitDisplay()
+        currentLocation?.let { updateGpsStatus(it); updateMapForLocation(it, true) }
+        routeResult?.let { drawRoute(it, false); currentLocation?.let { location -> updateTurnGuidance(location) } }
+        if (routeResult == null) routePreviewResult?.let { drawRoute(it, false) }
+        if (activityResumed) requestGps()
+    }
+
+    private fun speedForLimitAlertsKmh(): Int? {
+        val location = currentLocation ?: return null
+        if (!location.hasSpeed() || !location.hasAccuracy() || location.accuracy > 35f) return null
+        val gpsKmh = (location.speed * 3.6f).roundToInt()
+        return if (alertSpeedSource == "motorcycle") {
+            (gpsKmh + motorcycleSpeedOffsetKmh).coerceAtLeast(0)
+        } else gpsKmh
     }
 
     private fun showVehicleProfileMenu() {
@@ -4996,9 +5192,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun updateSpeedLimitDisplay() {
-        val location = currentLocation
         val limit = currentSpeedLimit
-        val speedKmh = location?.takeIf { it.hasSpeed() }?.speed?.times(3.6f)?.roundToInt()
+        val speedKmh = speedForLimitAlertsKmh()
 
         // Speak on first confirmed overspeed, then at most once every 120 seconds.
         // A short missing-limit interval must not reset the episode and cause repeated speech.
