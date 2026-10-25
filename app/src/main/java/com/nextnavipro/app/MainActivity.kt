@@ -298,6 +298,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastWeatherLocation: Location? = null
     private var latestWeather: WeatherSnapshot? = null
     private var forecastRequested = false
+    private var ambientWeatherTemperatureC: Double? = null
+    private var lastAmbientTemperatureUpdateMs = 0L
+    private var lastAmbientTemperatureLocation: Location? = null
     private val mapFollowHandler = Handler(Looper.getMainLooper())
     private val mapFollowRunnable = object : Runnable {
         override fun run() {
@@ -1392,26 +1395,32 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val manager = getSystemService(BATTERY_SERVICE) as? BatteryManager
             manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
         } catch (_: Exception) { null }
-        // The Galaxy S22 Ultra exposes a barometer but no ambient-temperature sensor.
-        // Only show temperature when Android actually exposes a usable ambient sensor reading.
-        val temperature = if (ambientTemperatureSensor != null) {
-            ambientTemperatureC?.let { String.format(Locale.getDefault(), "%.1f°C", it) }
+        // Prefer a physical ambient-temperature sensor when Android exposes one.
+        // Otherwise use a clearly marked global model estimate, never claim it is a station reading.
+        val measuredTemperature = if (ambientTemperatureSensor != null) {
+            ambientTemperatureC?.takeIf { it.isFinite() && it in -50f..80f }
+                ?.let { String.format(Locale.getDefault(), "%.1f°C", it) }
         } else null
+        val estimatedTemperature = ambientWeatherTemperatureC
+            ?.takeIf { it.isFinite() && it in -90.0..65.0 }
+            ?.let { "≈" + String.format(Locale.getDefault(), "%.1f°C", it) }
+        val temperature = measuredTemperature ?: estimatedTemperature
+        val temperatureIsEstimated = measuredTemperature == null && estimatedTemperature != null
         val parts = mutableListOf<String>()
         if (temperature != null) parts.add("🌡 $temperature")
         if (batteryPercent != null) parts.add("🔋 $batteryPercent%")
         deviceStatusText.text = parts.joinToString(" • ").ifBlank { "🔋 n/d" }
         deviceStatusText.contentDescription = buildString {
-            if (temperature != null) append("Temperatura ambientale $temperature")
+            if (temperature != null) {
+                append(if (temperatureIsEstimated) "Temperatura stimata dal modello meteorologico " else "Temperatura ambientale misurata ")
+                append(temperature)
+            }
             if (batteryPercent != null) {
                 if (isNotEmpty()) append(". ")
                 append("Batteria $batteryPercent percento")
             }
         }
     }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-
     private fun showMainMenu() {
         val choices = arrayOf(
             appText("Preferiti"),
@@ -1929,6 +1938,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun refreshWeatherForApproximateLocation(location: ApproximateLocation, force: Boolean = false) {
         if (currentLocation != null) return
+        refreshAmbientTemperatureIfNeeded(Location("approximate-network").apply { latitude = location.latitude; longitude = location.longitude }, force)
         val now = System.currentTimeMillis()
         if (!force && weatherUsesApproximateLocation && now - lastWeatherUpdateMs < 15L * 60L * 1000L) return
         lastWeatherUpdateMs = now
@@ -4814,9 +4824,39 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             WeatherService.format(snapshot.gustKmh) + " chilometri orari, probabilità di pioggia " +
             (currentRainChance?.let { "$it per cento" } ?: "non disponibile") +
             if (weatherUsesApproximateLocation) ", meteo basato su posizione IP approssimativa: " + (approximateLocation?.areaLabel ?: "zona incerta") else ""
+        updateDeviceStatusText()
+    }
+
+    private fun refreshAmbientTemperatureIfNeeded(location: Location, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val previous = lastAmbientTemperatureLocation
+        if (!force && now - lastAmbientTemperatureUpdateMs < 15L * 60L * 1000L &&
+            previous != null && previous.distanceTo(location) < 15_000f) return
+
+        lastAmbientTemperatureUpdateMs = now
+        lastAmbientTemperatureLocation = Location(location)
+        val requested = Location(location)
+        thread(name = "met-norway-global-temperature") {
+            val result = try {
+                AmbientTemperatureService.fetch(requested.latitude, requested.longitude)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_WEATHER", "Global temperature estimate unavailable", error)
+                null
+            }
+            runOnUiThread {
+                // Do not let a slow response for a previous area replace the current location's value.
+                val live = currentLocation
+                if (live != null && live.distanceTo(requested) > 25_000f) return@runOnUiThread
+                if (result != null) {
+                    ambientWeatherTemperatureC = result.temperatureC
+                    updateDeviceStatusText()
+                }
+            }
+        }
     }
 
     private fun refreshWeatherIfNeeded(location: Location, force: Boolean = false) {
+        refreshAmbientTemperatureIfNeeded(location, force)
         val now = System.currentTimeMillis()
         val previous = lastWeatherLocation
         if (!force && !weatherUsesApproximateLocation && now - lastWeatherUpdateMs < 15L * 60L * 1000L &&
