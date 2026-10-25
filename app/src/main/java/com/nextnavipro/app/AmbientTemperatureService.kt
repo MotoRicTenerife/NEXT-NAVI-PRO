@@ -91,6 +91,7 @@ object AmbientTemperatureService {
             isStationObservation = false,
             modelUpdatedAt = updatedAt
         )
+    }
 
     private fun requestBody(url: URL, allowNoContent: Boolean = false): String? {
         val connection = url.openConnection() as HttpURLConnection
