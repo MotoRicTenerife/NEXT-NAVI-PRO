@@ -1495,7 +1495,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(4))
             addView(TextView(this@MainActivity).apply {
-                text = appText("Inserisci le due velocità rilevate nello stesso momento, mantenendo un'andatura costante. NEXT NAVI PRO calcolerà automaticamente la differenza.")
+                text = appText("Inserisci la velocità indicata dal tachimetro del veicolo e quella GPS rilevata nello stesso momento, mantenendo un'andatura costante. Lo scarto calcolato sarà usato per correggere la velocità GPS negli avvisi, sia in auto sia in moto.")
                 textSize = 14f
             })
             addView(tachometerInput, params(-1, dp(52)))
