@@ -55,10 +55,21 @@ object AmbientTemperatureService {
         val lat1 = min(90.0, latitude + latSpan)
         val lon0 = normalizeLongitude(longitude - lonSpan)
         val lon1 = normalizeLongitude(longitude + lonSpan)
-        val bbox = "$lat0,$lon0,$lat1,$lon1"
-        val url = URL("https://aviationweather.gov/api/data/metar?bbox=$bbox&hours=2&format=json")
-        val body = requestBody(url, allowNoContent = true) ?: return null
-        return parseMetarResponse(body, latitude, longitude, altitudeM)
+        // Split boxes that cross the international date line instead of sending an invalid bbox.
+        val boxes = if (lon0 <= lon1) {
+            listOf("$lat0,$lon0,$lat1,$lon1")
+        } else {
+            listOf("$lat0,$lon0,$lat1,180.0", "$lat0,-180.0,$lat1,$lon1")
+        }
+        val reports = JSONArray()
+        for (bbox in boxes) {
+            val url = URL("https://aviationweather.gov/api/data/metar?bbox=$bbox&hours=2&format=json")
+            val body = requestBody(url, allowNoContent = true) ?: continue
+            val rows = JSONArray(body)
+            for (i in 0 until rows.length()) rows.optJSONObject(i)?.let { reports.put(it) }
+        }
+        if (reports.length() == 0) return null
+        return parseMetarResponse(reports.toString(), latitude, longitude, altitudeM)
     }
 
     private fun fetchGlobalModel(latitude: Double, longitude: Double): AmbientTemperatureSnapshot {
