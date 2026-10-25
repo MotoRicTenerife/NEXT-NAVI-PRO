@@ -1914,7 +1914,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         location: Location,
         rejectionStatus: String? = null,
         smoothedLocation: Location? = null,
-        gpxPointStatus: String = rejectionStatus ?: "NOT_EVALUATED"
+        gpxPointStatus: String = "NOT_EVALUATED"
     ) {
         if (!gpsDiagnosticRecording || gpsDiagnosticSamples.size >= 50_000) {
             if (gpsDiagnosticRecording && gpsDiagnosticSamples.size >= 50_000) {
@@ -2124,8 +2124,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } catch (_: Exception) {
             Toast.makeText(this, "Servizio in background non disponibile: tieni NEXT NAVI PRO in primo piano durante la registrazione.", Toast.LENGTH_LONG).show()
         }
-        lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-        currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
+        val seedRawLocation = lastRawGpsLocation
+        val seedSmoothedLocation = currentLocation
+        if (seedRawLocation != null) {
+            val seedGpxStatus = seedSmoothedLocation?.let { appendGpxRecordingPoint(it, force = true) }
+                ?: "NO_SMOOTHED_FIX"
+            appendGpsDiagnosticSample(
+                seedRawLocation,
+                smoothedLocation = seedSmoothedLocation,
+                gpxPointStatus = seedGpxStatus
+            )
+        } else {
+            seedSmoothedLocation?.let { appendGpxRecordingPoint(it, force = true) }
+        }
         saveGpsDiagnosticCheckpoint()
         saveGpxRecordingCheckpoint()
         Toast.makeText(this, "Registrazione GPX + CSV GPS avviata insieme.", Toast.LENGTH_LONG).show()
