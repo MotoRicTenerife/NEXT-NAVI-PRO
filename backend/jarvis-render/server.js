@@ -328,6 +328,19 @@ async function handleCloudSpeedSegments(req, res, url) {
     return send(res, 429, { error: "Too many speed-limit archive requests; try again later", retryAfterSeconds },
       { "retry-after": String(retryAfterSeconds) });
   }
+  // SECURITY: cloud archive writes remain fail-closed until Firebase ID-token
+  // verification is implemented end-to-end. IP rate limiting alone is not auth.
+  // This prevents anonymous clients from poisoning or deleting shared speed limits.
+  if (
+    (req.method === "POST" && url.pathname === "/speed-limit-segments/upsert") ||
+    (req.method === "DELETE" && url.pathname === "/speed-limit-segments")
+  ) {
+    return send(res, 503, {
+      error: "Cloud archive writes are temporarily disabled pending authentication",
+      code: "ARCHIVE_AUTH_REQUIRED"
+    });
+  }
+
   try {
     if (req.method === "GET" && url.pathname === "/speed-limit-segments") {
       const segments = [];
