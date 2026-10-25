@@ -1477,12 +1477,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showMotorcycleSpeedOffsetDialog() {
         val tachometerInput = EditText(this).apply {
-            hint = appText("Tachimetro moto (km/h)")
+            hint = appText("Velocità rilevata tachimetro (km/h)")
             inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine(true)
         }
         val gpsInput = EditText(this).apply {
-            hint = appText("Velocità GPS telefono (km/h)")
+            hint = appText("Velocità rilevata GPS (km/h)")
             inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine(true)
         }
