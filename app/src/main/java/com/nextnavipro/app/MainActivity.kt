@@ -186,7 +186,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var recordingIndependentOfNavigation = false
     private val gpxRecordingPoints = ArrayList<NavPoint>()
     private var lastRecordedGpxPoint: NavPoint? = null
-    private var lastGpxPointTimeMs = 0L
+    // Monotonic clock used only for GPX point filtering; exported GPX timestamps remain wall-clock GPS time.
+    private var lastGpxPointElapsedRealtimeMs = 0L
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
     @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
@@ -2102,7 +2103,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun startGpxRecording() {
         gpxRecordingPoints.clear()
         lastRecordedGpxPoint = null
-        lastGpxPointTimeMs = 0L
+        lastGpxPointElapsedRealtimeMs = 0L
         gpsDiagnosticSamples.clear()
         gpsDiagnosticRecording = true
         recordingGpx = true
@@ -2125,6 +2126,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
         if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 25f) return
         val now = System.currentTimeMillis()
+        // elapsedRealtime is monotonic and is not affected by clock/time-zone corrections.
+        // Location.elapsedRealtimeNanos and SystemClock.elapsedRealtime() share this time base.
+        val nowElapsedRealtimeMs = if (location.elapsedRealtimeNanos > 0L) {
+            location.elapsedRealtimeNanos / 1_000_000L
+        } else {
+            SystemClock.elapsedRealtime()
+        }
         val point = NavPoint(
             location.latitude,
             location.longitude,
@@ -2133,7 +2141,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val previous = lastRecordedGpxPoint
         if (!force && previous != null) {
             val distance = GpxRouteService.distanceMeters(previous, point)
-            if (distance < 5.0 && now - lastGpxPointTimeMs < 5000L) return
+            if (distance < 5.0 && nowElapsedRealtimeMs - lastGpxPointElapsedRealtimeMs < 5000L) return
         }
         if (gpxRecordingPoints.size >= 100_000) {
             finishGpxRecording(save = true)
@@ -2142,7 +2150,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         gpxRecordingPoints.add(point)
         lastRecordedGpxPoint = point
-        lastGpxPointTimeMs = now
+        lastGpxPointElapsedRealtimeMs = nowElapsedRealtimeMs
         // Durable paired checkpoint: if Android kills the process, the last saved track remains recoverable.
         if (gpxRecordingPoints.size % 10 == 0) saveGpxRecordingCheckpoint()
     }
