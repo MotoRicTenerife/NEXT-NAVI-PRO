@@ -1910,7 +1910,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         startActivityForResult(intent, REQUEST_EXPORT_GPS_TRACE)
     }
 
-    private fun appendGpsDiagnosticSample(location: Location, rejectionStatus: String? = null) {
+    private fun appendGpsDiagnosticSample(
+        location: Location,
+        rejectionStatus: String? = null,
+        smoothedLocation: Location? = null,
+        gpxPointStatus: String = rejectionStatus ?: "NOT_EVALUATED"
+    ) {
         if (!gpsDiagnosticRecording || gpsDiagnosticSamples.size >= 50_000) {
             if (gpsDiagnosticRecording && gpsDiagnosticSamples.size >= 50_000) {
                 gpsDiagnosticRecording = false
@@ -1927,6 +1932,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 timestampEpochMs = location.time,
                 latitude = location.latitude,
                 longitude = location.longitude,
+                smoothedLatitude = smoothedLocation?.latitude,
+                smoothedLongitude = smoothedLocation?.longitude,
+                gpxPointStatus = gpxPointStatus,
                 accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
                 speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
                 bearingDegrees = location.bearing.takeIf { location.hasBearing() },
@@ -2123,8 +2131,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         Toast.makeText(this, "Registrazione GPX + CSV GPS avviata insieme.", Toast.LENGTH_LONG).show()
     }
 
-    private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
-        if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 25f) return
+    private fun appendGpxRecordingPoint(location: Location, force: Boolean = false): String {
+        if (!recordingGpx) return "NOT_RECORDING"
+        if (!location.hasAccuracy()) return "REJECTED_NO_ACCURACY"
+        if (location.accuracy > 25f) return "REJECTED_ACCURACY"
         val now = System.currentTimeMillis()
         // elapsedRealtime is monotonic and is not affected by clock/time-zone corrections.
         // Location.elapsedRealtimeNanos and SystemClock.elapsedRealtime() share this time base.
@@ -2141,18 +2151,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val previous = lastRecordedGpxPoint
         if (!force && previous != null) {
             val distance = GpxRouteService.distanceMeters(previous, point)
-            if (distance < 5.0 && nowElapsedRealtimeMs - lastGpxPointElapsedRealtimeMs < 5000L) return
+            if (distance < 5.0 && nowElapsedRealtimeMs - lastGpxPointElapsedRealtimeMs < 5000L) return "FILTERED_NEAR_POINT"
         }
         if (gpxRecordingPoints.size >= 100_000) {
             finishGpxRecording(save = true)
             Toast.makeText(this, "Registrazione fermata: raggiunto il limite di sicurezza dei punti GPX.", Toast.LENGTH_LONG).show()
-            return
+            return "RECORDING_LIMIT_REACHED"
         }
         gpxRecordingPoints.add(point)
         lastRecordedGpxPoint = point
         lastGpxPointElapsedRealtimeMs = nowElapsedRealtimeMs
         // Durable paired checkpoint: if Android kills the process, the last saved track remains recoverable.
         if (gpxRecordingPoints.size % 10 == 0) saveGpxRecordingCheckpoint()
+        return "RECORDED"
     }
 
     private fun gpxRecordingCheckpointFile(): File =
@@ -4569,8 +4580,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
-        appendGpsDiagnosticSample(location)
-        appendGpxRecordingPoint(smoothed)
+        val gpxPointStatus = appendGpxRecordingPoint(smoothed)
+        appendGpsDiagnosticSample(location, smoothedLocation = smoothed, gpxPointStatus = gpxPointStatus)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
