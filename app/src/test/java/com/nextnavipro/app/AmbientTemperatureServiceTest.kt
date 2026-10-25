@@ -1,7 +1,6 @@
 package com.nextnavipro.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -36,7 +35,7 @@ class AmbientTemperatureServiceTest {
         assertNull(AmbientTemperatureService.parseMetarResponse(json, 28.10, -16.70, null, now))
     }
 
-    @Test fun acceptsGlobalModelFallbackResponseAndMarksItAsEstimated() {
+    @Test fun parsesGlobalModelFallbackAndMarksItAsEstimated() {
         val json = """
             {
               "properties": {
@@ -52,12 +51,10 @@ class AmbientTemperatureServiceTest {
               }
             }
         """.trimIndent()
-        // The fallback parser is intentionally exercised through the same response schema.
-        val root = org.json.JSONObject(json)
-        val details = root.getJSONObject("properties").getJSONArray("timeseries")
-            .getJSONObject(0).getJSONObject("data").getJSONObject("instant").getJSONObject("details")
-        assertEquals(22.4, details.getDouble("air_temperature"), 0.001)
-        assertFalse(false) // Keep test assertion imports useful without network access.
-        assertTrue(root.getJSONObject("properties").getJSONObject("meta").has("updated_at"))
+        val result = AmbientTemperatureService.parseGlobalModelResponse(json)
+        assertEquals(22.4, result.temperatureC, 0.001)
+        assertEquals("MET Norway • modello globale", result.source)
+        assertNotNull(result.modelUpdatedAt)
+        assertTrue(!result.isStationObservation)
     }
 }
