@@ -1394,6 +1394,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         else if (lux < 2500f && !negativeTheme) applyThemeMode(true)
     }
 
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // No accuracy-specific action is needed for ambient temperature or light.
+    }
+
     private fun updateDeviceStatusText() {
         if (!::deviceStatusText.isInitialized) return
         val batteryPercent = try {
