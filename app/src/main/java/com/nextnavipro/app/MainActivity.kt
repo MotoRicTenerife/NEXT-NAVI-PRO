@@ -1547,14 +1547,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@setOnClickListener
                 }
                 motorcycleSpeedOffsetKmh = offset
-                alertSpeedSource = "motorcycle"
+                alertSpeedSource = "offset"
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putInt(PREF_MOTORCYCLE_SPEED_OFFSET, offset)
                     .putString(PREF_ALERT_SPEED_SOURCE, alertSpeedSource)
                     .apply()
                 updateSpeedingAlertState()
                 updateSpeedLimitDisplay()
-                Toast.makeText(this, appText("Scarto salvato: +$offset km/h. Avvisi Moto attivi."), Toast.LENGTH_LONG).show()
+                Toast.makeText(this, appText("Scarto GPS salvato: +$offset km/h. Correzione attiva per gli avvisi."), Toast.LENGTH_LONG).show()
                 dialog.dismiss()
             }
         }
@@ -1593,7 +1593,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val location = currentLocation ?: return null
         if (!location.hasSpeed() || !location.hasAccuracy() || location.accuracy > 35f) return null
         val gpsKmh = (location.speed * 3.6f).roundToInt()
-        return if (alertSpeedSource == "motorcycle") {
+        return if (alertSpeedSource != "gps") {
             (gpsKmh + motorcycleSpeedOffsetKmh).coerceAtLeast(0)
         } else gpsKmh
     }
