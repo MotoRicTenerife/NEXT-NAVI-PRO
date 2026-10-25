@@ -1388,7 +1388,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Modalità veicolo: MOTO (attiva)"),
             appText("Jarvis • Assistente e impostazioni"),
             appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"),
-            appText("Velocità per avvisi: " + if (alertSpeedSource == "motorcycle") "Moto calibrata (+$motorcycleSpeedOffsetKmh km/h)" else "GPS")
+            appText("Impostazione scarto GPS" + if (alertSpeedSource == "motorcycle") " • scarto +$motorcycleSpeedOffsetKmh km/h" else " • scarto attuale +$motorcycleSpeedOffsetKmh km/h")
         )
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
@@ -1470,28 +1470,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showAlertSpeedSourceSettings() {
-        val labels = arrayOf(
-            appText("GPS — velocità GPS senza correzioni"),
-            appText("Moto — velocità stimata GPS + scarto del tachimetro")
-        )
-        AlertDialog.Builder(this)
-            .setTitle(appText("Velocità usata per gli avvisi"))
-            .setMessage(appText("Il telefono non può leggere direttamente il tachimetro della moto. In modalità Moto stima la velocità indicata sommando al GPS lo scarto calibrato. Esempio: GPS 74 + scarto 6 = stima tachimetro 80 km/h."))
-            .setSingleChoiceItems(labels, if (alertSpeedSource == "motorcycle") 1 else 0) { dialog, which ->
-                if (which == 0) {
-                    alertSpeedSource = "gps"
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                        .putString(PREF_ALERT_SPEED_SOURCE, alertSpeedSource).apply()
-                    dialog.dismiss()
-                    updateSpeedingAlertState()
-                    updateSpeedLimitDisplay()
-                } else {
-                    dialog.dismiss()
-                    showMotorcycleSpeedOffsetDialog()
-                }
-            }
-            .setNegativeButton(appText("Annulla"), null)
-            .show()
+        // The menu entry is a direct shortcut to the calibration form: never stop at
+        // the explanatory GPS/Moto selector, which gave the user no place to enter values.
+        showMotorcycleSpeedOffsetDialog()
     }
 
     private fun showMotorcycleSpeedOffsetDialog() {
