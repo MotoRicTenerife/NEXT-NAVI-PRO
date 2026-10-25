@@ -613,11 +613,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         infoColumn.addView(gpsText, params(-1, dp(38)))
         deviceStatusText = TextView(this).apply {
-            textSize = 9f
+            // Make ambient temperature and battery easier to read at a glance,
+            // while allowing two lines on narrow portrait layouts to avoid clipping.
+            textSize = 13f
             gravity = Gravity.CENTER
-            maxLines = 1
+            maxLines = 2
             includeFontPadding = false
-            setPadding(dp(2), 0, dp(2), 0)
+            setPadding(dp(3), dp(1), dp(3), dp(1))
             text = "🔋 --%"
         }
         updateDeviceStatusText()
@@ -1460,7 +1462,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Modalità veicolo: MOTO (attiva)"),
             appText("Jarvis • Assistente e impostazioni"),
             appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"),
-            appText("Impostazione scarto GPS")
+            appText("Scarto velocità GPS: " + (if (motorcycleSpeedOffsetKmh >= 0) "+" else "") + motorcycleSpeedOffsetKmh + " km/h (tocca per modificare)")
         )
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
