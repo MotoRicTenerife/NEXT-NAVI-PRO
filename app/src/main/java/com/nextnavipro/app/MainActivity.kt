@@ -613,14 +613,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         infoColumn.addView(gpsText, params(-1, dp(38)))
         deviceStatusText = TextView(this).apply {
-            // Make ambient temperature and battery easier to read at a glance,
-            // while allowing two lines on narrow portrait layouts to avoid clipping.
-            textSize = 13f
+            // In the standard dashboard this gets a dedicated two-line area beside
+            // the clock/ETA row. Keep the compact one-line version only in map-panel mode.
+            textSize = if (navigationMapMode) 10f else 15f
             gravity = Gravity.CENTER
-            maxLines = 2
+            maxLines = if (navigationMapMode) 1 else 2
             includeFontPadding = false
-            setPadding(dp(3), dp(1), dp(3), dp(1))
-            text = "🔋 --%"
+            setPadding(dp(5), dp(2), dp(5), dp(2))
+            setLineSpacing(dp(1).toFloat(), 1.0f)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            text = if (navigationMapMode) "🔋 --%" else "🌡 --\n🔋 --%"
         }
         updateDeviceStatusText()
         routeText = TextView(this).apply {
@@ -692,34 +694,57 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             includeFontPadding = false
             setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
         }
-        // In portrait, show km/h directly below the tachometer, then the clock.
-        // ETA and remaining distance stay below both; landscape order remains unchanged.
+        // Keep the clock and ETA grouped on the left, with temperature and phone
+        // battery on the right. This replaces the tiny status strip above the map
+        // without taking space away from the tachometer or navigation instructions.
+        val clockEtaColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val metricsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
         if (isPortrait) {
-            // Keep unit and clock visually close to the tachometer; avoid extra gaps.
-            // Pull the unit, clock and GPS warning closer to the tachometer to
-            // reclaim a little vertical space for the map.
             speedColumn.addView(unit, LinearLayout.LayoutParams(-1, dp(30)).apply {
                 topMargin = -dp(7)
             })
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
-                topMargin = -dp(5)
-            })
-            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
-                topMargin = -dp(4)
-            })
+            if (navigationMapMode) {
+                // Preserve the optional map-panel layout exactly as before.
+                speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(32)).apply {
+                    topMargin = -dp(5)
+                })
+                speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(34)).apply {
+                    topMargin = -dp(4)
+                })
+            } else {
+                clockEtaColumn.addView(clockText, params(-1, dp(32)))
+                clockEtaColumn.addView(routeMetricsText, params(-1, dp(30)))
+                metricsRow.addView(clockEtaColumn, LinearLayout.LayoutParams(0, dp(62), 1.05f))
+                metricsRow.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(62), 0.95f))
+                speedColumn.addView(metricsRow, params(-1, dp(62)))
+            }
         } else {
-            // Landscape: lift the speed unit, clock and ETA/distance row together by
-            // roughly half a centimetre so the bottom row stays clear of the controls.
+            // Landscape: retain the existing vertical placement beneath km/h.
             unit.translationY = -dp(20).toFloat()
-            clockText.translationY = -dp(20).toFloat()
-            routeMetricsText.translationY = -dp(20).toFloat()
             speedColumn.addView(unit, params(-1, dp(30)))
-            speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(30)).apply {
-                topMargin = -dp(4)
-            })
-            speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(30)).apply {
-                topMargin = -dp(5)
-            })
+            if (navigationMapMode) {
+                clockText.translationY = -dp(20).toFloat()
+                routeMetricsText.translationY = -dp(20).toFloat()
+                speedColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                    topMargin = -dp(4)
+                })
+                speedColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(30)).apply {
+                    topMargin = -dp(5)
+                })
+            } else {
+                clockEtaColumn.addView(clockText, params(-1, dp(32)))
+                clockEtaColumn.addView(routeMetricsText, params(-1, dp(30)))
+                metricsRow.addView(clockEtaColumn, LinearLayout.LayoutParams(0, dp(62), 1.05f))
+                metricsRow.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(62), 0.95f))
+                metricsRow.translationY = -dp(20).toFloat()
+                speedColumn.addView(metricsRow, params(-1, dp(62)))
+            }
         }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.8f else 0.25f))
@@ -757,7 +782,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.removeView(radarText)
         mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
-        mapStatus.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(22), 0.9f))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
@@ -1424,7 +1448,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val parts = mutableListOf<String>()
         if (temperature != null) parts.add("🌡 $temperature")
         if (batteryPercent != null) parts.add("🔋 $batteryPercent%")
-        deviceStatusText.text = parts.joinToString(" • ").ifBlank { "🔋 n/d" }
+        deviceStatusText.text = parts.joinToString(if (navigationMapMode) " • " else "\n")
+            .ifBlank { if (navigationMapMode) "🔋 n/d" else "🌡 --\n🔋 n/d" }
         deviceStatusText.contentDescription = buildString {
             if (temperature != null) {
                 when {
