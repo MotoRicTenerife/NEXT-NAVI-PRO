@@ -299,6 +299,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var latestWeather: WeatherSnapshot? = null
     private var forecastRequested = false
     private var ambientWeatherTemperatureC: Double? = null
+    private var ambientWeatherTemperatureIsObserved = false
+    private var ambientWeatherStationId: String? = null
+    private var ambientWeatherStationDistanceKm: Double? = null
+    private var ambientWeatherObservationTime: String? = null
     private var lastAmbientTemperatureUpdateMs = 0L
     private var lastAmbientTemperatureLocation: Location? = null
     private val mapFollowHandler = Handler(Looper.getMainLooper())
@@ -1401,18 +1405,33 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             ambientTemperatureC?.takeIf { it.isFinite() && it in -50f..80f }
                 ?.let { String.format(Locale.getDefault(), "%.1f°C", it) }
         } else null
-        val estimatedTemperature = ambientWeatherTemperatureC
+        val weatherTemperature = ambientWeatherTemperatureC
             ?.takeIf { it.isFinite() && it in -90.0..65.0 }
-            ?.let { "≈" + String.format(Locale.getDefault(), "%.1f°C", it) }
-        val temperature = measuredTemperature ?: estimatedTemperature
-        val temperatureIsEstimated = measuredTemperature == null && estimatedTemperature != null
+            ?.let {
+                (if (ambientWeatherTemperatureIsObserved) "" else "≈") +
+                    String.format(Locale.getDefault(), "%.1f°C", it)
+            }
+        val temperature = measuredTemperature ?: weatherTemperature
+        val temperatureIsEstimated = measuredTemperature == null &&
+            weatherTemperature != null && !ambientWeatherTemperatureIsObserved
         val parts = mutableListOf<String>()
         if (temperature != null) parts.add("🌡 $temperature")
         if (batteryPercent != null) parts.add("🔋 $batteryPercent%")
         deviceStatusText.text = parts.joinToString(" • ").ifBlank { "🔋 n/d" }
         deviceStatusText.contentDescription = buildString {
             if (temperature != null) {
-                append(if (temperatureIsEstimated) "Temperatura stimata dal modello meteorologico " else "Temperatura ambientale misurata ")
+                when {
+                    temperatureIsEstimated -> append("Temperatura stimata dal modello meteorologico ")
+                    measuredTemperature != null -> append("Temperatura ambientale misurata dal sensore del telefono ")
+                    ambientWeatherTemperatureIsObserved -> {
+                        append("Temperatura misurata dalla stazione meteorologica ")
+                        append(ambientWeatherStationId ?: "METAR")
+                        ambientWeatherStationDistanceKm?.let { append(", a " + String.format(Locale.getDefault(), "%.1f", it) + " chilometri") }
+                        ambientWeatherObservationTime?.let { append(", rilevazione delle " + it) }
+                        append(" ")
+                    }
+                    else -> append("Temperatura ")
+                }
                 append(temperature)
             }
             if (batteryPercent != null) {
@@ -4838,7 +4857,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val requested = Location(location)
         thread(name = "met-norway-global-temperature") {
             val result = try {
-                AmbientTemperatureService.fetch(requested.latitude, requested.longitude)
+                AmbientTemperatureService.fetch(requested.latitude, requested.longitude, requested.takeIf { it.hasAltitude() }?.altitude)
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_WEATHER", "Global temperature estimate unavailable", error)
                 null
@@ -4849,6 +4868,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (live != null && live.distanceTo(requested) > 25_000f) return@runOnUiThread
                 if (result != null) {
                     ambientWeatherTemperatureC = result.temperatureC
+                    ambientWeatherTemperatureIsObserved = result.isStationObservation
+                    ambientWeatherStationId = result.stationId
+                    ambientWeatherStationDistanceKm = result.distanceKm
+                    ambientWeatherObservationTime = result.observationTime
                     updateDeviceStatusText()
                 }
             }
