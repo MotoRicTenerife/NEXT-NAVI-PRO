@@ -794,10 +794,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
             }
-            panelControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(38), 1f).apply {
-                setMargins(dp(2), dp(1), dp(2), dp(1))
-            })
-            panelControls.addView(makeButton(appText("⌖ GPS")) { recenterMapToGps() }, LinearLayout.LayoutParams(0, dp(38), 0.72f).apply {
+            // Do not reparent routeButton here: it already belongs to the dashboard
+            // controls row (landscape) or the map controls (portrait). Reparenting a View
+            // that still has a parent throws IllegalStateException and closes the Activity.
+            panelControls.addView(makeButton(appText("⌖ GPS")) { recenterMapToGps() }, LinearLayout.LayoutParams(-1, dp(38)).apply {
                 setMargins(dp(2), dp(1), dp(2), dp(1))
             })
             infoPanel.addView(panelControls, params(-1, dp(40)))
