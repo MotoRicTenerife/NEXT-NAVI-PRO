@@ -1388,7 +1388,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Modalità veicolo: MOTO (attiva)"),
             appText("Jarvis • Assistente e impostazioni"),
             appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"),
-            appText("Impostazione scarto GPS" + if (alertSpeedSource == "motorcycle") " • scarto +$motorcycleSpeedOffsetKmh km/h" else " • scarto attuale +$motorcycleSpeedOffsetKmh km/h")
+            appText("Impostazione scarto GPS")
         )
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
             .setItems(choices) { _, which ->
