@@ -615,14 +615,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         deviceStatusText = TextView(this).apply {
             // In the standard dashboard this gets a dedicated two-line area beside
             // the clock/ETA row. Keep the compact one-line version only in map-panel mode.
-            textSize = if (navigationMapMode) 10f else 15f
+            textSize = if (navigationMapMode) 13f else 15f
             gravity = Gravity.CENTER
-            maxLines = if (navigationMapMode) 1 else 2
+            maxLines = 2
             includeFontPadding = false
             setPadding(dp(5), dp(2), dp(5), dp(2))
             setLineSpacing(dp(1).toFloat(), 1.0f)
             ellipsize = android.text.TextUtils.TruncateAt.END
-            text = if (navigationMapMode) "🔋 --%" else "🌡 --\n🔋 --%"
+            text = "🌡 --\n🔋 --%"
         }
         updateDeviceStatusText()
         routeText = TextView(this).apply {
@@ -796,6 +796,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val isMapPanelPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         if (navigationMapMode) {
             speedColumn.removeView(routeMetricsText)
+            speedColumn.removeView(clockText)
             mapColumn.removeView(mapStatus)
             mapStatus.removeView(gpsText)
             mapStatus.removeView(radarText)
@@ -829,15 +830,34 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             limitValue.translationY = 0f
             navigationInfo.addView(limitValue, LinearLayout.LayoutParams(dp(if (isMapPanelPortrait) 76 else 84), dp(if (isMapPanelPortrait) 76 else 84)))
             infoPanel.addView(navigationInfo, LinearLayout.LayoutParams(-1, 0, 1f))
+            // Compact, measured information row: clock + ETA on the left,
+            // temperature + phone battery on the right. Keep GPS/radar below it.
+            val clockEtaColumn = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+            clockText.textSize = 12f
+            clockText.maxLines = 1
+            clockText.includeFontPadding = false
+            clockText.gravity = Gravity.CENTER
+            routeMetricsText.textSize = 11f
+            routeMetricsText.maxLines = 1
             routeMetricsText.translationY = 0f
-            infoPanel.addView(routeMetricsText, params(-1, dp(if (isMapPanelPortrait) 28 else 30)))
+            clockEtaColumn.addView(clockText, LinearLayout.LayoutParams(-1, dp(20)))
+            clockEtaColumn.addView(routeMetricsText, LinearLayout.LayoutParams(-1, dp(22)))
+            val clockStatusRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            clockStatusRow.addView(clockEtaColumn, LinearLayout.LayoutParams(0, dp(42), 1.05f))
+            clockStatusRow.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(42), 0.95f))
+            infoPanel.addView(clockStatusRow, params(-1, dp(42)))
             val statusRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             statusRow.addView(gpsText, LinearLayout.LayoutParams(0, dp(20), 1f))
             statusRow.addView(radarText, LinearLayout.LayoutParams(0, dp(20), 1f))
-            statusRow.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(20), 0.9f))
             infoPanel.addView(statusRow, params(-1, dp(20)))
             if (isMapPanelPortrait) {
                 content.orientation = LinearLayout.VERTICAL
@@ -1448,8 +1468,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val parts = mutableListOf<String>()
         if (temperature != null) parts.add("🌡 $temperature")
         if (batteryPercent != null) parts.add("🔋 $batteryPercent%")
-        deviceStatusText.text = parts.joinToString(if (navigationMapMode) " • " else "\n")
-            .ifBlank { if (navigationMapMode) "🔋 n/d" else "🌡 --\n🔋 n/d" }
+        deviceStatusText.text = parts.joinToString("\n")
+            .ifBlank { "🌡 --\n🔋 n/d" }
         deviceStatusText.contentDescription = buildString {
             if (temperature != null) {
                 when {
