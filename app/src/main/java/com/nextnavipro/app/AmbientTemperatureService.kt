@@ -67,6 +67,10 @@ object AmbientTemperatureService {
                 "?lat=$latitude&lon=$longitude"
         )
         val body = requestBody(url) ?: throw IllegalStateException("Modello globale meteo vuoto")
+        return parseGlobalModelResponse(body)
+    }
+
+    internal fun parseGlobalModelResponse(body: String): AmbientTemperatureSnapshot {
         val root = JSONObject(body)
         val properties = root.optJSONObject("properties")
             ?: throw IllegalStateException("Metadati meteo globali assenti")
@@ -87,7 +91,6 @@ object AmbientTemperatureService {
             isStationObservation = false,
             modelUpdatedAt = updatedAt
         )
-    }
 
     private fun requestBody(url: URL, allowNoContent: Boolean = false): String? {
         val connection = url.openConnection() as HttpURLConnection
