@@ -25,6 +25,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Build
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -139,6 +140,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private lateinit var menuButton: Button
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
+    private var ambientTemperatureSensor: Sensor? = null
+    private var ambientTemperatureC: Float? = null
+    private lateinit var deviceStatusText: TextView
     private var themeMode: String = "negative"
     private var navigationMapMode = false
     private var alertSpeedSource = "gps"
@@ -418,6 +422,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         negativeTheme = when (themeMode) { "positive" -> false; "negative" -> true; else -> preferences.getBoolean(PREF_NEGATIVE, true) }
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
+        ambientTemperatureSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
         dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
         if (dashboardStarted) {
             buildDashboard(savedInstanceState)
@@ -599,6 +604,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gravity = Gravity.CENTER
         }
         infoColumn.addView(gpsText, params(-1, dp(38)))
+        deviceStatusText = TextView(this).apply {
+            textSize = 9f
+            gravity = Gravity.CENTER
+            maxLines = 1
+            includeFontPadding = false
+            setPadding(dp(2), 0, dp(2), 0)
+            text = "🔋 --%"
+        }
+        updateDeviceStatusText()
         routeText = TextView(this).apply {
             text = appText("Nessun percorso attivo")
             textSize = 11f
@@ -699,7 +713,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val centerSpacer = View(this)
         speedColumn.addView(centerSpacer, LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.8f else 0.25f))
-        routeButton = makeButton(appText(if (routeResult != null) "TERMINA NAVIGAZIONE" else "AVVIA PERCORSO")) {
+        routeButton = makeButton(appText(if (routeResult != null) "TERMINA NAVIGAZIONE" else "AVVIA NAVIGAZIONE")) {
             if (routeResult != null) clearRoute() else calculateSelectedRoute()
         }
         // The route button is placed in the lower control row in landscape and
@@ -723,25 +737,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         infoColumn.removeView(radarText)
         mapStatus.addView(gpsText, LinearLayout.LayoutParams(0, dp(22), 1f))
         mapStatus.addView(radarText, LinearLayout.LayoutParams(0, dp(22), 1f))
+        mapStatus.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(22), 0.9f))
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
         mapColumn.addView(mapStatus, params(-1, dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
-        val recenterButton = makeButton(appText("⌖ POSIZIONE")) { recenterMapToGps() }
-        if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT && !navigationMapMode) {
-            val portraitControls = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-            portraitControls.addView(routeButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                setMargins(dp(2), dp(2), dp(2), dp(2))
-            })
-            portraitControls.addView(recenterButton, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
-                setMargins(dp(2), dp(2), dp(2), dp(2))
-            })
-            mapColumn.addView(portraitControls, params(-1, dp(44)))
-        }
+        // Navigation and GPS controls live together in the bottom row in both orientations.
+        // This also gives the embedded map more height in portrait mode.
 
         // Keep the existing dashboard untouched by default. The optional map-panel
         // view reuses the same live map, speed-limit sign, guidance, weather and status views.
@@ -752,6 +755,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             mapColumn.removeView(mapStatus)
             mapStatus.removeView(gpsText)
             mapStatus.removeView(radarText)
+            mapStatus.removeView(deviceStatusText)
             val infoPanel = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -789,18 +793,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             statusRow.addView(gpsText, LinearLayout.LayoutParams(0, dp(20), 1f))
             statusRow.addView(radarText, LinearLayout.LayoutParams(0, dp(20), 1f))
+            statusRow.addView(deviceStatusText, LinearLayout.LayoutParams(0, dp(20), 0.9f))
             infoPanel.addView(statusRow, params(-1, dp(20)))
-            val panelControls = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-            // Do not reparent routeButton here: it already belongs to the dashboard
-            // controls row (landscape) or the map controls (portrait). Reparenting a View
-            // that still has a parent throws IllegalStateException and closes the Activity.
-            panelControls.addView(makeButton(appText("⌖ GPS")) { recenterMapToGps() }, LinearLayout.LayoutParams(-1, dp(38)).apply {
-                setMargins(dp(2), dp(1), dp(2), dp(1))
-            })
-            infoPanel.addView(panelControls, params(-1, dp(40)))
             if (isMapPanelPortrait) {
                 content.orientation = LinearLayout.VERTICAL
                 content.addView(infoPanel, LinearLayout.LayoutParams(-1, 0, 0.88f))
@@ -915,7 +909,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Exit and GPX share the space previously occupied by the single EXIT button.
         exitButton = makeButton("ESCI") { showExitConfirmation() }
         gpxButton = makeButton("GPX") { toggleDashboardGpxRecording() }
-        val navigatorButton = makeButton("NAVIGATORE") { enterMapFullScreen() }
+        val gpsButton = makeButton(appText("⌖ GPS")) { recenterMapToGps() }
         val controlHeight = dp(40)
         fun addBottomControl(button: Button) {
             controls.addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
@@ -934,12 +928,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         addHalfExitControl(exitButton)
         addHalfExitControl(gpxButton)
         controls.addView(exitAndGpx, LinearLayout.LayoutParams(0, controlHeight, 1f))
-        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            addBottomControl(navigatorButton)
-            addBottomControl(routeButton)
-        } else {
-            addBottomControl(navigatorButton)
-        }
+        addBottomControl(gpsButton)
+        addBottomControl(routeButton)
         if (navigationMapMode && isMapPanelPortrait) {
             // Portrait map-panel mode keeps every control above the map.
             root.addView(controls, params(-1, dp(44)))
@@ -1367,11 +1357,39 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if (themeMode != "auto" || event.sensor.type != Sensor.TYPE_LIGHT || event.values.isEmpty()) return
+        if (event.values.isEmpty()) return
+        if (event.sensor.type == Sensor.TYPE_AMBIENT_TEMPERATURE) {
+            ambientTemperatureC = event.values[0].takeIf { it.isFinite() && it in -50f..80f }
+            updateDeviceStatusText()
+            return
+        }
+        if (themeMode != "auto" || event.sensor.type != Sensor.TYPE_LIGHT) return
         val lux = event.values[0]
         // Bright sunlight: light panel with dark text; ordinary/dim light: dark panel.
         if (lux >= 6000f && negativeTheme) applyThemeMode(false)
         else if (lux < 2500f && !negativeTheme) applyThemeMode(true)
+    }
+
+    private fun updateDeviceStatusText() {
+        if (!::deviceStatusText.isInitialized) return
+        val batteryPercent = try {
+            val manager = getSystemService(BATTERY_SERVICE) as? BatteryManager
+            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 }
+        } catch (_: Exception) { null }
+        val temperature = if (ambientTemperatureSensor != null) {
+            ambientTemperatureC?.let { String.format(Locale.getDefault(), "%.1f°C", it) } ?: "--°C"
+        } else null
+        val parts = mutableListOf<String>()
+        if (temperature != null) parts.add("🌡 $temperature")
+        if (batteryPercent != null) parts.add("🔋 $batteryPercent%")
+        deviceStatusText.text = parts.joinToString(" • ").ifBlank { "🔋 n/d" }
+        deviceStatusText.contentDescription = buildString {
+            if (temperature != null) append("Temperatura ambientale $temperature")
+            if (batteryPercent != null) {
+                if (isNotEmpty()) append(". ")
+                append("Batteria $batteryPercent percento")
+            }
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -6176,7 +6194,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         activityResumed = true
         if (dashboardStarted) setNavigationBrightnessEnabled(true)
         mapView?.onResume()
-        if (themeMode == "auto") lightSensor?.let { sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+        sensorManager?.let { manager ->
+            if (themeMode == "auto") lightSensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+            ambientTemperatureSensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+        }
+        updateDeviceStatusText()
         if (dashboardStarted) requestGps()
     }
 
