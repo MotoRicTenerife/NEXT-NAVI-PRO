@@ -2488,7 +2488,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val favorite = favorites[which]
                 destination = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
                 destinationInput.setText(favorite.first)
-                routeText.text = "DESTINAZIONE: " + favorite.first + "\nPremi AVVIA PERCORSO"
+                routeText.text = "DESTINAZIONE: " + favorite.first + "\nPremi AVVIA NAVIGAZIONE"
             }.setNegativeButton("Chiudi", null).show()
     }
 
@@ -3855,7 +3855,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val routeSource = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
         routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
         destinationInput.setText(place.name)
-        routeText.text = appText("DESTINAZIONE: ") + place.name + "\n" + appText("Premi AVVIA PERCORSO")
+        routeText.text = appText("DESTINAZIONE: ") + place.name + "\n" + appText("Premi AVVIA NAVIGAZIONE")
         routeButton.text = appText("AVVIA NAVIGAZIONE")
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
         if (autoStart) {
@@ -4276,7 +4276,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     destination = PlaceResult(poi.first, NavPoint(poi.second, poi.third), "Luogo salvato")
                     refreshDestinationMarker()
                     destinationInput.setText(poi.first)
-                    routeText.text = "DESTINAZIONE: " + poi.first + "\nPremi AVVIA PERCORSO"
+                    routeText.text = "DESTINAZIONE: " + poi.first + "\nPremi AVVIA NAVIGAZIONE"
                     exitMapFullScreen()
                     calculateSelectedRoute()
                 } else {
