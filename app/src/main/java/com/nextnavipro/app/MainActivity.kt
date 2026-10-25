@@ -1377,26 +1377,54 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun showMainMenu() {
-        val choices = arrayOf(appText("Indirizzi preferiti"), appText("Salva destinazione come preferita"), appText("Elimina preferiti"), appText("Prova voce navigatore"), appText("Modalità schermo"), appText("Ricerche recenti"), appText("Soglie tachimetro e avvisi"), appText("Previsioni meteo"), appText("Percorsi GPX"), appText("Debug • CSV GPS: esporta / elimina"), appText("Modalità veicolo: MOTO (attiva)"), appText("Jarvis • Assistente e impostazioni"), appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"), appText("Velocità per avvisi: " + if (alertSpeedSource == "motorcycle") "Moto calibrata" else "GPS"))
+        val choices = arrayOf(
+            appText("Preferiti"),
+            appText("Modalità schermo"),
+            appText("Ricerche recenti"),
+            appText("Soglie tachimetro e avvisi"),
+            appText("Previsioni meteo"),
+            appText("Percorsi GPX"),
+            appText("Debug • CSV GPS: esporta / elimina"),
+            appText("Modalità veicolo: MOTO (attiva)"),
+            appText("Jarvis • Assistente e impostazioni"),
+            appText("Visualizzazione: " + if (navigationMapMode) "Mappa + pannello" else "Cruscotto"),
+            appText("Velocità per avvisi: " + if (alertSpeedSource == "motorcycle") "Moto calibrata (+$motorcycleSpeedOffsetKmh km/h)" else "GPS")
+        )
         AlertDialog.Builder(this).setTitle(appText("NEXT NAVI PRO • Menu"))
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> showFavoritesMenu()
+                    1 -> toggleTheme()
+                    2 -> showSearchHistory()
+                    3 -> showSpeedSettings()
+                    4 -> showWeatherForecast()
+                    5 -> showGpxMenu()
+                    6 -> showGpsDiagnosticsMenu()
+                    7 -> showVehicleProfileMenu()
+                    8 -> showJarvisMenu()
+                    9 -> showNavigationMapModeSettings()
+                    10 -> showAlertSpeedSourceSettings()
+                }
+            }.setNegativeButton(appText("Chiudi"), null).show()
+    }
+
+    private fun showFavoritesMenu() {
+        val choices = arrayOf(
+            appText("Apri indirizzi preferiti"),
+            appText("Salva destinazione attuale come preferita"),
+            appText("Elimina un preferito")
+        )
+        AlertDialog.Builder(this)
+            .setTitle(appText("Preferiti"))
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> showFavoriteAddresses()
                     1 -> saveFavoriteAddress()
                     2 -> deleteFavoriteAddress()
-                    3 -> testNavigationVoice()
-                    4 -> toggleTheme()
-                    5 -> showSearchHistory()
-                    6 -> showSpeedSettings()
-                    7 -> showWeatherForecast()
-                    8 -> showGpxMenu()
-                    9 -> showGpsDiagnosticsMenu()
-                    10 -> showVehicleProfileMenu()
-                    11 -> showJarvisMenu()
-                    12 -> showNavigationMapModeSettings()
-                    13 -> showAlertSpeedSourceSettings()
                 }
-            }.setNegativeButton("Chiudi", null).show()
+            }
+            .setNegativeButton(appText("Chiudi"), null)
+            .show()
     }
 
     private fun showJarvisMenu() {
@@ -1405,7 +1433,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Nome dell'assistente"),
             appText("Voce di Jarvis"),
             appText("Personalità di Jarvis"),
-            appText("Memoria Jarvis • spazio e pulizia")
+            appText("Memoria Jarvis • spazio e pulizia"),
+            appText("Prova voce navigatore")
         )
         AlertDialog.Builder(this)
             .setTitle(appText("JARVIS • Assistente"))
@@ -1417,6 +1446,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     2 -> showJarvisVoiceSettings()
                     3 -> showJarvisPersonalitySettings()
                     4 -> showJarvisMemorySettings()
+                    5 -> testNavigationVoice()
                 }
             }
             .setNegativeButton(appText("Chiudi"), null)
