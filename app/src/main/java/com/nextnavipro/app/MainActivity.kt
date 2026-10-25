@@ -741,7 +741,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val newMapView = MapView(this)
         mapView = newMapView
         newMapView.onCreate(savedState)
-        mapColumn.addView(mapStatus, params(-1, dp(if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) 18 else 22)))
+        mapColumn.addView(mapStatus, params(-1, dp(22)))
         mapColumn.addView(newMapView, LinearLayout.LayoutParams(-1, 0, 1f))
         // Navigation and GPS controls live together in the bottom row in both orientations.
         // This also gives the embedded map more height in portrait mode.
@@ -3838,7 +3838,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeSource?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
         destinationInput.setText(place.name)
         routeText.text = appText("DESTINAZIONE: ") + place.name + "\n" + appText("Premi AVVIA PERCORSO")
-        routeButton.text = appText("AVVIA PERCORSO")
+        routeButton.text = appText("AVVIA NAVIGAZIONE")
         map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 14.0), 700)
         if (autoStart) {
             if (pendingJarvisPreview) {
@@ -3889,7 +3889,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routeText.text = String.format(Locale.ITALY,
                         "ANTEPRIMA • %.1f km • circa %d min\n%s",
                         result.distanceKm, minutes, result.firstInstruction)
-                    routeButton.text = appText("AVVIA PERCORSO")
+                    routeButton.text = appText("AVVIA NAVIGAZIONE")
                     if (announce) speakRouteBriefing(place.name, result, routePreviewFetchedAt)
                 }
             } catch (_: Exception) {
@@ -3920,7 +3920,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeText.text = String.format(Locale.ITALY,
             "ANTEPRIMA OFFLINE • %.1f km • circa %d min\n%s",
             cached.route.distanceKm, minutes, freshness)
-        routeButton.text = appText("AVVIA PERCORSO")
+        routeButton.text = appText("AVVIA NAVIGAZIONE")
         scheduleRoutePreviewRefresh()
         if (announce) speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
     }
@@ -4100,7 +4100,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         refreshDestinationMarker()
         if (::routeText.isInitialized) routeText.text = appText("Nessun percorso attivo")
         if (::routeMetricsText.isInitialized) routeMetricsText.text = "— km  •  ARRIVO —"
-        if (::routeButton.isInitialized) routeButton.text = appText("AVVIA PERCORSO")
+        if (::routeButton.isInitialized) routeButton.text = appText("AVVIA NAVIGAZIONE")
         if (::destinationInput.isInitialized) destinationInput.text.clear()
         val source = map?.style?.getSource(SOURCE_ROUTE) as? GeoJsonSource
         source?.setGeoJson("""{"type":"FeatureCollection","features":[]}""")
