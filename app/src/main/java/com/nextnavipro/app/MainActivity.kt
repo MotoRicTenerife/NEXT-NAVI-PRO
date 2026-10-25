@@ -750,6 +750,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (navigationMapMode) {
             speedColumn.removeView(routeMetricsText)
             mapColumn.removeView(mapStatus)
+            mapStatus.removeView(gpsText)
+            mapStatus.removeView(radarText)
             val infoPanel = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
