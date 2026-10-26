@@ -1534,7 +1534,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Apri indirizzi preferiti"),
             appText("Salva destinazione attuale come preferita"),
             appText("Scegli Casa sulla mappa"),
-            appText("Elimina un preferito")
+            appText("Elimina un preferito"),
+            appText("Gestisci tutte le bandierine sulla mappa")
         )
         AlertDialog.Builder(this)
             .setTitle(appText("Preferiti e Casa"))
@@ -1544,6 +1545,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     1 -> saveFavoriteAddress()
                     2 -> selectHomeFromMap()
                     3 -> deleteFavoriteAddress()
+                    4 -> manageSavedMapFlags()
                 }
             }
             .setNegativeButton(appText("Chiudi"), null)
@@ -2678,6 +2680,74 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         }.show()
                 }
             }.setNegativeButton("Indietro") { _, _ -> showFavoriteAddresses() }.show()
+    }
+
+    /**
+     * Explicit cleanup path for every persistent map flag. The map draws flags from both
+     * favorite_* and poi_* keys, so this manager enumerates both stores and the Home marker.
+     * It deliberately keeps transient destination markers out of this list.
+     */
+    private fun manageSavedMapFlags() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val places = readFavoriteAddresses().toMutableList()
+        val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (homeName.isNotBlank() && homeLat != null && homeLon != null &&
+            homeLat.isFinite() && homeLon.isFinite() &&
+            homeLat in -90.0..90.0 && homeLon in -180.0..180.0
+        ) {
+            places.removeAll { it.first == "Casa — $homeName" }
+            places.add(Triple("Casa — $homeName", homeLat, homeLon))
+        }
+        val sorted = places.distinctBy { it.first }.sortedBy { it.first.lowercase(Locale.ROOT) }
+        if (sorted.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Bandierine sulla mappa")
+                .setMessage("Non risultano luoghi salvati da gestire.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Bandierine sulla mappa • ${sorted.size}")
+            .setMessage("Seleziona una bandierina per visualizzarla oppure eliminarla definitivamente.")
+            .setItems(sorted.map { it.first }.toTypedArray()) { _, which ->
+                val selected = sorted[which]
+                val isHome = selected.first.startsWith("Casa — ")
+                AlertDialog.Builder(this)
+                    .setTitle("Eliminare la bandierina?")
+                    .setMessage("Verrà rimossa la posizione salvata «${selected.first}».")
+                    .setNegativeButton(appText("Annulla"), null)
+                    .setNeutralButton("Mostra sulla mappa") { _, _ ->
+                        showPlaceOnMap(PlaceResult(selected.first, NavPoint(selected.second, selected.third), "Luogo salvato"))
+                    }
+                    .setPositiveButton("Elimina") { _, _ ->
+                        val editor = prefs.edit()
+                        if (isHome) {
+                            editor.remove("home_name")
+                                .remove("home_description")
+                                .remove("home_lat")
+                                .remove("home_lon")
+                                .remove("poi_home_marker")
+                        } else {
+                            val name = selected.first
+                            editor.remove("poi_" + name).remove("favorite_" + name)
+                        }
+                        val removed = editor.commit()
+                        refreshSavedPoiMarkers()
+                        if (isHome) refreshDestinationMarker()
+                        Toast.makeText(
+                            this,
+                            if (removed) "Bandierina eliminata dalla mappa." else "Impossibile eliminare la bandierina.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        manageSavedMapFlags()
+                    }
+                    .show()
+            }
+            .setNegativeButton("Chiudi", null)
+            .show()
     }
 
     private fun showPlaceOnMap(place: PlaceResult) {
