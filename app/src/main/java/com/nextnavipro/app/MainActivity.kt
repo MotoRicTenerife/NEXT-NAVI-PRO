@@ -2612,15 +2612,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton(appText("Annulla"), null).show()
     }
 
-    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> =
-        getSharedPreferences(PREFS, MODE_PRIVATE).all.filterKeys { it.startsWith("favorite_") }
-            .mapNotNull { (key, value) ->
-                val coords = (value as? String)?.split(",") ?: return@mapNotNull null
-                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
-                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
-                Triple(key.removePrefix("favorite_"), lat, lon)
-            }.sortedBy { it.first.lowercase(Locale.ROOT) }
+    /**
+     * A single user-facing list for saved map places. Older builds stored named map flags
+     * under poi_* and address favorites under favorite_*, which made map flags visible while
+     * the Favorites screen incorrectly reported an empty list. Read both formats for backward
+     * compatibility; prefer favorite_* coordinates when the same name exists in both stores.
+     */
+    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> {
+        val all = getSharedPreferences(PREFS, MODE_PRIVATE).all
+        val byName = linkedMapOf<String, Triple<String, Double, Double>>()
+        // Load map-saved POIs first so a formal favorite with the same name wins below.
+        all.filterKeys { it.startsWith("poi_") && it != "poi_home_marker" }
+            .forEach { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@forEach
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
+                val name = key.removePrefix("poi_")
+                byName[name] = Triple(name, lat, lon)
+            }
+        all.filterKeys { it.startsWith("favorite_") }
+            .forEach { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@forEach
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
+                val name = key.removePrefix("favorite_")
+                byName[name] = Triple(name, lat, lon)
+            }
+        return byName.values.sortedBy { it.first.lowercase(Locale.ROOT) }
+    }
 
     private fun showFavoriteAddresses() {
         val favorites = readFavoriteAddresses()
@@ -2646,7 +2667,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${favorite.first}» verrà rimosso dai preferiti.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorite.first).commit()
+                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .remove("favorite_" + favorite.first)
+                                .remove("poi_" + favorite.first)
+                                .commit()
+                            refreshSavedPoiMarkers()
                             Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
                         }.show()
                 }
@@ -2672,7 +2697,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         AlertDialog.Builder(this).setTitle("Elimina preferito")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 val name = favorites[which].first
-                val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + name).commit()
+                val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .remove("favorite_" + name)
+                    .remove("poi_" + name)
+                    .commit()
+                refreshSavedPoiMarkers()
                 Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
                 showFavoriteAddresses()
             }.setNegativeButton(appText("Annulla"), null).show()
@@ -4486,7 +4515,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${poi.first}» verrà rimosso dai luoghi salvati.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("poi_" + poi.first).commit()
+                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .remove("poi_" + poi.first)
+                                .remove("favorite_" + poi.first)
+                                .commit()
                             refreshSavedPoiMarkers()
                             Toast.makeText(this, if (removed) "Luogo eliminato." else "Impossibile eliminare il luogo.", Toast.LENGTH_LONG).show()
                             showSavedPois()
@@ -6179,12 +6211,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
         val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
-            .filterKeys { it.startsWith("poi_") }
+            .filterKeys {
+                (it.startsWith("poi_") && it != "poi_home_marker") || it.startsWith("favorite_") ||
+                    it == "poi_home_marker"
+            }
             .mapNotNull { (_, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
                 Feature.fromGeometry(Point.fromLngLat(lon, lat))
             }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
