@@ -2659,6 +2659,35 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton("Chiudi", null).show()
     }
 
+    /**
+     * Deletes the saved entry and any legacy POI/favorite entries at the same coordinates.
+     * This prevents a visible flag from surviving as an orphan when old versions stored the
+     * same location under a different key/name.
+     */
+    private fun deleteSavedPlaceAndMarker(name: String, latitude: Double, longitude: Double): Boolean {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val editor = prefs.edit()
+        var matched = false
+        prefs.all.forEach { (key, value) ->
+            if (!key.startsWith("poi_") && !key.startsWith("favorite_")) return@forEach
+            if (key == "poi_home_marker") return@forEach
+            val coords = (value as? String)?.split(",")
+            val lat = coords?.getOrNull(0)?.toDoubleOrNull()
+            val lon = coords?.getOrNull(1)?.toDoubleOrNull()
+            val sameName = key == "poi_$name" || key == "favorite_$name"
+            val samePosition = lat != null && lon != null && lat.isFinite() && lon.isFinite() &&
+                kotlin.math.abs(lat - latitude) < 0.0000001 &&
+                kotlin.math.abs(lon - longitude) < 0.0000001
+            if (sameName || samePosition) {
+                editor.remove(key)
+                matched = true
+            }
+        }
+        val committed = editor.commit()
+        refreshSavedPoiMarkers()
+        return committed && matched
+    }
+
     private fun showFavoriteActions(favorite: Triple<String, Double, Double>) {
         val place = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
         AlertDialog.Builder(this).setTitle(favorite.first)
@@ -2671,12 +2700,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${favorite.first}» verrà rimosso dai preferiti.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                .remove("favorite_" + favorite.first)
-                                .remove("poi_" + favorite.first)
-                                .commit()
-                            refreshSavedPoiMarkers()
-                            Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
+                            val removed = deleteSavedPlaceAndMarker(
+                                favorite.first, favorite.second, favorite.third
+                            )
+                            Toast.makeText(
+                                this,
+                                if (removed) "Preferito e bandierina eliminati." else "Nessun dato associato trovato; mappa aggiornata.",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }.show()
                 }
             }.setNegativeButton("Indietro") { _, _ -> showFavoriteAddresses() }.show()
@@ -2739,10 +2770,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                 .remove("home_lon")
                                 .remove("poi_home_marker")
                         } else {
-                            val name = selected.first
-                            editor.remove("poi_" + name).remove("favorite_" + name)
+                            // Remove by both name and coordinates, covering orphaned legacy keys.
+                            deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
                         }
-                        val removed = editor.commit()
+                        val removed = if (isHome) editor.commit() else true
                         refreshSavedPoiMarkers()
                         if (isHome) refreshDestinationMarker()
                         Toast.makeText(
@@ -2777,11 +2808,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         AlertDialog.Builder(this).setTitle("Elimina preferito")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 val name = favorites[which].first
-                val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .remove("favorite_" + name)
-                    .remove("poi_" + name)
-                    .commit()
-                refreshSavedPoiMarkers()
+                val removed = deleteSavedPlaceAndMarker(
+                    name, favorites[which].second, favorites[which].third
+                )
                 Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
                 showFavoriteAddresses()
             }.setNegativeButton(appText("Annulla"), null).show()
@@ -4595,11 +4624,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${poi.first}» verrà rimosso dai luoghi salvati.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                .remove("poi_" + poi.first)
-                                .remove("favorite_" + poi.first)
-                                .commit()
-                            refreshSavedPoiMarkers()
+                            val removed = deleteSavedPlaceAndMarker(
+                                poi.first, poi.second, poi.third
+                            )
                             Toast.makeText(this, if (removed) "Luogo eliminato." else "Impossibile eliminare il luogo.", Toast.LENGTH_LONG).show()
                             showSavedPois()
                         }.show()
@@ -6290,6 +6317,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSavedPoiMarkers() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
+        val seenCoordinates = HashSet<String>()
         val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
             .filterKeys {
                 (it.startsWith("poi_") && it != "poi_home_marker") || it.startsWith("favorite_") ||
@@ -6300,6 +6328,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
                 if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                // Legacy keys may describe the same location; never draw stacked duplicate flags.
+                val coordinateKey = String.format(Locale.US, "%.6f,%.6f", lat, lon)
+                if (!seenCoordinates.add(coordinateKey)) return@mapNotNull null
                 Feature.fromGeometry(Point.fromLngLat(lon, lat))
             }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
