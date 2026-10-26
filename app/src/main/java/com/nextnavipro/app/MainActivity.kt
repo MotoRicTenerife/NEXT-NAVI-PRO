@@ -2693,12 +2693,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
         val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
         val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
-        if (homeName.isNotBlank() && homeLat != null && homeLon != null &&
-            homeLat.isFinite() && homeLon.isFinite() &&
-            homeLat in -90.0..90.0 && homeLon in -180.0..180.0
+        val homeMarker = prefs.getString("poi_home_marker", null)?.split(",")
+        val markerLat = homeMarker?.getOrNull(0)?.toDoubleOrNull()
+        val markerLon = homeMarker?.getOrNull(1)?.toDoubleOrNull()
+        val effectiveHomeLat = homeLat ?: markerLat
+        val effectiveHomeLon = homeLon ?: markerLon
+        if (effectiveHomeLat != null && effectiveHomeLon != null &&
+            effectiveHomeLat.isFinite() && effectiveHomeLon.isFinite() &&
+            effectiveHomeLat in -90.0..90.0 && effectiveHomeLon in -180.0..180.0 &&
+            (homeName.isNotBlank() || prefs.contains("poi_home_marker"))
         ) {
-            places.removeAll { it.first == "Casa — $homeName" }
-            places.add(Triple("Casa — $homeName", homeLat, homeLon))
+            val displayHomeName = if (homeName.isNotBlank()) "Casa — $homeName" else "Casa (bandierina da recuperare)"
+            places.removeAll { it.first == displayHomeName }
+            places.add(Triple(displayHomeName, effectiveHomeLat, effectiveHomeLon))
         }
         val sorted = places.distinctBy { it.first }.sortedBy { it.first.lowercase(Locale.ROOT) }
         if (sorted.isEmpty()) {
@@ -2714,7 +2721,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setMessage("Seleziona una bandierina per visualizzarla oppure eliminarla definitivamente.")
             .setItems(sorted.map { it.first }.toTypedArray()) { _, which ->
                 val selected = sorted[which]
-                val isHome = selected.first.startsWith("Casa — ")
+                val isHome = selected.first == "Casa — $homeName" ||
+                    selected.first == "Casa (bandierina da recuperare)"
                 AlertDialog.Builder(this)
                     .setTitle("Eliminare la bandierina?")
                     .setMessage("Verrà rimossa la posizione salvata «${selected.first}».")
