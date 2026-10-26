@@ -3195,6 +3195,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             pendingNavigationSpeech = message to utteranceId
             return
         }
+        startNavigationSpeech(message, utteranceId)
+    }
+
+    private fun startNavigationSpeech(message: String, utteranceId: String) {
+        if (!voiceGuideReady || message.isBlank()) return
         activeNavigationUtteranceId = utteranceId
         voiceGuide?.setSpeechRate(0.96f)
         val result = voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
@@ -3208,13 +3213,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 activeJarvisUtteranceId = null
             } else if (activeNavigationUtteranceId == utteranceId) {
                 activeNavigationUtteranceId = null
-            } else {
-                // Ignore completion callbacks for speech that was explicitly stopped.
+            } else if (activeJarvisUtteranceId != null || activeNavigationUtteranceId != null) {
+                // Ignore callbacks from speech that was stopped while another utterance is active.
                 return@runOnUiThread
             }
+            // This callback is the end-of-utterance boundary: start the retained
+            // latest guidance directly rather than rechecking isSpeaking(), which
+            // can briefly lag the TTS completion callback on some engines.
             val pending = pendingNavigationSpeech
             pendingNavigationSpeech = null
-            if (pending != null) queueNavigationSpeech(pending.first, pending.second)
+            if (pending != null) startNavigationSpeech(pending.first, pending.second)
         }
     }
 
