@@ -2603,10 +2603,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton(appText("Sostituisci")) { _, _ ->
                             prefs.edit().putString(key, value).apply()
+                            refreshSavedPoiMarkers()
                             Toast.makeText(this, "Preferito aggiornato.", Toast.LENGTH_SHORT).show()
                         }.show()
                 } else {
                     prefs.edit().putString(key, value).apply()
+                    refreshSavedPoiMarkers()
                     Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
                 }
             }.setNegativeButton(appText("Annulla"), null).show()
