@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
+import { isUnauthenticatedArchiveWrite } from "./archiveWritePolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -327,6 +328,14 @@ async function handleCloudSpeedSegments(req, res, url) {
     const retryAfterSeconds = Math.max(1, Math.ceil(archiveCheck.retryAfterMs / 1000));
     return send(res, 429, { error: "Too many speed-limit archive requests; try again later", retryAfterSeconds },
       { "retry-after": String(retryAfterSeconds) });
+  }
+  // IP rate limiting is not authentication. Fail closed until Android and this
+  // backend verify Firebase ID tokens end-to-end before shared data is mutated.
+  if (isUnauthenticatedArchiveWrite(req.method, url.pathname)) {
+    return send(res, 503, {
+      error: "Cloud archive writes are temporarily disabled pending authentication",
+      code: "ARCHIVE_AUTH_REQUIRED"
+    });
   }
   try {
     if (req.method === "GET" && url.pathname === "/speed-limit-segments") {
