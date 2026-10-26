@@ -10,8 +10,9 @@ import android.os.Build
 import android.os.IBinder
 
 /**
- * Keeps the process in foreground-service priority while the user explicitly records a trip.
- * Location collection and paired GPX/CSV persistence remain owned by MainActivity.
+ * Keeps GPS navigation or explicit trip recording eligible for foreground location operation.
+ * MainActivity still consumes location callbacks and owns GPX/CSV persistence; this service
+ * currently protects lifecycle continuity but is not yet the durable owner of location fixes.
  */
 class GpsRecordingForegroundService : Service() {
     companion object {
@@ -33,7 +34,7 @@ class GpsRecordingForegroundService : Service() {
                 "Registrazione viaggio",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Mantiene attiva la registrazione GPX e CSV durante il viaggio."
+                description = "Mantiene attiva la navigazione GPS e la registrazione del viaggio."
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
