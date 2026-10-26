@@ -2601,18 +2601,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 val value = place.point.latitude.toString() + "," + place.point.longitude
                 val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val duplicate = readFavoriteAddresses().firstOrNull { saved ->
+                    if (saved.first.equals(name, ignoreCase = true)) false else {
+                        val meters = FloatArray(1)
+                        Location.distanceBetween(place.point.latitude, place.point.longitude, saved.second, saved.third, meters)
+                        meters[0] <= 5f
+                    }
+                }
+                if (duplicate != null) {
+                    Toast.makeText(this, "Questa posizione è già salvata come «${duplicate.first}». Non creo un duplicato.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 val key = "favorite_" + name
                 if (prefs.contains(key) && prefs.getString(key, null) != value) {
                     AlertDialog.Builder(this).setTitle("Sostituire il preferito?")
                         .setMessage("Esiste già un preferito chiamato «$name». Vuoi aggiornarne la posizione?")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton(appText("Sostituisci")) { _, _ ->
-                            prefs.edit().putString(key, value).apply()
+                            prefs.edit().remove("poi_" + name).putString(key, value).apply()
                             refreshSavedPoiMarkers()
                             Toast.makeText(this, "Preferito aggiornato.", Toast.LENGTH_SHORT).show()
                         }.show()
                 } else {
-                    prefs.edit().putString(key, value).apply()
+                    prefs.edit().remove("poi_" + name).putString(key, value).apply()
                     refreshSavedPoiMarkers()
                     Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
                 }
@@ -2778,6 +2789,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .setPositiveButton("Elimina") { _, _ ->
                         val removed: Boolean
                         if (isHome) {
+                            deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
                             removed = prefs.edit()
                                 .remove("home_name")
                                 .remove("home_description")
@@ -4675,10 +4687,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             .setPositiveButton(appText("Salva")) { _, _ ->
                                 val name = input.text.toString().trim()
                                 if (name.isNotBlank()) {
-                                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                        .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
-                                    refreshSavedPoiMarkers()
-                                    Toast.makeText(this, "Luogo salvato: $name", Toast.LENGTH_SHORT).show()
+                                    val duplicate = readFavoriteAddresses().firstOrNull { saved ->
+                                        if (saved.first.equals(name, ignoreCase = true)) false else {
+                                            val meters = FloatArray(1)
+                                            Location.distanceBetween(point.latitude, point.longitude, saved.second, saved.third, meters)
+                                            meters[0] <= 5f
+                                        }
+                                    }
+                                    if (duplicate != null) {
+                                        Toast.makeText(this, "Questa posizione è già salvata come «${duplicate.first}». Non creo un duplicato.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                            .remove("favorite_" + name)
+                                            .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
+                                        refreshSavedPoiMarkers()
+                                        Toast.makeText(this, "Luogo salvato: $name", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }.setNegativeButton(appText("Annulla"), null).show()
                     }
@@ -6386,6 +6410,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setNegativeButton(appText("Annulla"), null)
             .setPositiveButton("Elimina") { _, _ ->
                 val removed = if (isHome) {
+                    // A home flag and a saved favorite at the same coordinates represent one
+                    // map location; remove legacy duplicate records as part of the same action.
+                    deleteSavedPlaceAndMarker(nearest.first, nearest.second, nearest.third)
                     val committed = prefs.edit()
                         .remove("home_name")
                         .remove("home_description")
