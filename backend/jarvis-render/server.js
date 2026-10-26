@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 import { isUnauthenticatedArchiveWrite } from "./archiveWritePolicy.js";
+import { parseExplicitMaximumSpeedLimits } from "./speedLimitParsing.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -547,18 +548,8 @@ async function handle(req, res) {
         const roadIndex = Number.isInteger(properties?.routeIndex) ? properties.routeIndex : -1;
         const segment = properties?.snapResult === "Matched" && roadIndex >= 0 ? roadElements[roadIndex] : null;
         const raw = segment?.properties?.speedLimits;
-        const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-        const parsed = values.map(value => {
-          const number = Number(value?.value);
-          if (!Number.isFinite(number) || number <= 0 || String(value?.type || "").trim().toLowerCase() !== "maximum") return null;
-          const unit = String(value?.unit || "").trim().toLowerCase();
-          const kmh = ["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)
-            ? number
-            : ["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit) ? number * 1.609344 : NaN;
-          const rounded = Math.round(kmh);
-          return Number.isFinite(rounded) && rounded >= 5 && rounded <= 200 ? rounded : null;
-        }).filter(value => value !== null);
-        const unique = [...new Set(parsed)];
+        const parsed = parseExplicitMaximumSpeedLimits(raw);
+        const unique = [...new Set(parsed.map(value => value.kmh))];
         const address = segment?.properties?.address;
         return {
           routeIndex: sampleIndex,
@@ -644,28 +635,7 @@ async function handle(req, res) {
           // solely because an earlier road had a different limit.
           const currentSegment = routeSegments.length ? routeSegments[routeSegments.length - 1] : null;
           const rawLimits = currentSegment?.properties?.speedLimits;
-          const limits = Array.isArray(rawLimits) ? rawLimits : rawLimits ? [rawLimits] : [];
-          const parsed = limits.map(limit => {
-            const value = Number(limit?.value);
-            if (!Number.isFinite(value) || value <= 0) return null;
-            const type = String(limit?.type || "").trim().toLowerCase();
-            // Only an explicitly identified maximum limit is suitable for a sign.
-            if (type !== "maximum") return null;
-            // Request metric explicitly and never guess an unknown/missing unit.
-            const unit = String(limit?.unit || "").trim().toLowerCase();
-            let kmh;
-            if (["kmph", "km/h", "kmh", "kph", "kilometersperhour", "kilometresperhour"].includes(unit)) {
-              kmh = value;
-            } else if (["mph", "mi/h", "milesperhour", "mileperhour"].includes(unit)) {
-              kmh = value * 1.609344;
-            } else {
-              return null;
-            }
-            const rounded = Math.round(kmh);
-            return rounded >= 5 && rounded <= 200
-              ? { kmh: rounded, rawValue: value, unit, type: "Maximum" }
-              : null;
-          }).filter(value => value !== null);
+          const parsed = parseExplicitMaximumSpeedLimits(rawLimits);
           const observedLimits = [...new Set(parsed.map(value => value.kmh))];
           if (observedLimits.length > 1) {
             return send(res, 200, {
