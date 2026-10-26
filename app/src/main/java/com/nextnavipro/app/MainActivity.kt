@@ -1032,6 +1032,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
                     true
+                } else if (handleSavedFlagTap(readyMap, point.latitude, point.longitude)) {
+                    // A saved flag is a real object, not a generic map tap.
+                    true
                 } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     val nearest = nearestRoadGeometryIndex(picked, roadEditorGeometry)
@@ -6326,6 +6329,85 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return bitmap
     }
 
+    /**
+     * Resolve a rendered persistent flag to its saved record and offer explicit deletion.
+     * The GeoJSON contains coordinates only, so match against the saved-place stores.
+     */
+    private fun handleSavedFlagTap(readyMap: MapLibreMap, latitude: Double, longitude: Double): Boolean {
+        if (!mapStyleReady) return false
+        val screenPoint = readyMap.projection.toScreenLocation(LatLng(latitude, longitude))
+        val hit = try {
+            readyMap.queryRenderedFeatures(screenPoint, "next-saved-poi-flags").isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+        if (!hit) return false
+
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val candidates = readFavoriteAddresses().toMutableList()
+        val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+            ?: prefs.getString("poi_home_marker", null)?.split(",")?.getOrNull(0)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+            ?: prefs.getString("poi_home_marker", null)?.split(",")?.getOrNull(1)?.toDoubleOrNull()
+        if (homeLat != null && homeLon != null && homeLat.isFinite() && homeLon.isFinite() &&
+            homeLat in -90.0..90.0 && homeLon in -180.0..180.0) {
+            candidates.removeAll { kotlin.math.abs(it.second - homeLat) < 0.0000001 &&
+                kotlin.math.abs(it.third - homeLon) < 0.0000001 }
+            candidates.add(Triple(if (homeName.isBlank()) "Casa" else "Casa — " + homeName, homeLat, homeLon))
+        }
+        if (candidates.isEmpty()) {
+            manageSavedMapFlags()
+            return true
+        }
+        val nearest = candidates.minByOrNull { place ->
+            val results = FloatArray(1)
+            Location.distanceBetween(latitude, longitude, place.second, place.third, results)
+            results[0]
+        } ?: run {
+            manageSavedMapFlags()
+            return true
+        }
+        val distance = FloatArray(1)
+        Location.distanceBetween(latitude, longitude, nearest.second, nearest.third, distance)
+        if (distance[0] > 100f) {
+            AlertDialog.Builder(this)
+                .setTitle("Bandierina non associata")
+                .setMessage("Questa bandierina non è collegata a una posizione salvata. Vuoi aprire la gestione per ripulire le voci residue?")
+                .setNegativeButton(appText("Annulla"), null)
+                .setPositiveButton("Gestisci") { _, _ -> manageSavedMapFlags() }
+                .show()
+            return true
+        }
+        val isHome = nearest.first == "Casa" || nearest.first.startsWith("Casa — ")
+        AlertDialog.Builder(this)
+            .setTitle(nearest.first)
+            .setMessage("Vuoi eliminare questa bandierina e la relativa posizione salvata?")
+            .setNegativeButton(appText("Annulla"), null)
+            .setPositiveButton("Elimina") { _, _ ->
+                val removed = if (isHome) {
+                    val committed = prefs.edit()
+                        .remove("home_name")
+                        .remove("home_description")
+                        .remove("home_lat")
+                        .remove("home_lon")
+                        .remove("poi_home_marker")
+                        .commit()
+                    if (committed) {
+                        refreshSavedPoiMarkers()
+                        refreshDestinationMarker()
+                    }
+                    committed
+                } else {
+                    deleteSavedPlaceAndMarker(nearest.first, nearest.second, nearest.third)
+                }
+                Toast.makeText(this,
+                    if (removed) "Posizione eliminata dalla memoria e dalla mappa." else "Non è stato possibile eliminare la posizione.",
+                    Toast.LENGTH_LONG).show()
+            }
+            .show()
+        return true
+    }
     private fun refreshSavedPoiMarkers() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
