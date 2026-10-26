@@ -6382,26 +6382,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      */
     private fun handleSavedFlagTap(readyMap: MapLibreMap, latitude: Double, longitude: Double): Boolean {
         if (!mapStyleReady) return false
-        val screenPoint = readyMap.projection.toScreenLocation(LatLng(latitude, longitude))
-        val hitFeatures = try {
-            readyMap.queryRenderedFeatures(screenPoint, "next-saved-poi-flags")
-        } catch (_: Exception) {
-            emptyArray<Feature>()
-        }
-        if (hitFeatures.isEmpty()) return false
-
-        // Prefer the exact rendered feature metadata. This avoids deleting a different saved
-        // place when several flags are close together or visually overlap at low zoom.
-        val hitFeature = hitFeatures.firstOrNull { feature ->
-            !feature.getStringProperty("savedKey").isNullOrBlank() &&
-                feature.getNumberProperty("savedLatitude") != null &&
-                feature.getNumberProperty("savedLongitude") != null
-        }
-        val exactKey = hitFeature?.getStringProperty("savedKey")
-        val exactName = hitFeature?.getStringProperty("savedName")
-        val exactLat = hitFeature?.getNumberProperty("savedLatitude")?.toDouble()
-        val exactLon = hitFeature?.getNumberProperty("savedLongitude")?.toDouble()
-
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val candidates = readFavoriteAddresses().toMutableList()
         val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
@@ -6411,50 +6391,31 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             ?: prefs.getString("poi_home_marker", null)?.split(",")?.getOrNull(1)?.toDoubleOrNull()
         if (homeLat != null && homeLon != null && homeLat.isFinite() && homeLon.isFinite() &&
             homeLat in -90.0..90.0 && homeLon in -180.0..180.0) {
-            candidates.removeAll { kotlin.math.abs(it.second - homeLat) < 0.0000001 &&
-                kotlin.math.abs(it.third - homeLon) < 0.0000001 }
+            candidates.removeAll { kotlin.math.abs(it.second - homeLat) < 0.0000001 && kotlin.math.abs(it.third - homeLon) < 0.0000001 }
             candidates.add(Triple(if (homeName.isBlank()) "Casa" else "Casa — " + homeName, homeLat, homeLon))
         }
-        if (candidates.isEmpty()) {
-            manageSavedMapFlags()
-            return true
-        }
-        val nearest = if (exactKey != null && exactLat != null && exactLon != null &&
-            exactLat.isFinite() && exactLon.isFinite() &&
-            exactLat in -90.0..90.0 && exactLon in -180.0..180.0
-        ) {
-            Triple(exactName?.takeIf { it.isNotBlank() } ?: "Luogo salvato", exactLat, exactLon)
-        } else {
-            candidates.minByOrNull { place ->
-                val results = FloatArray(1)
-                Location.distanceBetween(latitude, longitude, place.second, place.third, results)
-                results[0]
-            } ?: run {
-                manageSavedMapFlags()
-                return true
-            }
-        }
-        val distance = FloatArray(1)
-        Location.distanceBetween(latitude, longitude, nearest.second, nearest.third, distance)
-        if (exactKey == null && distance[0] > 100f) {
-            AlertDialog.Builder(this)
-                .setTitle("Bandierina non associata")
-                .setMessage("Questa bandierina non è collegata a una posizione salvata. Vuoi aprire la gestione per ripulire le voci residue?")
-                .setNegativeButton(appText("Annulla"), null)
-                .setPositiveButton("Gestisci") { _, _ -> manageSavedMapFlags() }
-                .show()
-            return true
-        }
-        val isHome = exactKey == "poi_home_marker" || nearest.first == "Casa" || nearest.first.startsWith("Casa — ")
+        if (candidates.isEmpty()) return false
+
+        // Hit-test in screen pixels, not meters: a tap only selects a visible flag icon.
+        val density = resources.displayMetrics.density.coerceAtLeast(1f)
+        val tapX = readyMap.projection.toScreenLocation(LatLng(latitude, longitude)).x
+        val tapY = readyMap.projection.toScreenLocation(LatLng(latitude, longitude)).y
+        val nearest = candidates.map { place ->
+            val screen = readyMap.projection.toScreenLocation(LatLng(place.second, place.third))
+            val dx = screen.x - tapX
+            val dy = screen.y - tapY
+            Triple(place, dx * dx + dy * dy, kotlin.math.sqrt((dx * dx + dy * dy).toDouble()))
+        }.minByOrNull { it.second } ?: return false
+        if (nearest.third > 36f * density) return false
+        val place = nearest.first
+        val isHome = place.first == "Casa" || place.first.startsWith("Casa — ")
         AlertDialog.Builder(this)
-            .setTitle(nearest.first)
+            .setTitle(place.first)
             .setMessage("Vuoi eliminare questa bandierina e la relativa posizione salvata?")
             .setNegativeButton(appText("Annulla"), null)
             .setPositiveButton("Elimina") { _, _ ->
                 val removed = if (isHome) {
-                    // A home flag and a saved favorite at the same coordinates represent one
-                    // map location; remove legacy duplicate records as part of the same action.
-                    deleteSavedPlaceAndMarker(nearest.first, nearest.second, nearest.third)
+                    deleteSavedPlaceAndMarker(place.first, place.second, place.third)
                     val committed = prefs.edit()
                         .remove("home_name")
                         .remove("home_description")
@@ -6462,17 +6423,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .remove("home_lon")
                         .remove("poi_home_marker")
                         .commit()
-                    if (committed) {
-                        refreshSavedPoiMarkers()
-                        refreshDestinationMarker()
-                    }
+                    if (committed) { refreshSavedPoiMarkers(); refreshDestinationMarker() }
                     committed
                 } else {
-                    deleteSavedPlaceAndMarker(nearest.first, nearest.second, nearest.third)
+                    deleteSavedPlaceAndMarker(place.first, place.second, place.third)
                 }
-                Toast.makeText(this,
-                    if (removed) "Posizione eliminata dalla memoria e dalla mappa." else "Non è stato possibile eliminare la posizione.",
-                    Toast.LENGTH_LONG).show()
+                Toast.makeText(this, if (removed) "Posizione eliminata dalla memoria e dalla mappa." else "Non è stato possibile eliminare la posizione.", Toast.LENGTH_LONG).show()
             }
             .show()
         return true
