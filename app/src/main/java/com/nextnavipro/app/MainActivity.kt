@@ -1032,7 +1032,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
                     true
-                } else if (handleSavedFlagTap(readyMap, point.latitude, point.longitude)) {
+                } else if (!manualSegmentEditing && !selectionMode && handleSavedFlagTap(readyMap, point.latitude, point.longitude)) {
                     // A saved flag is a real object, not a generic map tap.
                     true
                 } else if (!manualSegmentEditing && !selectionMode && handleSavedFlagTap(point)) {
