@@ -17,12 +17,15 @@ internal data class GpsTraceSample(
     val constellations: String,
     val routeSegmentIndex: Int?,
     val routeDistanceMeters: Float?,
-    val matchStatus: String
+    val matchStatus: String,
+    val reportedSpeedMetersPerSecond: Float? = null,
+    val reportedBearingDegrees: Float? = null,
+    val motionSource: String = "UNKNOWN"
 )
 
 internal object GpsTraceDiagnostics {
     fun toCsv(samples: List<GpsTraceSample>): String = buildString {
-        appendLine("timestamp_epoch_ms,latitude,longitude,smoothed_latitude,smoothed_longitude,gpx_point_status,accuracy_m,speed_mps,bearing_deg,satellites_used,satellites_visible,constellations,route_segment_index,route_distance_m,match_status")
+        appendLine("timestamp_epoch_ms,latitude,longitude,smoothed_latitude,smoothed_longitude,gpx_point_status,accuracy_m,speed_mps,bearing_deg,reported_speed_mps,reported_bearing_deg,motion_source,satellites_used,satellites_visible,constellations,route_segment_index,route_distance_m,match_status")
         for (s in samples) {
             append(s.timestampEpochMs).append(',')
             append(String.format(Locale.US, "%.7f", s.latitude)).append(',')
@@ -31,8 +34,11 @@ internal object GpsTraceDiagnostics {
             append(s.smoothedLongitude?.let { String.format(Locale.US, "%.7f", it) } ?: "").append(',')
             append(csv(s.gpxPointStatus)).append(',')
             append(s.accuracyMeters?.let { String.format(Locale.US, "%.2f", it) } ?: "").append(',')
-            append(s.speedMetersPerSecond?.let { String.format(Locale.US, "%.2f", it) } ?: "").append(',')
-            append(s.bearingDegrees?.let { String.format(Locale.US, "%.1f", it) } ?: "").append(',')
+            append(s.speedMetersPerSecond?.takeIf { it.isFinite() && it in 0f..100f }?.let { String.format(Locale.US, "%.2f", it) } ?: "").append(',')
+            append(s.bearingDegrees?.takeIf { it.isFinite() && it in 0f..360f }?.let { String.format(Locale.US, "%.1f", it) } ?: "").append(',')
+            append(s.reportedSpeedMetersPerSecond?.takeIf { it.isFinite() && it in 0f..100f }?.let { String.format(Locale.US, "%.2f", it) } ?: "").append(',')
+            append(s.reportedBearingDegrees?.takeIf { it.isFinite() && it in 0f..360f }?.let { String.format(Locale.US, "%.1f", it) } ?: "").append(',')
+            append(csv(s.motionSource)).append(',')
             append(s.satellitesUsed).append(',')
             append(s.satellitesVisible).append(',')
             append(csv(s.constellations)).append(',')

@@ -171,6 +171,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var negativeTheme = true
     private var currentLocation: Location? = null
     private val speedLimitTrace = mutableListOf<Location>()
+    private val gpsMotionEstimator = GpsMotionEstimator()
     private var approximateLocation: ApproximateLocation? = null
     private var ipFallbackRequested = false
     private var weatherUsesApproximateLocation = false
@@ -1201,6 +1202,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             refreshSavedPoiMarkers()
             refreshDestinationMarker()
             refreshManualSegmentMarkers()
+            refreshSavedPoiMarkers()
+            refreshDestinationMarker()
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
@@ -1532,15 +1535,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val choices = arrayOf(
             appText("Apri indirizzi preferiti"),
             appText("Salva destinazione attuale come preferita"),
+            appText("Scegli Casa sulla mappa"),
             appText("Elimina un preferito")
         )
         AlertDialog.Builder(this)
-            .setTitle(appText("Preferiti"))
+            .setTitle(appText("Preferiti e Casa"))
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> showFavoriteAddresses()
                     1 -> saveFavoriteAddress()
-                    2 -> deleteFavoriteAddress()
+                    2 -> selectHomeFromMap()
+                    3 -> deleteFavoriteAddress()
                 }
             }
             .setNegativeButton(appText("Chiudi"), null)
@@ -1914,6 +1919,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         location: Location,
         rejectionStatus: String? = null,
         smoothedLocation: Location? = null,
+        effectiveLocation: Location? = null,
+        motionSource: String = "RAW",
         gpxPointStatus: String = "NOT_EVALUATED"
     ) {
         if (!gpsDiagnosticRecording || gpsDiagnosticSamples.size >= 50_000) {
@@ -1935,9 +1942,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 smoothedLatitude = smoothedLocation?.latitude,
                 smoothedLongitude = smoothedLocation?.longitude,
                 gpxPointStatus = gpxPointStatus,
-                accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
-                speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
-                bearingDegrees = location.bearing.takeIf { location.hasBearing() },
+                accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() && it >= 0f },
+                speedMetersPerSecond = (effectiveLocation ?: location).let { fix ->
+                    fix.speed.takeIf { fix.hasSpeed() && it.isFinite() && it in 0f..100f }
+                },
+                bearingDegrees = (effectiveLocation ?: location).let { fix ->
+                    fix.bearing.takeIf { fix.hasBearing() && it.isFinite() && it in 0f..360f }
+                },
                 satellitesUsed = satellitesUsedInFix,
                 satellitesVisible = satellitesInView,
                 constellations = usedConstellations.mapNotNull {
@@ -1958,7 +1969,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     route == null -> "NO_ACTIVE_ROUTE"
                     validMatch == null -> "NO_CONFIDENT_MATCH"
                     else -> "MATCHED"
-                }
+                },
+                reportedSpeedMetersPerSecond = location.speed.takeIf { location.hasSpeed() && it.isFinite() && it in 0f..100f },
+                reportedBearingDegrees = location.bearing.takeIf { location.hasBearing() && it.isFinite() && it in 0f..360f },
+                motionSource = motionSource
             )
         )
         if (gpsDiagnosticSamples.size % 10 == 0) saveGpsDiagnosticCheckpoint()
@@ -2565,17 +2579,34 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun saveFavoriteAddress() {
         val selected = destination
         if (selected == null) {
-            Toast.makeText(this, "Cerca prima un indirizzo da salvare.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cerca prima un indirizzo oppure scegli un punto sulla mappa.", Toast.LENGTH_LONG).show()
             return
         }
-        val input = EditText(this).apply { setText(selected.name); hint = "Nome preferito" }
-        AlertDialog.Builder(this).setTitle("Salva indirizzo preferito").setView(input)
+        saveFavoritePlace(selected)
+    }
+
+    private fun saveFavoritePlace(place: PlaceResult) {
+        val input = EditText(this).apply { setText(place.name); hint = "Nome preferito" }
+        AlertDialog.Builder(this).setTitle("Memorizza indirizzo preferito").setView(input)
             .setPositiveButton(appText("Salva")) { _, _ ->
                 val name = input.text.toString().trim()
-                if (name.isNotBlank()) {
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                        .putString("favorite_" + name, selected.point.latitude.toString() + "," + selected.point.longitude)
-                        .apply()
+                if (name.isBlank()) {
+                    Toast.makeText(this, "Inserisci un nome per il preferito.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val value = place.point.latitude.toString() + "," + place.point.longitude
+                val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val key = "favorite_" + name
+                if (prefs.contains(key) && prefs.getString(key, null) != value) {
+                    AlertDialog.Builder(this).setTitle("Sostituire il preferito?")
+                        .setMessage("Esiste già un preferito chiamato «$name». Vuoi aggiornarne la posizione?")
+                        .setNegativeButton(appText("Annulla"), null)
+                        .setPositiveButton(appText("Sostituisci")) { _, _ ->
+                            prefs.edit().putString(key, value).apply()
+                            Toast.makeText(this, "Preferito aggiornato.", Toast.LENGTH_SHORT).show()
+                        }.show()
+                } else {
+                    prefs.edit().putString(key, value).apply()
                     Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
                 }
             }.setNegativeButton(appText("Annulla"), null).show()
@@ -2587,7 +2618,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
                 Triple(key.removePrefix("favorite_"), lat, lon)
             }.sortedBy { it.first.lowercase(Locale.ROOT) }
 
@@ -2599,11 +2630,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         AlertDialog.Builder(this).setTitle("Indirizzi preferiti")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
-                val favorite = favorites[which]
-                destination = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
-                destinationInput.setText(favorite.first)
-                routeText.text = "DESTINAZIONE: " + favorite.first + "\nPremi AVVIA NAVIGAZIONE"
+                showFavoriteActions(favorites[which])
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun showFavoriteActions(favorite: Triple<String, Double, Double>) {
+        val place = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
+        AlertDialog.Builder(this).setTitle(favorite.first)
+            .setItems(arrayOf("Mostra sulla mappa", "Avvia navigazione", "Imposta come Casa", "Elimina preferito")) { _, which ->
+                when (which) {
+                    0 -> showPlaceOnMap(place)
+                    1 -> { showPlaceOnMap(place); calculateSelectedRoute() }
+                    2 -> saveHomePlace(place)
+                    3 -> AlertDialog.Builder(this).setTitle("Eliminare il preferito?")
+                        .setMessage("«${favorite.first}» verrà rimosso dai preferiti.")
+                        .setNegativeButton(appText("Annulla"), null)
+                        .setPositiveButton("Elimina") { _, _ ->
+                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorite.first).commit()
+                            Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
+                        }.show()
+                }
+            }.setNegativeButton("Indietro") { _, _ -> showFavoriteAddresses() }.show()
+    }
+
+    private fun showPlaceOnMap(place: PlaceResult) {
+        destination = place
+        if (fullScreenMap) exitMapFullScreen()
+        destinationInput.setText(place.name)
+        routeText.text = "DESTINAZIONE: ${place.name}\nPremi AVVIA NAVIGAZIONE"
+        refreshDestinationMarker()
+        map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(place.point.latitude, place.point.longitude), 16.0))
     }
 
     private fun deleteFavoriteAddress() {
@@ -2614,8 +2670,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         AlertDialog.Builder(this).setTitle("Elimina preferito")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorites[which].first).apply()
-                Toast.makeText(this, "Preferito eliminato.", Toast.LENGTH_SHORT).show()
+                val name = favorites[which].first
+                val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + name).commit()
+                Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
+                showFavoriteAddresses()
             }.setNegativeButton(appText("Annulla"), null).show()
     }
 
@@ -3596,21 +3654,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val savedName = prefs.getString("home_name", null)
         val choices = if (savedName.isNullOrBlank()) {
-            arrayOf("Salva la destinazione selezionata come Casa")
+            arrayOf("Salva destinazione selezionata come Casa", "Scegli Casa sulla mappa")
         } else {
-            arrayOf("Vai a Casa: " + savedName, "Salva la destinazione selezionata come Casa", "Dimentica Casa")
+            arrayOf("Vai a Casa: $savedName", "Mostra Casa sulla mappa", "Salva destinazione selezionata come Casa", "Scegli Casa sulla mappa", "Dimentica Casa")
         }
         AlertDialog.Builder(this)
-            .setTitle(if (savedName.isNullOrBlank()) "Indirizzo di casa" else "Casa salvata: " + savedName)
+            .setTitle(if (savedName.isNullOrBlank()) "Indirizzo di casa" else "Casa salvata: $savedName")
             .setItems(choices) { _, which ->
                 if (savedName.isNullOrBlank()) {
-                    saveSelectedDestinationAsHome()
+                    when (which) {
+                        0 -> saveSelectedDestinationAsHome()
+                        1 -> selectHomeFromMap()
+                    }
                 } else when (which) {
                     0 -> navigateHome()
-                    1 -> saveSelectedDestinationAsHome()
-                    2 -> {
+                    1 -> showHomeOnMap()
+                    2 -> saveSelectedDestinationAsHome()
+                    3 -> selectHomeFromMap()
+                    4 -> {
                         prefs.edit().remove("home_name").remove("home_description")
-                            .remove("home_lat").remove("home_lon").apply()
+                            .remove("home_lat").remove("home_lon").remove("poi_home_marker").apply()
+                        refreshSavedPoiMarkers()
                         Toast.makeText(this, "Indirizzo di casa rimosso.", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -3619,19 +3683,45 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .show()
     }
 
+    private fun selectHomeFromMap() {
+        selectionMode = true
+        enterMapFullScreen()
+        Toast.makeText(this, "Tocca il punto di Casa sulla mappa, poi scegli «Memorizza come Casa».", Toast.LENGTH_LONG).show()
+    }
+
     private fun saveSelectedDestinationAsHome() {
         val selected = destination
         if (selected == null) {
-            Toast.makeText(this, "Cerca e seleziona prima un indirizzo da salvare come Casa.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cerca prima un indirizzo, oppure scegli un punto sulla mappa.", Toast.LENGTH_LONG).show()
             return
         }
+        saveHomePlace(selected)
+    }
+
+    private fun saveHomePlace(place: PlaceResult) {
+        val coordinates = place.point.latitude.toString() + "," + place.point.longitude
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-            .putString("home_name", selected.name)
-            .putString("home_description", selected.description)
-            .putString("home_lat", selected.point.latitude.toString())
-            .putString("home_lon", selected.point.longitude.toString())
+            .putString("home_name", place.name)
+            .putString("home_description", place.description)
+            .putString("home_lat", place.point.latitude.toString())
+            .putString("home_lon", place.point.longitude.toString())
+            .putString("poi_home_marker", coordinates)
             .apply()
-        Toast.makeText(this, "Indirizzo di casa salvato: " + selected.name, Toast.LENGTH_LONG).show()
+        showPlaceOnMap(place)
+        refreshSavedPoiMarkers()
+        Toast.makeText(this, "Casa memorizzata: ${place.name}", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showHomeOnMap() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val name = prefs.getString("home_name", null) ?: return
+        val lat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val lon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (lat == null || lon == null || !lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+            Toast.makeText(this, "Indirizzo di Casa non valido: salvalo di nuovo.", Toast.LENGTH_LONG).show()
+            return
+        }
+        showPlaceOnMap(PlaceResult(name, NavPoint(lat, lon), prefs.getString("home_description", "").orEmpty()))
     }
 
     private fun navigateHome() {
@@ -3639,14 +3729,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val name = prefs.getString("home_name", null) ?: return
         val lat = prefs.getString("home_lat", null)?.toDoubleOrNull()
         val lon = prefs.getString("home_lon", null)?.toDoubleOrNull()
-        if (lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
-            Toast.makeText(this, "Indirizzo di casa non valido: salvalo di nuovo.", Toast.LENGTH_LONG).show()
+        if (lat == null || lon == null || !lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+            Toast.makeText(this, "Indirizzo di Casa non valido: salvalo di nuovo.", Toast.LENGTH_LONG).show()
             return
         }
-        destination = PlaceResult(name, NavPoint(lat, lon), prefs.getString("home_description", "").orEmpty())
-        refreshDestinationMarker()
-        destinationInput.setText(name)
-        routeText.text = "DESTINAZIONE: Casa\n" + name
+        showPlaceOnMap(PlaceResult(name, NavPoint(lat, lon), prefs.getString("home_description", "").orEmpty()))
         calculateSelectedRoute()
     }
 
@@ -4348,7 +4435,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun readSavedPois(): List<Triple<String, Double, Double>> =
         getSharedPreferences(PREFS, MODE_PRIVATE).all
-            .filterKeys { it.startsWith("poi_") }
+            .filterKeys { it.startsWith("poi_") && it != "poi_home_marker" }
             .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
@@ -4360,7 +4447,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun savedPoisStorageBytes(): Long =
         getSharedPreferences(PREFS, MODE_PRIVATE).all
-            .filterKeys { it.startsWith("poi_") }
+            .filterKeys { it.startsWith("poi_") && it != "poi_home_marker" }
             .entries.sumOf { (key, value) -> key.toByteArray(Charsets.UTF_8).size.toLong() + (value?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0) }
 
     private fun showSavedPois() {
@@ -4408,26 +4495,38 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun showPickedPointDialog(point: NavPoint) {
+        val picked = PlaceResult("Punto sulla mappa", point, "Punto selezionato manualmente sulla mappa")
         AlertDialog.Builder(this).setTitle("Punto sulla mappa")
-            .setItems(arrayOf("Usa come destinazione", "Salva come luogo di interesse")) { _, which ->
-                if (which == 0) {
-                    destination = PlaceResult("Punto sulla mappa", point, "Punto selezionato sulla mappa")
-                    refreshDestinationMarker()
-                    destinationInput.setText("Punto sulla mappa")
-                    exitMapFullScreen()
-                    calculateSelectedRoute()
-                } else {
-                    val input = EditText(this).apply { hint = "Nome del luogo" }
-                    AlertDialog.Builder(this).setTitle("Salva luogo di interesse").setView(input)
-                        .setPositiveButton(appText("Salva")) { _, _ ->
-                            val name = input.text.toString().trim()
-                            if (name.isNotBlank()) {
-                                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
-                                refreshSavedPoiMarkers()
-                                Toast.makeText(this, "Luogo salvato: " + name, Toast.LENGTH_SHORT).show()
-                            }
-                        }.setNegativeButton(appText("Annulla"), null).show()
+            .setItems(arrayOf("Usa come destinazione", "Memorizza come Casa", "Memorizza indirizzo preferito", "Salva come luogo di interesse")) { _, which ->
+                when (which) {
+                    0 -> {
+                        showPlaceOnMap(picked)
+                        calculateSelectedRoute()
+                    }
+                    1 -> {
+                        val input = EditText(this).apply { setText("Casa"); hint = "Nome/indirizzo di Casa" }
+                        AlertDialog.Builder(this).setTitle("Memorizza indirizzo di Casa")
+                            .setMessage("Hai scelto un punto sulla mappa. Inserisci un nome riconoscibile; la posizione verrà salvata esattamente su questo punto.")
+                            .setView(input)
+                            .setPositiveButton(appText("Memorizza")) { _, _ ->
+                                val name = input.text.toString().trim().ifBlank { "Casa" }
+                                saveHomePlace(picked.copy(name = name, description = "Punto scelto sulla mappa"))
+                            }.setNegativeButton(appText("Annulla"), null).show()
+                    }
+                    2 -> saveFavoritePlace(picked)
+                    3 -> {
+                        val input = EditText(this).apply { setText("Punto sulla mappa"); hint = "Nome del luogo" }
+                        AlertDialog.Builder(this).setTitle("Salva luogo di interesse").setView(input)
+                            .setPositiveButton(appText("Salva")) { _, _ ->
+                                val name = input.text.toString().trim()
+                                if (name.isNotBlank()) {
+                                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                        .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
+                                    refreshSavedPoiMarkers()
+                                    Toast.makeText(this, "Luogo salvato: $name", Toast.LENGTH_SHORT).show()
+                                }
+                            }.setNegativeButton(appText("Annulla"), null).show()
+                    }
                 }
             }.setNegativeButton(appText("Annulla"), null).show()
     }
@@ -4558,7 +4657,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
         }
-        if (ageMs > 10000 || !location.hasAccuracy() || location.accuracy > 50f) {
+        if (ageMs > 10000 || !location.hasAccuracy() || !location.accuracy.isFinite() || location.accuracy < 0f || location.accuracy > 50f) {
             appendGpsDiagnosticSample(location, "REJECTED_STALE_OR_ACCURACY")
             gpsText.text = "GPS INSUFFICIENTE"
             return
@@ -4572,27 +4671,39 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS SALTO SCARTATO"
             return
         }
-        val previousSpeedForPrediction = previousRaw?.takeIf { it.hasSpeed() }?.speed ?: location.speed
+        val previousSpeedForPrediction = previousRaw?.takeIf { it.hasSpeed() && it.speed.isFinite() && it.speed >= 0f }?.speed
+            ?: location.speed.takeIf { it.isFinite() && it >= 0f } ?: 0f
         val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
         val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
         lastAcceptedFixElapsedMs = fixElapsedMs
+        val motion = gpsMotionEstimator.update(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            elapsedRealtimeMs = fixElapsedMs,
+            reportedSpeedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
+            reportedBearingDegrees = location.bearing.takeIf { location.hasBearing() }
+        )
+        val motionLocation = Location(location).apply {
+            motion.speedMetersPerSecond?.let { speed = it; setSpeed(it) }
+            motion.bearingDegrees?.let { bearing = it; setBearing(it) }
+        }
         lastRawGpsLocation = Location(location)
-        val smoothed = smoothLocation(smoothedGpsLocation, location)
+        val smoothed = smoothLocation(smoothedGpsLocation, motionLocation)
         currentLocation = Location(smoothed)
         appendSpeedLimitTracePoint(smoothed)
-        if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
+        if (pendingJarvisWeather && motionLocation.hasAccuracy() && motionLocation.accuracy <= 100f) {
             pendingJarvisWeather = false
             answerJarvisWeather()
         }
-        val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
-        updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
-        updateGpsStatus(location)
+        val speed = if (motionLocation.hasSpeed() && motionLocation.speed.isFinite()) motionLocation.speed * 3.6f else 0f
+        updateSpeedDisplay(if (motionLocation.hasSpeed() && motionLocation.speed.isFinite()) speed.toInt() else null)
+        updateGpsStatus(motionLocation)
         animateGpsMarkerTo(smoothed, movingTimeMs, previousSpeedForPrediction)
         updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
         val gpxPointStatus = appendGpxRecordingPoint(smoothed)
-        appendGpsDiagnosticSample(location, smoothedLocation = smoothed, gpxPointStatus = gpxPointStatus)
+        appendGpsDiagnosticSample(location, smoothedLocation = smoothed, effectiveLocation = motionLocation, motionSource = motion.source, gpxPointStatus = gpxPointStatus)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
@@ -4618,8 +4729,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun smoothLocation(previous: Location?, incoming: Location): Location {
-        // Adaptive low-pass filter: suppress stationary GPS wander, but rapidly accept
-        // genuine movement and course changes so the marker does not cut across a turn.
+        // Time-aware adaptive low-pass filter: damp true stationary wander while
+        // allowing movement to catch up after irregular GNSS callback intervals.
         val result = Location(incoming)
         if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
             val jump = previous.distanceTo(incoming)
@@ -4631,20 +4742,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     incoming.accuracy <= 35f -> 0.42f
                     else -> 0.30f
                 }
-                val speed = if (incoming.hasSpeed()) incoming.speed else 0f
-                // Keep enough of the raw fix to avoid visible lag, but do not let
-                // one-second GNSS updates move the marker almost entirely in one jump.
-                var alpha = when {
-                    speed >= 8f -> (accuracyAlpha - 0.08f).coerceIn(0.48f, 0.68f)
-                    speed < 2.5f -> 0.14f
-                    else -> (accuracyAlpha - 0.06f).coerceIn(0.42f, 0.66f)
+                val speed = incoming.speed.takeIf { incoming.hasSpeed() && it.isFinite() && it >= 0f } ?: 0f
+                val elapsedDeltaMs = if (previous.elapsedRealtimeNanos > 0L && incoming.elapsedRealtimeNanos > previous.elapsedRealtimeNanos) {
+                    (incoming.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000L
+                } else 1000L
+                val dtSeconds = (elapsedDeltaMs.coerceIn(100L, 5000L) / 1000.0).toFloat()
+                val stationaryThreshold = maxOf(3.5f, incoming.accuracy * 0.45f)
+                val genuinelyStationary = speed < 0.8f && jump < stationaryThreshold
+                var alpha = if (genuinelyStationary) {
+                    0.18f
+                } else {
+                    val timeAlpha = (1.0 - kotlin.math.exp(-dtSeconds / 0.65f)).toFloat().coerceIn(0.42f, 0.92f)
+                    maxOf(accuracyAlpha, timeAlpha)
                 }
-                // A larger displacement can be real motion; respond faster without
-                // reverting to the previous near-raw filter.
-                if (jump > 12f) alpha = maxOf(alpha, 0.76f)
-                if (previous.hasBearing() && incoming.hasBearing() && speed >= 2.5f) {
+                if (jump > 12f) alpha = maxOf(alpha, 0.82f)
+                if (previous.hasBearing() && incoming.hasBearing() && speed >= 1.2f) {
                     val courseDelta = abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
-                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.76f)
+                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.82f)
                 }
                 result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
                 result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
@@ -5529,7 +5643,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         cameraIndex = i
                     }
                 }
-                if (cameraIndex < currentIndex || crossTrackMeters > 22f) return@mapNotNull null
+                if (cameraIndex < currentIndex || crossTrackMeters > 16f) return@mapNotNull null
+                val segmentStart = if (cameraIndex < route.points.lastIndex) cameraIndex else cameraIndex - 1
+                if (segmentStart < 0) return@mapNotNull null
+                val routeBearing = bearingBetween(route.points[segmentStart], route.points[segmentStart + 1])
+                if (!RadarDirectionPolicy.isDirectionCompatible(camera.direction, routeBearing)) return@mapNotNull null
                 val alongRouteMeters = cumulative[cameraIndex] - cumulative[currentIndex]
                 if (alongRouteMeters !in 0.0..650.0) return@mapNotNull null
                 camera to alongRouteMeters.toFloat()
@@ -5547,7 +5665,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (directMeters > 250f) return@mapNotNull null
                 val bearingToCamera = location.bearingTo(target)
                 val delta = abs(((bearingToCamera - location.bearing + 540f) % 360f) - 180f)
-                if (delta > 40f) return@mapNotNull null
+                val maxCrossTrack = minOf(18f, maxOf(10f, location.accuracy * 0.7f))
+                if (!RadarDirectionPolicy.isDirectionCompatible(camera.direction, location.bearing) ||
+                    !RadarDirectionPolicy.isInsideForwardCorridor(directMeters, delta, 250f, maxCrossTrack)) return@mapNotNull null
                 camera to directMeters
             }.minByOrNull { it.second }
         } ?: return
@@ -5753,7 +5873,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
             elapsedRealtimeMs = elapsedMs
         ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
-        val confidenceLimit = minOf(30.0, maxOf(12.0, accuracy * 1.5))
+        val speedMps = location.speed.takeIf { location.hasSpeed() && it.isFinite() && it >= 0f } ?: 0f
+        val initialLowSpeedFallback = !routeProgressInitialized && speedMps < 4.0f && accuracy <= 35.0
+        val confidenceLimit = if (initialLowSpeedFallback) {
+            minOf(45.0, maxOf(25.0, accuracy * 2.0))
+        } else {
+            minOf(30.0, maxOf(12.0, accuracy * 1.5))
+        }
         if (match.distanceMeters <= confidenceLimit) {
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, match.segmentIndex) else match.segmentIndex
             routeProgressInitialized = true

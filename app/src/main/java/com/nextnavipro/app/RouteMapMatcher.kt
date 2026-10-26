@@ -129,10 +129,18 @@ internal class RouteProgressTracker {
             // Ensure a tiny route or a route segment longer than the movement window remains searchable.
             if (end < start) end = start
         }
-        val heading = bearingDegrees?.takeIf { it.isFinite() && (speedMetersPerSecond ?: 0.0) >= 3.0 }
+        val heading = bearingDegrees?.takeIf { it.isFinite() && (speedMetersPerSecond ?: 0.0) >= 1.2 }
         val candidates = RouteMapMatcher.candidates(points, latitude, longitude, start, end, heading)
         if (candidates.isEmpty()) return null
-        val maximumSnapDistance = minOf(30.0, maxOf(12.0, accuracyMeters * 1.5))
+        // A bounded cold-start fallback helps reacquire the selected road while moving slowly.
+        // Once route progress is established, keep the stricter radius to avoid parallel-road jumps.
+        val lowSpeedColdStart = previousAlong == null &&
+            (speedMetersPerSecond ?: 0.0) < 4.0 && accuracyMeters <= 35.0
+        val maximumSnapDistance = if (lowSpeedColdStart) {
+            minOf(45.0, maxOf(25.0, accuracyMeters * 2.0))
+        } else {
+            minOf(30.0, maxOf(12.0, accuracyMeters * 1.5))
+        }
         val observedDistance = if (previousAlong != null && lastLatitude.isFinite() && lastLongitude.isFinite())
             GpxRouteService.distanceMeters(NavPoint(lastLatitude, lastLongitude), NavPoint(latitude, longitude)) else 0.0
         val emissionSigma = maxOf(5.0, accuracyMeters)

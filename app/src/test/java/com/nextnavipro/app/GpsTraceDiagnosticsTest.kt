@@ -21,10 +21,13 @@ class GpsTraceDiagnosticsTest {
                 constellations = "GPS/GAL,SBAS",
                 routeSegmentIndex = 42,
                 routeDistanceMeters = 6.25f,
-                matchStatus = "MATCHED"
+                matchStatus = "MATCHED",
+                reportedSpeedMetersPerSecond = 12.0f,
+                reportedBearingDegrees = 91f,
+                motionSource = "GNSS"
             )
         ))
         assertTrue(csv.startsWith("timestamp_epoch_ms,latitude,longitude,smoothed_latitude,smoothed_longitude,gpx_point_status"))
-        assertTrue(csv.contains("28.1234567,-16.7654321,28.1234500,-16.7654200,FILTERED_NEAR_POINT,4.50,12.00,91.0,18,25,\"GPS/GAL,SBAS\",42,6.25,MATCHED"))
+        assertTrue(csv.contains("28.1234567,-16.7654321,28.1234500,-16.7654200,FILTERED_NEAR_POINT,4.50,12.00,91.0,12.00,91.0,GNSS,18,25,\"GPS/GAL,SBAS\",42,6.25,MATCHED"))
     }
 }
