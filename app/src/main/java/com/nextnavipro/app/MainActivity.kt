@@ -1035,8 +1035,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 } else if (!manualSegmentEditing && !selectionMode && handleSavedFlagTap(readyMap, point.latitude, point.longitude)) {
                     // A saved flag is a real object, not a generic map tap.
                     true
-                } else if (!manualSegmentEditing && !selectionMode && handleSavedFlagTap(point)) {
-                    true
                 } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     val nearest = nearestRoadGeometryIndex(picked, roadEditorGeometry)
@@ -6427,72 +6425,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // Legacy keys may describe the same location; never draw stacked duplicate flags.
                 val coordinateKey = String.format(Locale.US, "%.6f,%.6f", lat, lon)
                 if (!seenCoordinates.add(coordinateKey)) return@mapNotNull null
-                val feature = Feature.fromGeometry(Point.fromLngLat(lon, lat))
-                val name = when {
-                    key == "poi_home_marker" -> getSharedPreferences(PREFS, MODE_PRIVATE).getString("home_name", null)?.trim().orEmpty().ifBlank { "Casa" }
-                    key.startsWith("poi_") -> key.removePrefix("poi_")
-                    key.startsWith("favorite_") -> key.removePrefix("favorite_")
-                    else -> "Luogo salvato"
-                }
-                feature.addStringProperty("savedName", name)
-                feature.addStringProperty("savedKey", key)
-                feature.addNumberProperty("savedLatitude", lat)
-                feature.addNumberProperty("savedLongitude", lon)
-                feature
+                Feature.fromGeometry(Point.fromLngLat(lon, lat))
             }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
-    }
-
-    /**
-     * Handles taps on persistent saved-place flags. The feature carries stable metadata so
-     * the map is an actual management surface, not just a picture of persisted preferences.
-     * Returns true only when a saved flag was hit; ordinary map taps keep their old behavior.
-     */
-    private fun handleSavedFlagTap(point: LatLng): Boolean {
-        if (!mapStyleReady) return false
-        val readyMap = map ?: return false
-        val screenPoint = readyMap.projection.toScreenLocation(point)
-        val hit = readyMap.queryRenderedFeatures(screenPoint, "next-saved-poi-flags")
-            .firstOrNull { it.hasProperty("savedKey") && it.hasProperty("savedLatitude") && it.hasProperty("savedLongitude") }
-            ?: return false
-        val key = hit.getStringProperty("savedKey")
-        val name = hit.getStringProperty("savedName")?.takeIf { it.isNotBlank() } ?: "Luogo salvato"
-        val lat = hit.getNumberProperty("savedLatitude")?.toDouble() ?: return false
-        val lon = hit.getNumberProperty("savedLongitude")?.toDouble() ?: return false
-        if (!lat.isFinite() || !lon.isFinite()) return false
-
-        AlertDialog.Builder(this)
-            .setTitle(name)
-            .setMessage("Posizione salvata\n${String.format(Locale.US, "%.6f", lat)}, ${String.format(Locale.US, "%.6f", lon)}\n\nVuoi eliminare questa bandierina e la posizione memorizzata?")
-            .setPositiveButton(appText("Elimina")) { _, _ ->
-                val removed = if (key == "poi_home_marker") {
-                    val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-                    val committed = prefs.edit()
-                        .remove("home_name").remove("home_description")
-                        .remove("home_lat").remove("home_lon").remove("poi_home_marker")
-                        .commit()
-                    val activeDestination = destination
-                    if (routeResult == null && activeDestination != null &&
-                        kotlin.math.abs(activeDestination.point.latitude - lat) < 0.0000001 &&
-                        kotlin.math.abs(activeDestination.point.longitude - lon) < 0.0000001
-                    ) {
-                        destination = null
-                        refreshDestinationMarker()
-                    }
-                    refreshSavedPoiMarkers()
-                    committed
-                } else {
-                    deleteSavedPlaceAndMarker(name, lat, lon)
-                }
-                Toast.makeText(
-                    this,
-                    if (removed) "Bandierina e posizione salvata eliminate." else "Non è stato possibile eliminare la posizione.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            .setNegativeButton(appText("Annulla"), null)
-            .show()
-        return true
     }
 
     private fun refreshDestinationMarker() {
