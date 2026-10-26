@@ -2762,19 +2762,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         showPlaceOnMap(PlaceResult(selected.first, NavPoint(selected.second, selected.third), "Luogo salvato"))
                     }
                     .setPositiveButton("Elimina") { _, _ ->
-                        val editor = prefs.edit()
+                        val removed: Boolean
                         if (isHome) {
-                            editor.remove("home_name")
+                            removed = prefs.edit()
+                                .remove("home_name")
                                 .remove("home_description")
                                 .remove("home_lat")
                                 .remove("home_lon")
                                 .remove("poi_home_marker")
+                                .commit()
+                            refreshSavedPoiMarkers()
                         } else {
                             // Remove by both name and coordinates, covering orphaned legacy keys.
-                            deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
+                            removed = deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
                         }
-                        val removed = if (isHome) editor.commit() else true
-                        refreshSavedPoiMarkers()
                         if (isHome) refreshDestinationMarker()
                         Toast.makeText(
                             this,
