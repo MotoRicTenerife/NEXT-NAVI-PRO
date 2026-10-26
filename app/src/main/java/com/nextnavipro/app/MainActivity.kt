@@ -1026,9 +1026,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             readyMap.uiSettings.isZoomGesturesEnabled = true
             readyMap.uiSettings.isRotateGesturesEnabled = true
             readyMap.addOnMapClickListener { point ->
+                // Screen-space hit test makes saved map flags directly selectable.
+                // Do not intercept taps while the destination chooser is inspecting the map.
+                val tappedSavedMarker = if (!destinationPickerOpen) findSavedMapMarkerNearTap(readyMap, point) else null
                 if (destinationPickerOpen) {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
+                    true
+                } else if (tappedSavedMarker != null) {
+                    when (tappedSavedMarker.first) {
+                        "home" -> showHomeMarkerActions()
+                        else -> showSavedPoiActions(tappedSavedMarker.second)
+                    }
                     true
                 } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
                     val picked = NavPoint(point.latitude, point.longitude)
@@ -3581,6 +3590,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     2 -> {
                         prefs.edit().remove("home_name").remove("home_description")
                             .remove("home_lat").remove("home_lon").apply()
+                        refreshSavedPoiMarkers()
                         Toast.makeText(this, "Indirizzo di casa rimosso.", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -3601,7 +3611,42 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .putString("home_lat", selected.point.latitude.toString())
             .putString("home_lon", selected.point.longitude.toString())
             .apply()
+        refreshSavedPoiMarkers()
         Toast.makeText(this, "Indirizzo di casa salvato: " + selected.name, Toast.LENGTH_LONG).show()
+    }
+
+    private fun showHomeMarkerActions() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val homeName = prefs.getString("home_name", null)?.takeIf { it.isNotBlank() } ?: return
+        AlertDialog.Builder(this)
+            .setTitle("Casa • $homeName")
+            .setItems(arrayOf("Usa come destinazione", "Elimina Casa")) { _, which ->
+                if (which == 0) {
+                    navigateHome()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Eliminare Casa?")
+                        .setMessage("La bandierina di Casa e l'indirizzo salvato verranno rimossi.")
+                        .setNegativeButton(appText("Annulla"), null)
+                        .setPositiveButton("Elimina") { _, _ ->
+                            val removed = prefs.edit()
+                                .remove("home_name")
+                                .remove("home_description")
+                                .remove("home_lat")
+                                .remove("home_lon")
+                                .commit()
+                            refreshSavedPoiMarkers()
+                            Toast.makeText(
+                                this,
+                                if (removed) "Casa eliminata." else "Impossibile eliminare Casa.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        .show()
+                }
+            }
+            .setNegativeButton(appText("Annulla"), null)
+            .show()
     }
 
     private fun navigateHome() {
@@ -6019,16 +6064,72 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun refreshSavedPoiMarkers() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
-        val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val features = prefs.all
             .filterKeys { it.startsWith("poi_") }
-            .mapNotNull { (_, value) ->
+            .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
                 if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
-                Feature.fromGeometry(Point.fromLngLat(lon, lat))
+                Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
+                    addStringProperty("name", key.removePrefix("poi_"))
+                    addStringProperty("markerType", "poi")
+                }
             }
+            .toMutableList()
+
+        // Casa is a saved place too: render it in the same selectable marker layer.
+        val homeName = prefs.getString("home_name", null)?.takeIf { it.isNotBlank() }
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (homeName != null && homeLat != null && homeLon != null &&
+            homeLat in -90.0..90.0 && homeLon in -180.0..180.0
+        ) {
+            features.add(
+                Feature.fromGeometry(Point.fromLngLat(homeLon, homeLat)).apply {
+                    addStringProperty("name", homeName)
+                    addStringProperty("markerType", "home")
+                }
+            )
+        }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
+    }
+
+    /**
+     * Finds a saved marker only when the user taps close to its visible screen position.
+     * Screen-space hit testing avoids accidentally selecting a distant marker at low zoom.
+     */
+    private fun findSavedMapMarkerNearTap(
+        readyMap: MapLibreMap,
+        tapped: LatLng
+    ): Pair<String, Triple<String, Double, Double>>? {
+        val tapScreen = readyMap.projection.toScreenLocation(tapped)
+        var best: Pair<String, Triple<String, Double, Double>>? = null
+        var bestDistance = dp(48).toDouble()
+
+        fun consider(type: String, name: String, lat: Double, lon: Double) {
+            if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return
+            val markerScreen = readyMap.projection.toScreenLocation(LatLng(lat, lon))
+            val dx = markerScreen.x - tapScreen.x
+            val dy = markerScreen.y - tapScreen.y
+            val distance = kotlin.math.sqrt((dx * dx + dy * dy).toDouble())
+            if (distance <= bestDistance) {
+                bestDistance = distance
+                best = type to Triple(name, lat, lon)
+            }
+        }
+
+        readSavedPois().forEach { (name, lat, lon) -> consider("poi", name, lat, lon) }
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val homeName = prefs.getString("home_name", null)?.takeIf { it.isNotBlank() }
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (homeName != null && homeLat != null && homeLon != null) {
+            // Prefer Casa when its marker overlaps another saved flag at the same coordinates.
+            consider("home", homeName, homeLat, homeLon)
+        }
+        return best
     }
 
     private fun refreshDestinationMarker() {
