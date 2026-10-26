@@ -8,10 +8,11 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 import kotlin.math.roundToInt
 
 data class NavPoint(val latitude: Double, val longitude: Double, val timestampEpochMs: Long? = null)
-data class PlaceResult(val name: String, val point: NavPoint, val description: String)
+data class PlaceResult(val name: String, val point: NavPoint, val description: String, val kind: String = "unknown")
 data class RouteManeuver(
     val pointIndex: Int,
     val instruction: String,
@@ -31,7 +32,47 @@ object NavigationServices {
     private const val READ_TIMEOUT_MS = 15000
     private const val USER_AGENT = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)"
 
+    internal fun placeQueryVariants(query: String): List<String> {
+        val clean = query.trim().replace(Regex("\\s+"), " ")
+        if (clean.isBlank()) return emptyList()
+        val variants = linkedSetOf(clean)
+        // Speech recognition may double consonants in foreign proper names:
+        // Spanish "Guaza" can be transcribed as "Guazza".
+        val collapsed = clean.replace(Regex("(?i)([b-df-hj-np-tv-z])\\1+"), "$1")
+        if (collapsed != clean && collapsed.length >= 3) variants.add(collapsed)
+        val unaccented = java.text.Normalizer.normalize(clean, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+        if (unaccented != clean) variants.add(unaccented)
+        return variants.toList()
+    }
+
     fun searchPlaces(query: String, near: NavPoint? = null): List<PlaceResult> {
+        val combined = LinkedHashMap<String, PlaceResult>()
+        for (candidate in placeQueryVariants(query)) {
+            val results = try {
+                searchPlacesSingle(candidate, near)
+            } catch (_: Exception) {
+                // A failed fallback for one spelling must not prevent trying the next spelling.
+                emptyList()
+            }
+            // Do not stop at the first non-empty spelling: speech recognition can produce
+            // a plausible but wrong result for "Guazza" while "Guaza" finds the real place.
+            // Merge real geocoder matches so the caller can show alternatives rather than
+            // automatically navigating to the first accidental match.
+            for (place in results) {
+                val normalizedName = java.text.Normalizer.normalize(place.name.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{Mn}+"), "")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                val key = normalizedName + "|" +
+                    String.format(Locale.ROOT, "%.5f,%.5f", place.point.latitude, place.point.longitude)
+                combined.putIfAbsent(key, place)
+            }
+        }
+        return combined.values.toList()
+    }
+
+    private fun searchPlacesSingle(query: String, near: NavPoint?): List<PlaceResult> {
         val cleanQuery = query.trim().replace(Regex("\\s+"), " ")
         val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
         // Photon supports location-biased search. Supplying the current GPS fix helps
@@ -39,7 +80,10 @@ object NavigationServices {
         val proximity = near?.let {
             "&lat=" + it.latitude + "&lon=" + it.longitude + "&zoom=14"
         }.orEmpty()
-        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20&lang=it" + proximity)
+        val language = Locale.getDefault().language.ifBlank { "en" }
+        // Use Accept-Language instead of a lang query parameter. Photon documents both,
+        // but this avoids provider-side query validation rejecting an otherwise valid search.
+        val connection = URL("https://photon.komoot.io/api/?q=" + encoded + "&limit=20" + proximity)
             .openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -47,6 +91,7 @@ object NavigationServices {
             connection.readTimeout = READ_TIMEOUT_MS
             connection.setRequestProperty("User-Agent", USER_AGENT)
             connection.setRequestProperty("Accept", "application/geo+json, application/json")
+            connection.setRequestProperty("Accept-Language", language)
             connection.setRequestProperty("Referer", "https://github.com/MotoRicTenerife/NEXT-NAVI-PRO")
             val body = readResponse(connection)
             val features = JSONObject(body).optJSONArray("features") ?: JSONArray()
@@ -70,9 +115,17 @@ object NavigationServices {
                     properties.optString("state").takeIf { it.isNotBlank() },
                     properties.optString("country").takeIf { it.isNotBlank() }
                 ).filterNotNull()
-                results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", ")))
+                val kindCandidates = listOf(properties.optString("type"), properties.optString("osm_value"), properties.optString("osm_key"))
+                    .map { it.lowercase(Locale.ROOT) }
+                val localityKinds = setOf("city", "town", "village", "hamlet", "municipality", "suburb",
+                    "quarter", "neighbourhood", "neighborhood", "district", "locality", "borough")
+                val kind = kindCandidates.firstOrNull { it in localityKinds }
+                    ?: kindCandidates.firstOrNull { it.isNotBlank() } ?: "unknown"
+                results.add(PlaceResult(name, NavPoint(lat, lon), detailParts.joinToString(", "), kind))
             }
-            return results
+            if (results.isNotEmpty()) return results
+            // A zero-result Photon response is also a reason to try the fallback geocoder.
+            return searchPlacesNominatim(cleanQuery, near)
         } catch (error: Exception) {
             // If Photon is unavailable, try Nominatim once as a fallback.
             // This is a search fallback only; it never fabricates a result.
@@ -88,7 +141,8 @@ object NavigationServices {
             "&viewbox=${it.longitude - 0.5},${it.latitude + 0.5},${it.longitude + 0.5},${it.latitude - 0.5}"
         }.orEmpty()
         val url = "https://nominatim.openstreetmap.org/search?q=" + encoded +
-            "&format=jsonv2&limit=20&addressdetails=1&countrycodes=es&accept-language=it" + viewbox
+            "&format=jsonv2&limit=20&addressdetails=1&accept-language=" +
+            URLEncoder.encode(Locale.getDefault().toLanguageTag(), "UTF-8") + viewbox
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -109,7 +163,15 @@ object NavigationServices {
                     ?: item.optString("display_name").substringBefore(",").takeIf { it.isNotBlank() }
                     ?: continue
                 val detail = item.optString("display_name").removePrefix(name).trim().trimStart(',')
-                results.add(PlaceResult(name, NavPoint(lat, lon), detail))
+                val kindCandidates = listOf(
+                    item.optString("addresstype"), item.optString("type"), item.optString("class"),
+                    address.optString("city"), address.optString("town"), address.optString("village")
+                ).map { it.lowercase(Locale.ROOT) }
+                val localityKinds = setOf("city", "town", "village", "hamlet", "municipality", "suburb",
+                    "quarter", "neighbourhood", "neighborhood", "district", "locality", "borough")
+                val kind = kindCandidates.firstOrNull { it in localityKinds }
+                    ?: kindCandidates.firstOrNull { it.isNotBlank() } ?: "unknown"
+                results.add(PlaceResult(name, NavPoint(lat, lon), detail, kind))
             }
             return results
         } finally {
@@ -128,7 +190,7 @@ object NavigationServices {
                 .put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
             .put("costing", if (motorcycle) "motorcycle" else "auto")
             .put("units", "kilometers")
-            .put("language", "it-IT")
+            .put("language", Locale.getDefault().toLanguageTag())
             .put("shape_format", "polyline6")
             .put("directions_options", JSONObject().put("units", "kilometers"))
         if (motorcycle) {
