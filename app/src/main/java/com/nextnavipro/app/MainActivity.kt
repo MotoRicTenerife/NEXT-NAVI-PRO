@@ -6360,12 +6360,24 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun handleSavedFlagTap(readyMap: MapLibreMap, latitude: Double, longitude: Double): Boolean {
         if (!mapStyleReady) return false
         val screenPoint = readyMap.projection.toScreenLocation(LatLng(latitude, longitude))
-        val hit = try {
-            readyMap.queryRenderedFeatures(screenPoint, "next-saved-poi-flags").isNotEmpty()
+        val hitFeatures = try {
+            readyMap.queryRenderedFeatures(screenPoint, "next-saved-poi-flags")
         } catch (_: Exception) {
-            false
+            emptyArray<Feature>()
         }
-        if (!hit) return false
+        if (hitFeatures.isEmpty()) return false
+
+        // Prefer the exact rendered feature metadata. This avoids deleting a different saved
+        // place when several flags are close together or visually overlap at low zoom.
+        val hitFeature = hitFeatures.firstOrNull { feature ->
+            !feature.getStringProperty("savedKey").isNullOrBlank() &&
+                feature.getNumberProperty("savedLatitude") != null &&
+                feature.getNumberProperty("savedLongitude") != null
+        }
+        val exactKey = hitFeature?.getStringProperty("savedKey")
+        val exactName = hitFeature?.getStringProperty("savedName")
+        val exactLat = hitFeature?.getNumberProperty("savedLatitude")?.toDouble()
+        val exactLon = hitFeature?.getNumberProperty("savedLongitude")?.toDouble()
 
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val candidates = readFavoriteAddresses().toMutableList()
@@ -6384,17 +6396,24 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             manageSavedMapFlags()
             return true
         }
-        val nearest = candidates.minByOrNull { place ->
-            val results = FloatArray(1)
-            Location.distanceBetween(latitude, longitude, place.second, place.third, results)
-            results[0]
-        } ?: run {
-            manageSavedMapFlags()
-            return true
+        val nearest = if (exactKey != null && exactLat != null && exactLon != null &&
+            exactLat.isFinite() && exactLon.isFinite() &&
+            exactLat in -90.0..90.0 && exactLon in -180.0..180.0
+        ) {
+            Triple(exactName?.takeIf { it.isNotBlank() } ?: "Luogo salvato", exactLat, exactLon)
+        } else {
+            candidates.minByOrNull { place ->
+                val results = FloatArray(1)
+                Location.distanceBetween(latitude, longitude, place.second, place.third, results)
+                results[0]
+            } ?: run {
+                manageSavedMapFlags()
+                return true
+            }
         }
         val distance = FloatArray(1)
         Location.distanceBetween(latitude, longitude, nearest.second, nearest.third, distance)
-        if (distance[0] > 100f) {
+        if (exactKey == null && distance[0] > 100f) {
             AlertDialog.Builder(this)
                 .setTitle("Bandierina non associata")
                 .setMessage("Questa bandierina non è collegata a una posizione salvata. Vuoi aprire la gestione per ripulire le voci residue?")
@@ -6403,7 +6422,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .show()
             return true
         }
-        val isHome = nearest.first == "Casa" || nearest.first.startsWith("Casa — ")
+        val isHome = exactKey == "poi_home_marker" || nearest.first == "Casa" || nearest.first.startsWith("Casa — ")
         AlertDialog.Builder(this)
             .setTitle(nearest.first)
             .setMessage("Vuoi eliminare questa bandierina e la relativa posizione salvata?")
@@ -6444,6 +6463,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 (it.startsWith("poi_") && it != "poi_home_marker") || it.startsWith("favorite_") ||
                     it == "poi_home_marker"
             }
+            // Home is the canonical marker when another saved entry occupies the same point.
+            .toList()
+            .sortedBy { (key, _) ->
+                when {
+                    key == "poi_home_marker" -> 0
+                    key.startsWith("favorite_") -> 1
+                    else -> 2
+                }
+            }
             .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
@@ -6452,7 +6480,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // Legacy keys may describe the same location; never draw stacked duplicate flags.
                 val coordinateKey = String.format(Locale.US, "%.6f,%.6f", lat, lon)
                 if (!seenCoordinates.add(coordinateKey)) return@mapNotNull null
-                Feature.fromGeometry(Point.fromLngLat(lon, lat))
+                val feature = Feature.fromGeometry(Point.fromLngLat(lon, lat))
+                val name = when {
+                    key == "poi_home_marker" -> getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_name", null)?.trim().orEmpty().ifBlank { "Casa" }
+                    key.startsWith("poi_") -> key.removePrefix("poi_")
+                    else -> key.removePrefix("favorite_")
+                }
+                feature.addStringProperty("savedName", name)
+                feature.addStringProperty("savedKey", key)
+                feature.addNumberProperty("savedLatitude", lat)
+                feature.addNumberProperty("savedLongitude", lon)
+                feature
             }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
     }
