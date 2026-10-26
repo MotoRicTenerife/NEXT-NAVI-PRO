@@ -4819,7 +4819,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             val callback = fusedLocationCallback ?: object : FusedLocationCallback() {
                 override fun onLocationResult(result: FusedLocationResult) {
-                    result.lastLocation?.let { onLocationChanged(it) }
+                    // A result may contain a batch, not just one fix. Process every sample in
+                    // provider order so recording, motion estimation and route progress do not
+                    // silently lose intermediate positions.
+                    val fixes = result.locations
+                    if (fixes.isNotEmpty()) fixes.forEach { onLocationChanged(it) }
+                    else result.lastLocation?.let { onLocationChanged(it) }
                 }
             }.also { fusedLocationCallback = it }
             // One-second high-accuracy updates are a practical navigation target. Android treats
@@ -4865,10 +4870,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 return
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, 1000L, 0f, this, Looper.getMainLooper())
             } else {
                 @Suppress("DEPRECATION")
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this)
+                locationManager.requestLocationUpdates(provider, 1000L, 0f, this)
             }
             usingLocationManagerFallback = true
             gpsUpdatesRequested = true
