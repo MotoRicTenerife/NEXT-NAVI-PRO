@@ -58,6 +58,14 @@ class RouteMapMatcherTest {
             reacquired!!.alongRouteMeters - first!!.alongRouteMeters < 40.0)
     }
 
+    @Test fun coldStartAtLowSpeedAllowsWiderSnapWhenAccuracyIsBounded() {
+        val route = listOf(NavPoint(28.0, -16.0), NavPoint(28.0, -15.999))
+        val tracker = RouteProgressTracker()
+        val match = tracker.match(route, 28.00030, -15.9998, 20.0, 90f, 1.0, 1_000L)
+        assertNotNull("A low-speed initial fix inside the relaxed cold-start window should match", match)
+        assertTrue(match!!.distanceMeters <= 45.0)
+    }
+
     @Test fun rejectsInvalidFixAndKeepsRouteProgressWhenNoCandidateExists() {
         val route = listOf(NavPoint(28.0, -16.0), NavPoint(28.0, -15.999))
         val tracker = RouteProgressTracker()
