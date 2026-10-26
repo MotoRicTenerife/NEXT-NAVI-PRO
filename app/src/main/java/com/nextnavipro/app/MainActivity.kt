@@ -42,6 +42,7 @@ import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.RecognizerIntent
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
@@ -225,6 +226,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
+    // Navigation speech is serialized: keep only the newest pending maneuver update,
+    // so GPS ticks cannot interrupt or build up a queue of stale instructions.
+    private var activeNavigationUtteranceId: String? = null
+    private var pendingNavigationSpeech: Pair<String, String>? = null
     private var radarCameras: List<RadarCamera> = emptyList()
     private var radarFetchFailed = false
     private var radarCacheCoversCurrentArea = false
@@ -413,6 +418,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 voiceGuideReady = false
             }
         }
+        voiceGuide?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) = Unit
+
+            override fun onDone(utteranceId: String?) {
+                finishNavigationUtterance(utteranceId)
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                finishNavigationUtterance(utteranceId)
+            }
+
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                finishNavigationUtterance(utteranceId)
+            }
+        })
         val preferences = getSharedPreferences(PREFS, MODE_PRIVATE)
         navigationMapMode = preferences.getBoolean(PREF_NAVIGATION_MAP_MODE, false)
         alertSpeedSource = preferences.getString(PREF_ALERT_SPEED_SOURCE, "gps") ?: "gps"
@@ -3151,9 +3172,40 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             pendingJarvisSpeech = message
             return
         }
+        // Jarvis is an explicit conversational response and may take priority over
+        // navigation. Invalidate the nav utterance before flushing TTS to avoid a
+        // completion callback from the interrupted turn starting stale guidance.
+        pendingNavigationSpeech = null
+        activeNavigationUtteranceId = null
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
         voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+    }
+
+    private fun queueNavigationSpeech(message: String, utteranceId: String) {
+        if (!voiceGuideReady || message.isBlank()) return
+        val active = activeNavigationUtteranceId
+        if (active != null) {
+            // Replace rather than append: only the freshest stage survives while
+            // the current sentence finishes (e.g. "in 200 m" becomes "now turn").
+            pendingNavigationSpeech = message to utteranceId
+            return
+        }
+        activeNavigationUtteranceId = utteranceId
+        voiceGuide?.setSpeechRate(0.96f)
+        val result = voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result == TextToSpeech.ERROR) finishNavigationUtterance(utteranceId)
+    }
+
+    private fun finishNavigationUtterance(utteranceId: String?) {
+        if (utteranceId == null) return
+        runOnUiThread {
+            if (activeNavigationUtteranceId != utteranceId) return@runOnUiThread
+            activeNavigationUtteranceId = null
+            val pending = pendingNavigationSpeech
+            pendingNavigationSpeech = null
+            if (pending != null) queueNavigationSpeech(pending.first, pending.second)
+        }
     }
 
     private fun onJarvisButtonPressed() {
@@ -3161,6 +3213,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // discard queued speech and invalidate an in-flight online answer before listening.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
+        pendingNavigationSpeech = null
+        activeNavigationUtteranceId = null
         try { voiceGuide?.stop() } catch (_: Exception) { }
         if (jarvisListening) {
             speechRecognizer?.cancel()
@@ -5994,8 +6048,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
-        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
+        // Estimate the approach window in seconds, not with one fixed distance:
+        // a roundabout needs earlier notice than a simple turn, especially at speed.
+        val planningSpeedMps = speedMps.coerceAtLeast(3.0f)
+        val earlyLeadSeconds = if (roundabout) 24f else 18f
+        val earlyThreshold = (planningSpeedMps * earlyLeadSeconds).coerceIn(100f, 650f)
+        val mediumThreshold = (planningSpeedMps * 7f).coerceIn(35f, 200f)
         val stage = when {
             distanceToTurn <= 10.0 -> 4
             distanceToTurn <= 50.0 -> 3
@@ -6017,8 +6075,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> ""
             }
             if (spoken.isNotBlank() && voiceGuideReady) {
-                voiceGuide?.setSpeechRate(0.96f)
-                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
+                queueNavigationSpeech(spoken, "turn-" + maneuverIndex + "-stage-" + stage)
             }
         }
     }
