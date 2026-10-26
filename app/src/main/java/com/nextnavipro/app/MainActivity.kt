@@ -2658,7 +2658,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val name = key.removePrefix("favorite_")
                 byName[name] = Triple(name, lat, lon)
             }
-        return byName.values.sortedBy { it.first.lowercase(Locale.ROOT) }
+        // Legacy versions could save the same point under different names/keys. Prefer a
+        // formal favorite over a POI alias, then keep only one record within a 5 m radius.
+        val candidates = byName.values.sortedWith(
+            compareByDescending<Triple<String, Double, Double>> { all.containsKey("favorite_" + it.first) }
+                .thenBy { it.first.lowercase(Locale.ROOT) }
+        )
+        val unique = mutableListOf<Triple<String, Double, Double>>()
+        candidates.forEach { candidate ->
+            val duplicate = unique.any { saved ->
+                val distance = FloatArray(1)
+                Location.distanceBetween(candidate.second, candidate.third, saved.second, saved.third, distance)
+                distance[0] <= 5f
+            }
+            if (!duplicate) unique.add(candidate)
+        }
+        return unique.sortedBy { it.first.lowercase(Locale.ROOT) }
     }
 
     private fun showFavoriteAddresses() {
@@ -2690,8 +2705,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val lon = coords?.getOrNull(1)?.toDoubleOrNull()
             val sameName = key == "poi_$name" || key == "favorite_$name"
             val samePosition = lat != null && lon != null && lat.isFinite() && lon.isFinite() &&
-                kotlin.math.abs(lat - latitude) < 0.0000001 &&
-                kotlin.math.abs(lon - longitude) < 0.0000001
+                lat in -90.0..90.0 && lon in -180.0..180.0 && run {
+                    val distance = FloatArray(1)
+                    Location.distanceBetween(lat, lon, latitude, longitude, distance)
+                    distance[0] <= 5f
+                }
             if (sameName || samePosition) {
                 editor.remove(key)
                 matched = true
@@ -6458,6 +6476,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
         val seenCoordinates = HashSet<String>()
+        val seenPositions = mutableListOf<Pair<Double, Double>>()
         val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
             .filterKeys {
                 (it.startsWith("poi_") && it != "poi_home_marker") || it.startsWith("favorite_") ||
@@ -6480,6 +6499,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // Legacy keys may describe the same location; never draw stacked duplicate flags.
                 val coordinateKey = String.format(Locale.US, "%.6f,%.6f", lat, lon)
                 if (!seenCoordinates.add(coordinateKey)) return@mapNotNull null
+                val overlapsExistingFlag = seenPositions.any { saved ->
+                    val distance = FloatArray(1)
+                    Location.distanceBetween(lat, lon, saved.first, saved.second, distance)
+                    distance[0] <= 5f
+                }
+                if (overlapsExistingFlag) return@mapNotNull null
+                seenPositions.add(lat to lon)
                 val feature = Feature.fromGeometry(Point.fromLngLat(lon, lat))
                 val name = when {
                     key == "poi_home_marker" -> getSharedPreferences(PREFS, MODE_PRIVATE)
