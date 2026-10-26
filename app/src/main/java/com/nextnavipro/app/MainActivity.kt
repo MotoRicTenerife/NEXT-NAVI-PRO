@@ -2684,6 +2684,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
         }
         val committed = editor.commit()
+        // A favorite may also have been opened as the transient destination marker. When no
+        // route is active, remove that marker too so deleting the favorite leaves no orphan flag.
+        val activeDestination = destination
+        if (routeResult == null && activeDestination != null &&
+            (activeDestination.name == name ||
+                (kotlin.math.abs(activeDestination.point.latitude - latitude) < 0.0000001 &&
+                    kotlin.math.abs(activeDestination.point.longitude - longitude) < 0.0000001))
+        ) {
+            destination = null
+            refreshDestinationMarker()
+        }
         refreshSavedPoiMarkers()
         return committed && matched
     }
