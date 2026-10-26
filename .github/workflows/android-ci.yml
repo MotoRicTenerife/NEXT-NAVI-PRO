@@ -107,19 +107,22 @@ jobs:
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
-            # Render's service is rooted in backend/jarvis-render and may not redeploy
-            # for later Android-only commits. Compare against the last commit that
-            # actually changed backend files, not the current repository HEAD.
+          if [ "${{ github.event_name }}" = "push" ] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
+            # Only a push to a deployment-configured branch can be expected to reach
+            # production. Pull-request commits are not deployed to Render by this workflow.
             export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
             if [ -z "$EXPECTED_RENDER_REVISION" ]; then
               echo "::error::Could not identify the last backend commit."
               exit 1
             fi
-            echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
+            echo "Production backend push detected; checking Render revision $EXPECTED_RENDER_REVISION."
           else
             export EXPECTED_RENDER_REVISION=""
-            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "Pull request branch is not deployed to production; checking only live service health and read-only endpoints."
+            else
+              echo "No production backend push detected; checking live service health without requiring a redeploy."
+            fi
           fi
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
