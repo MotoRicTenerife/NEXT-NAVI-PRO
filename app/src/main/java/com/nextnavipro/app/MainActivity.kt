@@ -2135,14 +2135,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticRecording = true
         recordingGpx = true
         updateGpxButtonState()
-        try {
-            startForegroundService(
-                Intent(this, GpsRecordingForegroundService::class.java)
-                    .setAction(GpsRecordingForegroundService.ACTION_START)
-            )
-        } catch (_: Exception) {
-            Toast.makeText(this, "Servizio in background non disponibile: tieni NEXT NAVI PRO in primo piano durante la registrazione.", Toast.LENGTH_LONG).show()
-        }
+        syncGpsForegroundService()
         val seedRawLocation = lastRawGpsLocation
         val seedSmoothedLocation = currentLocation
         if (seedRawLocation != null) {
@@ -2225,7 +2218,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
         gpsDiagnosticRecording = false
-        stopService(Intent(this, GpsRecordingForegroundService::class.java))
+        syncGpsForegroundService()
         if (!save) {
             // Never silently discard an interrupted/short session: leave checkpoints for recovery.
             if (showResult) Toast.makeText(this, "Registrazione fermata. I dati parziali sono conservati per il recupero.", Toast.LENGTH_LONG).show()
@@ -2443,6 +2436,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        syncGpsForegroundService()
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -2485,6 +2479,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.text = appText("ANNULLA PERCORSO GPX")
                     }
                     routeResult = result
+                    syncGpsForegroundService()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     resetRouteProgress()
@@ -4232,6 +4227,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
+        syncGpsForegroundService()
         navigationArrived = false
         arrivalClosestMeters = Float.MAX_VALUE
         arrivalStopSinceMs = 0L
@@ -4423,6 +4419,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    syncGpsForegroundService()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     navigationArrived = false
@@ -4494,6 +4491,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        syncGpsForegroundService()
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -4775,6 +4773,35 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gnssStatusRegistered = false
     }
 
+    /**
+     * Keep Android's location foreground service alive while either navigation or trip recording
+     * is active. This lets the existing location callback remain registered when the Activity
+     * loses foreground focus; the service is lifecycle support, not a claim that it owns fixes.
+     */
+    private fun syncGpsForegroundService() {
+        val navigationActive = routeResult != null
+        val recordingActive = recordingGpx || gpsDiagnosticRecording
+        if (!navigationActive && !recordingActive) {
+            try { startService(Intent(this, GpsRecordingForegroundService::class.java).setAction(GpsRecordingForegroundService.ACTION_STOP)) }
+            catch (_: Exception) { stopService(Intent(this, GpsRecordingForegroundService::class.java)) }
+            return
+        }
+        val action = when {
+            navigationActive && !recordingActive -> GpsRecordingForegroundService.ACTION_START_NAVIGATION
+            else -> GpsRecordingForegroundService.ACTION_SYNC
+        }
+        try {
+            startForegroundService(
+                Intent(this, GpsRecordingForegroundService::class.java)
+                    .setAction(action)
+                    .putExtra(GpsRecordingForegroundService.EXTRA_NAVIGATION_ACTIVE, navigationActive)
+                    .putExtra(GpsRecordingForegroundService.EXTRA_RECORDING_ACTIVE, recordingActive)
+            )
+        } catch (_: Exception) {
+            if (::gpsText.isInitialized) gpsText.text = "GPS ATTIVO • SERVIZIO BACKGROUND NON DISPONIBILE"
+        }
+    }
+
     private fun requestGps() {
         if (!dashboardStarted || gpsUpdatesRequested) return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
@@ -4795,10 +4822,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     result.lastLocation?.let { onLocationChanged(it) }
                 }
             }.also { fusedLocationCallback = it }
-            // Fused GNSS/network/sensor positioning; OsmAnd uses the same provider family
-            // with a very short high-accuracy interval. The marker is interpolated separately.
-            val request = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 250L)
-                .setMinUpdateIntervalMillis(250L)
+            // One-second high-accuracy updates are a practical navigation target. Android treats
+            // intervals as hints, and most phone GNSS stacks do not produce genuinely new fixes at 4 Hz.
+            // Keep a 500 ms minimum for devices that can deliver useful faster fixes; marker animation
+            // is independent and must never be mistaken for new GNSS measurements.
+            val request = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+                .setMinUpdateIntervalMillis(500L)
                 .setWaitForAccurateLocation(true)
                 .build()
             gpsUpdatesRequested = true
@@ -6017,6 +6046,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    syncGpsForegroundService()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -6805,7 +6835,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // While the explicit GPX+CSV recording service is active, keep location callbacks
         // registered even if the dashboard loses focus. Otherwise onPause creates long holes
         // in the trip trace whenever another app or system surface briefly takes over.
-        if (!recordingGpx) {
+        if (!recordingGpx && routeResult == null) {
             unregisterGnssDiagnostics()
             fusedLocationCallback?.let { callback ->
                 try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
