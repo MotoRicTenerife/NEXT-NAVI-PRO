@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Bounded, read-only load check for the live NEXT NAVI PRO Render backend.
 
-No Gemini requests are sent (avoids API spend). Only health, provider status,
-and two speed-limit diagnostic GETs are used. The speed-limit endpoint is
-reported separately because provider failures are a known functional issue.
+No Gemini requests are sent (avoids API spend). Only health and provider-status GETs
+are used. The paid TomTom lookup is a POST endpoint and is tested with mocked upstream
+responses in backend unit tests, not by sending invalid GET requests to production.
 """
 import concurrent.futures
 import json
@@ -80,23 +80,24 @@ def main():
     print(json.dumps({"test": "start", "base": BASE, "note": "No Gemini calls; bounded GET-only test"}))
     health, health_report = run_group("health-concurrency", ["/health"] * 40, 8)
     status, status_report = run_group("speed-limit-status-concurrency", ["/speed-limit/status"] * 16, 4)
-    limits, limits_report = run_group("speed-limit-live-diagnostic", [
-        "/speed-limit?lat=28.12271&lon=-16.72600",
-        "/speed-limit?lat=28.04974&lon=-16.67714",
-    ], 2)
-
     health_payload_ok = all(item["ok"] and item.get("payload", {}).get("ok") is True for item in health)
-    status_payload_ok = all(item["ok"] and item.get("payload", {}).get("osmDiagnostic") is True for item in status)
-    limit_ok = all(item["ok"] and "speedLimitKmh" in item.get("payload", {}) for item in limits)
+    status_payload_ok = all(
+        item["ok"]
+        and item.get("payload", {}).get("ok") is True
+        and (
+            item.get("payload", {}).get("roadEditorOsm") is True
+            or item.get("payload", {}).get("osmDiagnostic") is True
+        )
+        and isinstance(item.get("payload", {}).get("tomtomConfigured"), bool)
+        for item in status
+    )
     print(json.dumps({
         "test": "summary",
         "health_stable": health_payload_ok,
         "status_stable": status_payload_ok,
-        "speed_limit_functional": limit_ok,
         "health_p95_seconds": health_report["p95_latency_seconds"],
         "health_success_rate_pct": health_report["success_rate_pct"],
         "status_success_rate_pct": status_report["success_rate_pct"],
-        "speed_limit_success_rate_pct": limits_report["success_rate_pct"],
     }, ensure_ascii=False))
     # Keep CI useful while separately flagging the already-known speed-limit
     # provider outage. Core health must remain reliable under bounded concurrency.
