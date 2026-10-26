@@ -229,6 +229,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     // Navigation speech is serialized: keep only the newest pending maneuver update,
     // so GPS ticks cannot interrupt or build up a queue of stale instructions.
     private var activeNavigationUtteranceId: String? = null
+    private var activeJarvisUtteranceId: String? = null
     private var pendingNavigationSpeech: Pair<String, String>? = null
     private var radarCameras: List<RadarCamera> = emptyList()
     private var radarFetchFailed = false
@@ -3179,15 +3180,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         activeNavigationUtteranceId = null
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
-        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+        val utteranceId = "jarvis-" + System.currentTimeMillis()
+        activeJarvisUtteranceId = utteranceId
+        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     private fun queueNavigationSpeech(message: String, utteranceId: String) {
         if (!voiceGuideReady || message.isBlank()) return
         val active = activeNavigationUtteranceId
-        if (active != null) {
+        if (active != null || activeJarvisUtteranceId != null || voiceGuide?.isSpeaking() == true) {
             // Replace rather than append: only the freshest stage survives while
             // the current sentence finishes (e.g. "in 200 m" becomes "now turn").
+            // Never flush an explicit Jarvis response to play navigation.
             pendingNavigationSpeech = message to utteranceId
             return
         }
@@ -3200,8 +3204,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun finishNavigationUtterance(utteranceId: String?) {
         if (utteranceId == null) return
         runOnUiThread {
-            if (activeNavigationUtteranceId != utteranceId) return@runOnUiThread
-            activeNavigationUtteranceId = null
+            if (activeJarvisUtteranceId == utteranceId) {
+                activeJarvisUtteranceId = null
+            } else if (activeNavigationUtteranceId == utteranceId) {
+                activeNavigationUtteranceId = null
+            } else {
+                // Ignore completion callbacks for speech that was explicitly stopped.
+                return@runOnUiThread
+            }
             val pending = pendingNavigationSpeech
             pendingNavigationSpeech = null
             if (pending != null) queueNavigationSpeech(pending.first, pending.second)
@@ -3215,6 +3225,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         pendingJarvisSpeech = null
         pendingNavigationSpeech = null
         activeNavigationUtteranceId = null
+        activeJarvisUtteranceId = null
         try { voiceGuide?.stop() } catch (_: Exception) { }
         if (jarvisListening) {
             speechRecognizer?.cancel()
