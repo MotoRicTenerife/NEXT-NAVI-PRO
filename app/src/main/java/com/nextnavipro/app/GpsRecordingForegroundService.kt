@@ -47,12 +47,12 @@ class GpsRecordingForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        val navigationActive = intent?.getBooleanExtra(
-            EXTRA_NAVIGATION_ACTIVE, intent.action == ACTION_START_NAVIGATION
-        ) ?: false
-        val recordingActive = intent?.getBooleanExtra(
-            EXTRA_RECORDING_ACTIVE, intent.action == ACTION_START
-        ) ?: false
+        val navigationActive = intent?.let {
+            it.getBooleanExtra(EXTRA_NAVIGATION_ACTIVE, it.action == ACTION_START_NAVIGATION)
+        } ?: false
+        val recordingActive = intent?.let {
+            it.getBooleanExtra(EXTRA_RECORDING_ACTIVE, it.action == ACTION_START)
+        } ?: false
         val title = when {
             navigationActive && recordingActive -> "NEXT NAVI PRO • navigazione e registrazione"
             navigationActive -> "NEXT NAVI PRO • navigazione GPS attiva"
