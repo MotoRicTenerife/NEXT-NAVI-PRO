@@ -37,17 +37,25 @@ internal class GpsMotionEstimator {
 
         if (validPosition) {
             val old = previous
-            if (old != null && elapsedRealtimeMs > old.elapsedRealtimeMs) {
-                val dtMs = elapsedRealtimeMs - old.elapsedRealtimeMs
-                if (dtMs in 250L..10_000L) {
-                    val distance = distanceMeters(old.latitude, old.longitude, latitude, longitude)
-                    val dtSeconds = dtMs / 1000.0
-                    val speed = distance / dtSeconds
-                    if (distance >= 1.0 && speed.isFinite() && speed in 0.0..80.0) derivedSpeed = speed.toFloat()
-                    if (distance >= 2.0) derivedBearing = bearingDegrees(old.latitude, old.longitude, latitude, longitude)
+            // Out-of-order fixes must not move the estimator's baseline backwards in time.
+            // Otherwise the next sample could derive speed/course from a stale or future fix.
+            val monotonic = old == null || elapsedRealtimeMs > old.elapsedRealtimeMs
+            if (monotonic) {
+                if (old != null) {
+                    val dtMs = elapsedRealtimeMs - old.elapsedRealtimeMs
+                    if (dtMs in 250L..10_000L) {
+                        val distance = distanceMeters(old.latitude, old.longitude, latitude, longitude)
+                        val dtSeconds = dtMs / 1000.0
+                        val speed = distance / dtSeconds
+                        // Only derive either speed or bearing from a physically plausible displacement.
+                        if (distance.isFinite() && speed.isFinite() && speed in 0.0..80.0) {
+                            if (distance >= 1.0) derivedSpeed = speed.toFloat()
+                            if (distance >= 2.0) derivedBearing = bearingDegrees(old.latitude, old.longitude, latitude, longitude)
+                        }
+                    }
                 }
+                previous = Fix(latitude, longitude, elapsedRealtimeMs)
             }
-            previous = Fix(latitude, longitude, elapsedRealtimeMs)
         }
 
         val speed = reportedSpeed ?: derivedSpeed
