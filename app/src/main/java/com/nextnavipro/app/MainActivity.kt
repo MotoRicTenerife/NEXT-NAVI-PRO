@@ -4899,6 +4899,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val previousRaw = lastRawGpsLocation
+        if (previousRaw != null && GpsFixOrdering.isOutOfOrder(
+                previousRaw.elapsedRealtimeNanos,
+                location.elapsedRealtimeNanos,
+                previousRaw.time,
+                location.time
+            )) {
+            // Never let a stale/duplicate fix move the live position, smoothing state,
+            // route progress or the raw reference point backwards in time.
+            appendGpsDiagnosticSample(location, "REJECTED_OUT_OF_ORDER_FIX")
+            gpsText.text = "GPS CAMPIONE FUORI ORDINE"
+            return
+        }
         if (previousRaw != null && isImplausibleGpsJump(previousRaw, location)) {
             // Keep rejected fixes in opt-in diagnostics so real traces reveal the failures too.
             appendGpsDiagnosticSample(location, "REJECTED_IMPLAUSIBLE_JUMP")
