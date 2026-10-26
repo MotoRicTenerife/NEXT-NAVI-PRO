@@ -2703,13 +2703,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val coords = (value as? String)?.split(",")
             val lat = coords?.getOrNull(0)?.toDoubleOrNull()
             val lon = coords?.getOrNull(1)?.toDoubleOrNull()
-            val sameName = key == "poi_$name" || key == "favorite_$name"
             val samePosition = lat != null && lon != null && lat.isFinite() && lon.isFinite() &&
                 lat in -90.0..90.0 && lon in -180.0..180.0 && run {
                     val distance = FloatArray(1)
                     Location.distanceBetween(lat, lon, latitude, longitude, distance)
                     distance[0] <= 5f
                 }
+            val hasValidStoredCoordinates = lat != null && lon != null &&
+                lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0
+            val sameName = (key == "poi_$name" || key == "favorite_$name") &&
+                (!hasValidStoredCoordinates || samePosition)
             if (sameName || samePosition) {
                 editor.remove(key)
                 matched = true
