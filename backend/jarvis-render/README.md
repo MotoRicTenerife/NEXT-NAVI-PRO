@@ -22,6 +22,19 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 - The server listens on `0.0.0.0` and Render's `PORT`.
 - Request body is capped at 16 KiB, user text is capped by `MAX_REQUEST_CHARS`, and an in-memory best-effort per-IP rate limit is applied. This is not authentication and is not a robust global abuse-control system.
 
+## Security audit status
+
+The audit branch returns HTTP 503 (`ARCHIVE_AUTH_REQUIRED`) for
+`POST /speed-limit-segments/upsert` and `DELETE /speed-limit-segments`. This is a
+fail-closed safeguard: the Android client does not currently send a verified Firebase ID token,
+so unauthenticated writes would allow public clients to alter shared speed-limit data.
+Archive reads remain available. Do not re-enable mutations until Firebase Authentication is
+implemented in Android and the backend verifies ID-token signature, issuer, audience, expiry and
+subject, with tests for anonymous, invalid, expired and authorized tokens.
+
+This deliberately suspends cloud archive edits on the audit branch. It is not a completed
+authentication implementation and must be called out during release review.
+
 ## Important limitations
 
 The Render free web service can sleep after inactivity, causing a cold start delay. Test response time before relying on online Jarvis while riding. The offline app features remain separate. TomTom must be configured through `TOMTOM_API_KEY` for automatic speed-limit lookups; if it is not configured, the POST endpoint returns a configuration error and the app leaves the legal limit unknown. OSM/Overpass remains available only for road-editor search/geometry and community camera data, not as a speed-limit fallback. Verify TomTom plan, quotas, and permitted use before relying on the service.

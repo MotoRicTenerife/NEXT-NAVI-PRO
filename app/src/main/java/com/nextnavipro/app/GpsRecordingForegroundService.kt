@@ -10,13 +10,18 @@ import android.os.Build
 import android.os.IBinder
 
 /**
- * Keeps the process in foreground-service priority while the user explicitly records a trip.
- * Location collection and paired GPX/CSV persistence remain owned by MainActivity.
+ * Keeps GPS navigation or explicit trip recording eligible for foreground location operation.
+ * MainActivity still consumes location callbacks and owns GPX/CSV persistence; this service
+ * currently protects lifecycle continuity but is not yet the durable owner of location fixes.
  */
 class GpsRecordingForegroundService : Service() {
     companion object {
         const val ACTION_START = "com.nextnavipro.app.action.START_GPS_RECORDING"
+        const val ACTION_START_NAVIGATION = "com.nextnavipro.app.action.START_GPS_NAVIGATION"
+        const val ACTION_SYNC = "com.nextnavipro.app.action.SYNC_GPS_FOREGROUND"
         const val ACTION_STOP = "com.nextnavipro.app.action.STOP_GPS_RECORDING"
+        const val EXTRA_NAVIGATION_ACTIVE = "navigation_active"
+        const val EXTRA_RECORDING_ACTIVE = "recording_active"
         private const val CHANNEL_ID = "next_navi_trip_recording"
         private const val NOTIFICATION_ID = 4107
     }
@@ -29,7 +34,7 @@ class GpsRecordingForegroundService : Service() {
                 "Registrazione viaggio",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Mantiene attiva la registrazione GPX e CSV durante il viaggio."
+                description = "Mantiene attiva la navigazione GPS e la registrazione del viaggio."
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -43,6 +48,24 @@ class GpsRecordingForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        val navigationActive = intent?.let {
+            it.getBooleanExtra(EXTRA_NAVIGATION_ACTIVE, it.action == ACTION_START_NAVIGATION)
+        } ?: false
+        val recordingActive = intent?.let {
+            it.getBooleanExtra(EXTRA_RECORDING_ACTIVE, it.action == ACTION_START)
+        } ?: false
+        val title = when {
+            navigationActive && recordingActive -> "NEXT NAVI PRO • navigazione e registrazione"
+            navigationActive -> "NEXT NAVI PRO • navigazione GPS attiva"
+            recordingActive -> "NEXT NAVI PRO • registrazione attiva"
+            else -> "NEXT NAVI PRO • GPS attivo"
+        }
+        val content = when {
+            navigationActive && recordingActive -> "Guida GPS e registrazione GPX + CSV in corso"
+            navigationActive -> "La guida GPS continua anche con lo schermo spento"
+            recordingActive -> "Registrazione GPX + CSV GPS in corso"
+            else -> "Servizio GPS attivo"
+        }
         val openApp = PendingIntent.getActivity(
             this,
             4107,
@@ -53,8 +76,8 @@ class GpsRecordingForegroundService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("NEXT NAVI PRO • registrazione attiva")
-            .setContentText("Registrazione GPX + CSV GPS in corso")
+            .setContentTitle(title)
+            .setContentText(content)
             .setContentIntent(openApp)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)

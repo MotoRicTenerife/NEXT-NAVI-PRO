@@ -42,7 +42,7 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
-      - name: Test Jarvis backend (rate limiting, TomTom parsing; mocked upstream, no network or keys)
+      - name: Test backend archive policy, rate limiting and TomTom parsing (mocked; no network or keys)
         working-directory: backend/jarvis-render
         run: npm test
       - name: Prepare persistent debug signing (optional)
@@ -100,25 +100,29 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
+      - name: Smoke-test live Render health, TomTom, road editor and Guaza geocoder; paid Gemini calls opt-in
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          RUN_PAID_JARVIS_SMOKE_TESTS: ${{ vars.RUN_PAID_JARVIS_SMOKE_TESTS }}
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
-            # Render's service is rooted in backend/jarvis-render and may not redeploy
-            # for later Android-only commits. Compare against the last commit that
-            # actually changed backend files, not the current repository HEAD.
+          if [ "${{ github.event_name }}" = "push" ] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
+            # Only a push to a deployment-configured branch can be expected to reach
+            # production. Pull-request commits are not deployed to Render by this workflow.
             export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
             if [ -z "$EXPECTED_RENDER_REVISION" ]; then
               echo "::error::Could not identify the last backend commit."
               exit 1
             fi
-            echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
+            echo "Production backend push detected; checking Render revision $EXPECTED_RENDER_REVISION."
           else
             export EXPECTED_RENDER_REVISION=""
-            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "Pull request branch is not deployed to production; checking only live service health and read-only endpoints."
+            else
+              echo "No production backend push detected; checking live service health without requiring a redeploy."
+            fi
           fi
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
@@ -186,34 +190,37 @@ jobs:
                       else:
                           failures.append("Render road editor OSM search/geometry: " + str(error))
 
-                  try:
-                      status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
-                      reply = result.get("reply", "")
-                      if status != 200 or not reply.strip():
-                          raise RuntimeError("No reply in HTTP 200 response")
-                      print("Render Jarvis Gemini chat check PASSED:", reply[:180])
-                  except Exception as error:
-                      if isinstance(error, urllib.error.HTTPError):
-                          detail = error.read(400).decode("utf-8", "replace")
-                          failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
-                      else:
-                          failures.append("Jarvis chat/API key/model: " + str(error))
-                  try:
-                      status, weather_reply = post_json(endpoint, {
-                          "message":"Che condizioni meteo ci sono?",
-                          "language":"it-IT",
-                          "location":{"latitude":28.05,"longitude":-16.68}
-                      }, 30)
-                      reply = weather_reply.get("reply", "")
-                      if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
-                          raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
-                      print("Render Jarvis weather check PASSED:", reply[:180])
-                  except Exception as error:
-                      if isinstance(error, urllib.error.HTTPError):
-                          detail = error.read(400).decode("utf-8", "replace")
-                          failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
-                      else:
-                          failures.append("Render Jarvis weather: " + str(error))
+                  if os.environ.get("RUN_PAID_JARVIS_SMOKE_TESTS", "").strip().lower() == "true":
+                      try:
+                          status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
+                          reply = result.get("reply", "")
+                          if status != 200 or not reply.strip():
+                              raise RuntimeError("No reply in HTTP 200 response")
+                          print("Render Jarvis Gemini chat check PASSED:", reply[:180])
+                      except Exception as error:
+                          if isinstance(error, urllib.error.HTTPError):
+                              detail = error.read(400).decode("utf-8", "replace")
+                              failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
+                          else:
+                              failures.append("Jarvis chat/API key/model: " + str(error))
+                      try:
+                          status, weather_reply = post_json(endpoint, {
+                              "message":"Che condizioni meteo ci sono?",
+                              "language":"it-IT",
+                              "location":{"latitude":28.05,"longitude":-16.68}
+                          }, 30)
+                          reply = weather_reply.get("reply", "")
+                          if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
+                              raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
+                          print("Render Jarvis weather check PASSED:", reply[:180])
+                      except Exception as error:
+                          if isinstance(error, urllib.error.HTTPError):
+                              detail = error.read(400).decode("utf-8", "replace")
+                              failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
+                          else:
+                              failures.append("Render Jarvis weather: " + str(error))
+                  else:
+                      print("Skipping live Gemini POST smoke tests; set RUN_PAID_JARVIS_SMOKE_TESTS=true only when API usage is authorized.")
               except Exception as error:
                   failures.append("Render Jarvis health: " + str(error))
           else:

@@ -1032,6 +1032,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     // Taps in the chooser inspect the map; they must not reparent it
                     // into full-screen mode or replace the selected geocoder result.
                     true
+                } else if (!manualSegmentEditing && !selectionMode && handleSavedFlagTap(readyMap, point.latitude, point.longitude)) {
+                    // A saved flag is a real object, not a generic map tap.
+                    true
                 } else if (fullScreenMap && manualSegmentEditing && roadEditorGeometry.isNotEmpty()) {
                     val picked = NavPoint(point.latitude, point.longitude)
                     val nearest = nearestRoadGeometryIndex(picked, roadEditorGeometry)
@@ -1534,7 +1537,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             appText("Apri indirizzi preferiti"),
             appText("Salva destinazione attuale come preferita"),
             appText("Scegli Casa sulla mappa"),
-            appText("Elimina un preferito")
+            appText("Elimina un preferito"),
+            appText("Gestisci tutte le bandierine sulla mappa")
         )
         AlertDialog.Builder(this)
             .setTitle(appText("Preferiti e Casa"))
@@ -1544,6 +1548,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     1 -> saveFavoriteAddress()
                     2 -> selectHomeFromMap()
                     3 -> deleteFavoriteAddress()
+                    4 -> manageSavedMapFlags()
                 }
             }
             .setNegativeButton(appText("Chiudi"), null)
@@ -2130,14 +2135,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticRecording = true
         recordingGpx = true
         updateGpxButtonState()
-        try {
-            startForegroundService(
-                Intent(this, GpsRecordingForegroundService::class.java)
-                    .setAction(GpsRecordingForegroundService.ACTION_START)
-            )
-        } catch (_: Exception) {
-            Toast.makeText(this, "Servizio in background non disponibile: tieni NEXT NAVI PRO in primo piano durante la registrazione.", Toast.LENGTH_LONG).show()
-        }
+        syncGpsForegroundService()
         val seedRawLocation = lastRawGpsLocation
         val seedSmoothedLocation = currentLocation
         if (seedRawLocation != null) {
@@ -2220,7 +2218,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
         gpsDiagnosticRecording = false
-        stopService(Intent(this, GpsRecordingForegroundService::class.java))
+        syncGpsForegroundService()
         if (!save) {
             // Never silently discard an interrupted/short session: leave checkpoints for recovery.
             if (showResult) Toast.makeText(this, "Registrazione fermata. I dati parziali sono conservati per il recupero.", Toast.LENGTH_LONG).show()
@@ -2438,6 +2436,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        syncGpsForegroundService()
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -2480,6 +2479,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.text = appText("ANNULLA PERCORSO GPX")
                     }
                     routeResult = result
+                    syncGpsForegroundService()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     resetRouteProgress()
@@ -2596,31 +2596,82 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 val value = place.point.latitude.toString() + "," + place.point.longitude
                 val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val duplicate = readFavoriteAddresses().firstOrNull { saved ->
+                    if (saved.first.equals(name, ignoreCase = true)) false else {
+                        val meters = FloatArray(1)
+                        Location.distanceBetween(place.point.latitude, place.point.longitude, saved.second, saved.third, meters)
+                        meters[0] <= 5f
+                    }
+                }
+                if (duplicate != null) {
+                    Toast.makeText(this, "Questa posizione è già salvata come «${duplicate.first}». Non creo un duplicato.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 val key = "favorite_" + name
                 if (prefs.contains(key) && prefs.getString(key, null) != value) {
                     AlertDialog.Builder(this).setTitle("Sostituire il preferito?")
                         .setMessage("Esiste già un preferito chiamato «$name». Vuoi aggiornarne la posizione?")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton(appText("Sostituisci")) { _, _ ->
-                            prefs.edit().putString(key, value).apply()
+                            prefs.edit().remove("poi_" + name).putString(key, value).apply()
+                            refreshSavedPoiMarkers()
                             Toast.makeText(this, "Preferito aggiornato.", Toast.LENGTH_SHORT).show()
                         }.show()
                 } else {
-                    prefs.edit().putString(key, value).apply()
+                    prefs.edit().remove("poi_" + name).putString(key, value).apply()
+                    refreshSavedPoiMarkers()
                     Toast.makeText(this, "Preferito salvato.", Toast.LENGTH_SHORT).show()
                 }
             }.setNegativeButton(appText("Annulla"), null).show()
     }
 
-    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> =
-        getSharedPreferences(PREFS, MODE_PRIVATE).all.filterKeys { it.startsWith("favorite_") }
-            .mapNotNull { (key, value) ->
-                val coords = (value as? String)?.split(",") ?: return@mapNotNull null
-                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
-                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
-                Triple(key.removePrefix("favorite_"), lat, lon)
-            }.sortedBy { it.first.lowercase(Locale.ROOT) }
+    /**
+     * A single user-facing list for saved map places. Older builds stored named map flags
+     * under poi_* and address favorites under favorite_*, which made map flags visible while
+     * the Favorites screen incorrectly reported an empty list. Read both formats for backward
+     * compatibility; prefer favorite_* coordinates when the same name exists in both stores.
+     */
+    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> {
+        val all = getSharedPreferences(PREFS, MODE_PRIVATE).all
+        val byName = linkedMapOf<String, Triple<String, Double, Double>>()
+        // Load map-saved POIs first so a formal favorite with the same name wins below.
+        all.filterKeys { it.startsWith("poi_") && it != "poi_home_marker" }
+            .forEach { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@forEach
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
+                val name = key.removePrefix("poi_").trim()
+                if (name.isBlank()) return@forEach
+                byName[name.lowercase(Locale.ROOT)] = Triple(name, lat, lon)
+            }
+        all.filterKeys { it.startsWith("favorite_") }
+            .forEach { (key, value) ->
+                val coords = (value as? String)?.split(",") ?: return@forEach
+                val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
+                val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
+                val name = key.removePrefix("favorite_").trim()
+                if (name.isBlank()) return@forEach
+                byName[name.lowercase(Locale.ROOT)] = Triple(name, lat, lon)
+            }
+        // Legacy versions could save the same point under different names/keys. Prefer a
+        // formal favorite over a POI alias, then keep only one record within a 5 m radius.
+        val candidates = byName.values.sortedWith(
+            compareByDescending<Triple<String, Double, Double>> { all.containsKey("favorite_" + it.first) }
+                .thenBy { it.first.lowercase(Locale.ROOT) }
+        )
+        val unique = mutableListOf<Triple<String, Double, Double>>()
+        candidates.forEach { candidate ->
+            val duplicate = unique.any { saved ->
+                val distance = FloatArray(1)
+                Location.distanceBetween(candidate.second, candidate.third, saved.second, saved.third, distance)
+                distance[0] <= 5f
+            }
+            if (!duplicate) unique.add(candidate)
+        }
+        return unique.sortedBy { it.first.lowercase(Locale.ROOT) }
+    }
 
     private fun showFavoriteAddresses() {
         val favorites = readFavoriteAddresses()
@@ -2632,6 +2683,52 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 showFavoriteActions(favorites[which])
             }.setNegativeButton("Chiudi", null).show()
+    }
+
+    /**
+     * Deletes the saved entry and any legacy POI/favorite entries at the same coordinates.
+     * This prevents a visible flag from surviving as an orphan when old versions stored the
+     * same location under a different key/name.
+     */
+    private fun deleteSavedPlaceAndMarker(name: String, latitude: Double, longitude: Double): Boolean {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val editor = prefs.edit()
+        var matched = false
+        prefs.all.forEach { (key, value) ->
+            if (!key.startsWith("poi_") && !key.startsWith("favorite_")) return@forEach
+            if (key == "poi_home_marker") return@forEach
+            val coords = (value as? String)?.split(",")
+            val lat = coords?.getOrNull(0)?.toDoubleOrNull()
+            val lon = coords?.getOrNull(1)?.toDoubleOrNull()
+            val samePosition = lat != null && lon != null && lat.isFinite() && lon.isFinite() &&
+                lat in -90.0..90.0 && lon in -180.0..180.0 && run {
+                    val distance = FloatArray(1)
+                    Location.distanceBetween(lat, lon, latitude, longitude, distance)
+                    distance[0] <= 5f
+                }
+            val hasValidStoredCoordinates = lat != null && lon != null &&
+                lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0
+            val sameName = (key == "poi_$name" || key == "favorite_$name") &&
+                (!hasValidStoredCoordinates || samePosition)
+            if (sameName || samePosition) {
+                editor.remove(key)
+                matched = true
+            }
+        }
+        val committed = editor.commit()
+        // A favorite may also have been opened as the transient destination marker. When no
+        // route is active, remove that marker too so deleting the favorite leaves no orphan flag.
+        val activeDestination = destination
+        if (routeResult == null && activeDestination != null &&
+            (activeDestination.name == name ||
+                (kotlin.math.abs(activeDestination.point.latitude - latitude) < 0.0000001 &&
+                    kotlin.math.abs(activeDestination.point.longitude - longitude) < 0.0000001))
+        ) {
+            destination = null
+            refreshDestinationMarker()
+        }
+        refreshSavedPoiMarkers()
+        return committed && matched
     }
 
     private fun showFavoriteActions(favorite: Triple<String, Double, Double>) {
@@ -2646,11 +2743,95 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${favorite.first}» verrà rimosso dai preferiti.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorite.first).commit()
-                            Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
+                            val removed = deleteSavedPlaceAndMarker(
+                                favorite.first, favorite.second, favorite.third
+                            )
+                            Toast.makeText(
+                                this,
+                                if (removed) "Preferito e bandierina eliminati." else "Nessun dato associato trovato; mappa aggiornata.",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }.show()
                 }
             }.setNegativeButton("Indietro") { _, _ -> showFavoriteAddresses() }.show()
+    }
+
+    /**
+     * Explicit cleanup path for every persistent map flag. The map draws flags from both
+     * favorite_* and poi_* keys, so this manager enumerates both stores and the Home marker.
+     * It deliberately keeps transient destination markers out of this list.
+     */
+    private fun manageSavedMapFlags() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val places = readFavoriteAddresses().toMutableList()
+        val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        val homeMarker = prefs.getString("poi_home_marker", null)?.split(",")
+        val markerLat = homeMarker?.getOrNull(0)?.toDoubleOrNull()
+        val markerLon = homeMarker?.getOrNull(1)?.toDoubleOrNull()
+        val effectiveHomeLat = homeLat ?: markerLat
+        val effectiveHomeLon = homeLon ?: markerLon
+        if (effectiveHomeLat != null && effectiveHomeLon != null &&
+            effectiveHomeLat.isFinite() && effectiveHomeLon.isFinite() &&
+            effectiveHomeLat in -90.0..90.0 && effectiveHomeLon in -180.0..180.0 &&
+            (homeName.isNotBlank() || prefs.contains("poi_home_marker"))
+        ) {
+            val displayHomeName = if (homeName.isNotBlank()) "Casa — $homeName" else "Casa (bandierina da recuperare)"
+            places.removeAll { it.first == displayHomeName }
+            places.add(Triple(displayHomeName, effectiveHomeLat, effectiveHomeLon))
+        }
+        val sorted = places.distinctBy { it.first }.sortedBy { it.first.lowercase(Locale.ROOT) }
+        if (sorted.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Bandierine sulla mappa")
+                .setMessage("Non risultano luoghi salvati da gestire.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Bandierine sulla mappa • ${sorted.size}")
+            .setMessage("Seleziona una bandierina per visualizzarla oppure eliminarla definitivamente.")
+            .setItems(sorted.map { it.first }.toTypedArray()) { _, which ->
+                val selected = sorted[which]
+                val isHome = selected.first == "Casa — $homeName" ||
+                    selected.first == "Casa (bandierina da recuperare)"
+                AlertDialog.Builder(this)
+                    .setTitle("Eliminare la bandierina?")
+                    .setMessage("Verrà rimossa la posizione salvata «${selected.first}».")
+                    .setNegativeButton(appText("Annulla"), null)
+                    .setNeutralButton("Mostra sulla mappa") { _, _ ->
+                        showPlaceOnMap(PlaceResult(selected.first, NavPoint(selected.second, selected.third), "Luogo salvato"))
+                    }
+                    .setPositiveButton("Elimina") { _, _ ->
+                        val removed: Boolean
+                        if (isHome) {
+                            deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
+                            removed = prefs.edit()
+                                .remove("home_name")
+                                .remove("home_description")
+                                .remove("home_lat")
+                                .remove("home_lon")
+                                .remove("poi_home_marker")
+                                .commit()
+                            refreshSavedPoiMarkers()
+                        } else {
+                            // Remove by both name and coordinates, covering orphaned legacy keys.
+                            removed = deleteSavedPlaceAndMarker(selected.first, selected.second, selected.third)
+                        }
+                        if (isHome) refreshDestinationMarker()
+                        Toast.makeText(
+                            this,
+                            if (removed) "Bandierina eliminata dalla mappa." else "Impossibile eliminare la bandierina.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        manageSavedMapFlags()
+                    }
+                    .show()
+            }
+            .setNegativeButton("Chiudi", null)
+            .show()
     }
 
     private fun showPlaceOnMap(place: PlaceResult) {
@@ -2672,7 +2853,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         AlertDialog.Builder(this).setTitle("Elimina preferito")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 val name = favorites[which].first
-                val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + name).commit()
+                val removed = deleteSavedPlaceAndMarker(
+                    name, favorites[which].second, favorites[which].third
+                )
                 Toast.makeText(this, if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.", Toast.LENGTH_LONG).show()
                 showFavoriteAddresses()
             }.setNegativeButton(appText("Annulla"), null).show()
@@ -4044,6 +4227,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         destination = place
         pendingJarvisPlaces = emptyList()
         routeResult = null
+        syncGpsForegroundService()
         navigationArrived = false
         arrivalClosestMeters = Float.MAX_VALUE
         arrivalStopSinceMs = 0L
@@ -4235,6 +4419,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    syncGpsForegroundService()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     navigationArrived = false
@@ -4306,6 +4491,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        syncGpsForegroundService()
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -4486,8 +4672,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .setMessage("«${poi.first}» verrà rimosso dai luoghi salvati.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina") { _, _ ->
-                            val removed = getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("poi_" + poi.first).commit()
-                            refreshSavedPoiMarkers()
+                            val removed = deleteSavedPlaceAndMarker(
+                                poi.first, poi.second, poi.third
+                            )
                             Toast.makeText(this, if (removed) "Luogo eliminato." else "Impossibile eliminare il luogo.", Toast.LENGTH_LONG).show()
                             showSavedPois()
                         }.show()
@@ -4521,10 +4708,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             .setPositiveButton(appText("Salva")) { _, _ ->
                                 val name = input.text.toString().trim()
                                 if (name.isNotBlank()) {
-                                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                        .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
-                                    refreshSavedPoiMarkers()
-                                    Toast.makeText(this, "Luogo salvato: $name", Toast.LENGTH_SHORT).show()
+                                    val duplicate = readFavoriteAddresses().firstOrNull { saved ->
+                                        if (saved.first.equals(name, ignoreCase = true)) false else {
+                                            val meters = FloatArray(1)
+                                            Location.distanceBetween(point.latitude, point.longitude, saved.second, saved.third, meters)
+                                            meters[0] <= 5f
+                                        }
+                                    }
+                                    if (duplicate != null) {
+                                        Toast.makeText(this, "Questa posizione è già salvata come «${duplicate.first}». Non creo un duplicato.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                            .remove("favorite_" + name)
+                                            .putString("poi_" + name, point.latitude.toString() + "," + point.longitude).apply()
+                                        refreshSavedPoiMarkers()
+                                        Toast.makeText(this, "Luogo salvato: $name", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }.setNegativeButton(appText("Annulla"), null).show()
                     }
@@ -4574,6 +4773,35 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gnssStatusRegistered = false
     }
 
+    /**
+     * Keep Android's location foreground service alive while either navigation or trip recording
+     * is active. This lets the existing location callback remain registered when the Activity
+     * loses foreground focus; the service is lifecycle support, not a claim that it owns fixes.
+     */
+    private fun syncGpsForegroundService() {
+        val navigationActive = routeResult != null
+        val recordingActive = recordingGpx || gpsDiagnosticRecording
+        if (!navigationActive && !recordingActive) {
+            try { startService(Intent(this, GpsRecordingForegroundService::class.java).setAction(GpsRecordingForegroundService.ACTION_STOP)) }
+            catch (_: Exception) { stopService(Intent(this, GpsRecordingForegroundService::class.java)) }
+            return
+        }
+        val action = when {
+            navigationActive && !recordingActive -> GpsRecordingForegroundService.ACTION_START_NAVIGATION
+            else -> GpsRecordingForegroundService.ACTION_SYNC
+        }
+        try {
+            startForegroundService(
+                Intent(this, GpsRecordingForegroundService::class.java)
+                    .setAction(action)
+                    .putExtra(GpsRecordingForegroundService.EXTRA_NAVIGATION_ACTIVE, navigationActive)
+                    .putExtra(GpsRecordingForegroundService.EXTRA_RECORDING_ACTIVE, recordingActive)
+            )
+        } catch (_: Exception) {
+            if (::gpsText.isInitialized) gpsText.text = "GPS ATTIVO • SERVIZIO BACKGROUND NON DISPONIBILE"
+        }
+    }
+
     private fun requestGps() {
         if (!dashboardStarted || gpsUpdatesRequested) return
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
@@ -4591,13 +4819,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             val callback = fusedLocationCallback ?: object : FusedLocationCallback() {
                 override fun onLocationResult(result: FusedLocationResult) {
-                    result.lastLocation?.let { onLocationChanged(it) }
+                    // A result may contain a batch, not just one fix. Process every sample in
+                    // provider order so recording, motion estimation and route progress do not
+                    // silently lose intermediate positions.
+                    val fixes = result.locations
+                    if (fixes.isNotEmpty()) fixes.forEach { onLocationChanged(it) }
+                    else result.lastLocation?.let { onLocationChanged(it) }
                 }
             }.also { fusedLocationCallback = it }
-            // Fused GNSS/network/sensor positioning; OsmAnd uses the same provider family
-            // with a very short high-accuracy interval. The marker is interpolated separately.
-            val request = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 250L)
-                .setMinUpdateIntervalMillis(250L)
+            // One-second high-accuracy updates are a practical navigation target. Android treats
+            // intervals as hints, and most phone GNSS stacks do not produce genuinely new fixes at 4 Hz.
+            // Keep a 500 ms minimum for devices that can deliver useful faster fixes; marker animation
+            // is independent and must never be mistaken for new GNSS measurements.
+            val request = FusedLocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+                .setMinUpdateIntervalMillis(500L)
                 .setWaitForAccurateLocation(true)
                 .build()
             gpsUpdatesRequested = true
@@ -4635,10 +4870,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 return
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, 1000L, 0f, this, Looper.getMainLooper())
             } else {
                 @Suppress("DEPRECATION")
-                locationManager.requestLocationUpdates(provider, 500L, 0f, this)
+                locationManager.requestLocationUpdates(provider, 1000L, 0f, this)
             }
             usingLocationManagerFallback = true
             gpsUpdatesRequested = true
@@ -4664,6 +4899,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val previousRaw = lastRawGpsLocation
+        if (previousRaw != null && GpsFixOrdering.isOutOfOrder(
+                previousRaw.elapsedRealtimeNanos,
+                location.elapsedRealtimeNanos,
+                previousRaw.time,
+                location.time
+            )) {
+            // Never let a stale/duplicate fix move the live position, smoothing state,
+            // route progress or the raw reference point backwards in time.
+            appendGpsDiagnosticSample(location, "REJECTED_OUT_OF_ORDER_FIX")
+            gpsText.text = "GPS CAMPIONE FUORI ORDINE"
+            return
+        }
         if (previousRaw != null && isImplausibleGpsJump(previousRaw, location)) {
             // Keep rejected fixes in opt-in diagnostics so real traces reveal the failures too.
             appendGpsDiagnosticSample(location, "REJECTED_IMPLAUSIBLE_JUMP")
@@ -5816,6 +6063,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    syncGpsForegroundService()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -6175,17 +6423,109 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return bitmap
     }
 
+    /**
+     * Resolve a rendered persistent flag to its saved record and offer explicit deletion.
+     * The GeoJSON contains coordinates only, so match against the saved-place stores.
+     */
+    private fun handleSavedFlagTap(readyMap: MapLibreMap, latitude: Double, longitude: Double): Boolean {
+        if (!mapStyleReady) return false
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val candidates = readFavoriteAddresses().toMutableList()
+        val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+            ?: prefs.getString("poi_home_marker", null)?.split(",")?.getOrNull(0)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+            ?: prefs.getString("poi_home_marker", null)?.split(",")?.getOrNull(1)?.toDoubleOrNull()
+        if (homeLat != null && homeLon != null && homeLat.isFinite() && homeLon.isFinite() &&
+            homeLat in -90.0..90.0 && homeLon in -180.0..180.0) {
+            candidates.removeAll { kotlin.math.abs(it.second - homeLat) < 0.0000001 && kotlin.math.abs(it.third - homeLon) < 0.0000001 }
+            candidates.add(Triple(if (homeName.isBlank()) "Casa" else "Casa — " + homeName, homeLat, homeLon))
+        }
+        if (candidates.isEmpty()) return false
+
+        // Hit-test in screen pixels, not meters: a tap only selects a visible flag icon.
+        val density = resources.displayMetrics.density.coerceAtLeast(1f)
+        val tapX = readyMap.projection.toScreenLocation(LatLng(latitude, longitude)).x
+        val tapY = readyMap.projection.toScreenLocation(LatLng(latitude, longitude)).y
+        val nearest = candidates.map { place ->
+            val screen = readyMap.projection.toScreenLocation(LatLng(place.second, place.third))
+            val dx = screen.x - tapX
+            val dy = screen.y - tapY
+            Triple(place, dx * dx + dy * dy, kotlin.math.sqrt((dx * dx + dy * dy).toDouble()))
+        }.minByOrNull { it.second } ?: return false
+        if (nearest.third > 36f * density) return false
+        val place = nearest.first
+        val isHome = place.first == "Casa" || place.first.startsWith("Casa — ")
+        AlertDialog.Builder(this)
+            .setTitle(place.first)
+            .setMessage("Vuoi eliminare questa bandierina e la relativa posizione salvata?")
+            .setNegativeButton(appText("Annulla"), null)
+            .setPositiveButton("Elimina") { _, _ ->
+                val removed = if (isHome) {
+                    deleteSavedPlaceAndMarker(place.first, place.second, place.third)
+                    val committed = prefs.edit()
+                        .remove("home_name")
+                        .remove("home_description")
+                        .remove("home_lat")
+                        .remove("home_lon")
+                        .remove("poi_home_marker")
+                        .commit()
+                    if (committed) { refreshSavedPoiMarkers(); refreshDestinationMarker() }
+                    committed
+                } else {
+                    deleteSavedPlaceAndMarker(place.first, place.second, place.third)
+                }
+                Toast.makeText(this, if (removed) "Posizione eliminata dalla memoria e dalla mappa." else "Non è stato possibile eliminare la posizione.", Toast.LENGTH_LONG).show()
+            }
+            .show()
+        return true
+    }
     private fun refreshSavedPoiMarkers() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_SAVED_POIS) as? GeoJsonSource ?: return
+        val seenCoordinates = HashSet<String>()
+        val seenPositions = mutableListOf<Pair<Double, Double>>()
         val features = getSharedPreferences(PREFS, MODE_PRIVATE).all
-            .filterKeys { it.startsWith("poi_") }
-            .mapNotNull { (_, value) ->
+            .filterKeys {
+                (it.startsWith("poi_") && it != "poi_home_marker") || it.startsWith("favorite_") ||
+                    it == "poi_home_marker"
+            }
+            // Home is the canonical marker when another saved entry occupies the same point.
+            .toList()
+            .sortedBy { (key, _) ->
+                when {
+                    key == "poi_home_marker" -> 0
+                    key.startsWith("favorite_") -> 1
+                    else -> 2
+                }
+            }
+            .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
-                Feature.fromGeometry(Point.fromLngLat(lon, lat))
+                if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
+                // Legacy keys may describe the same location; never draw stacked duplicate flags.
+                val coordinateKey = String.format(Locale.US, "%.6f,%.6f", lat, lon)
+                if (!seenCoordinates.add(coordinateKey)) return@mapNotNull null
+                val overlapsExistingFlag = seenPositions.any { saved ->
+                    val distance = FloatArray(1)
+                    Location.distanceBetween(lat, lon, saved.first, saved.second, distance)
+                    distance[0] <= 5f
+                }
+                if (overlapsExistingFlag) return@mapNotNull null
+                seenPositions.add(lat to lon)
+                val feature = Feature.fromGeometry(Point.fromLngLat(lon, lat))
+                val name = when {
+                    key == "poi_home_marker" -> getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_name", null)?.trim().orEmpty().ifBlank { "Casa" }
+                    key.startsWith("poi_") -> key.removePrefix("poi_")
+                    else -> key.removePrefix("favorite_")
+                }
+                feature.addStringProperty("savedName", name)
+                feature.addStringProperty("savedKey", key)
+                feature.addNumberProperty("savedLatitude", lat)
+                feature.addNumberProperty("savedLongitude", lon)
+                feature
             }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
     }
@@ -6512,7 +6852,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // While the explicit GPX+CSV recording service is active, keep location callbacks
         // registered even if the dashboard loses focus. Otherwise onPause creates long holes
         // in the trip trace whenever another app or system surface briefly takes over.
-        if (!recordingGpx) {
+        if (!recordingGpx && routeResult == null) {
             unregisterGnssDiagnostics()
             fusedLocationCallback?.let { callback ->
                 try { fusedLocationClient?.removeLocationUpdates(callback) } catch (_: Exception) { }
