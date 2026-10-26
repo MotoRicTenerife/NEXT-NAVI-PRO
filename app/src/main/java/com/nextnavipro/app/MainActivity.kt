@@ -2646,8 +2646,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
                 if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
-                val name = key.removePrefix("poi_")
-                byName[name] = Triple(name, lat, lon)
+                val name = key.removePrefix("poi_").trim()
+                if (name.isBlank()) return@forEach
+                byName[name.lowercase(Locale.ROOT)] = Triple(name, lat, lon)
             }
         all.filterKeys { it.startsWith("favorite_") }
             .forEach { (key, value) ->
@@ -2655,8 +2656,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@forEach
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
                 if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return@forEach
-                val name = key.removePrefix("favorite_")
-                byName[name] = Triple(name, lat, lon)
+                val name = key.removePrefix("favorite_").trim()
+                if (name.isBlank()) return@forEach
+                byName[name.lowercase(Locale.ROOT)] = Triple(name, lat, lon)
             }
         // Legacy versions could save the same point under different names/keys. Prefer a
         // formal favorite over a POI alias, then keep only one record within a 5 m radius.
