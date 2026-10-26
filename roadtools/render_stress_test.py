@@ -99,16 +99,14 @@ def main():
         "health_success_rate_pct": health_report["success_rate_pct"],
         "status_success_rate_pct": status_report["success_rate_pct"],
     }, ensure_ascii=False))
-    # Keep CI useful while separately flagging the already-known speed-limit
-    # provider outage. Core health must remain reliable under bounded concurrency.
+    # Core health must remain reliable under bounded concurrency. Provider-status
+    # schema drift is reported as a warning, not confused with a paid lookup test.
     if not health_payload_ok or health_report["success_rate_pct"] < 95 or health_report["p95_latency_seconds"] > 25:
         raise SystemExit("FAIL: Render health endpoint did not meet stress-test stability thresholds")
     if health_report["p95_latency_seconds"] > 10:
         print("::warning::Render health is responding, but p95 latency is elevated; investigate cold starts/instance capacity.")
     if not status_payload_ok:
         print("::warning::Speed-limit status endpoint degraded under concurrent requests.")
-    if not limit_ok:
-        print("::warning::Live speed-limit lookup remains unavailable; inspect OSM/Overpass/TomTom provider diagnostics.")
     print("PASS: bounded Render health stress test completed; see summary for feature-level failures.")
 
 
