@@ -1929,8 +1929,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val route = routeResult
+        val matchingLocation = effectiveLocation ?: location
         val match = if (rejectionStatus == null && route != null && route.points.size >= 2)
-            findRouteProgressIndex(route, location) else null
+            findRouteProgressIndex(route, matchingLocation) else null
         val validMatch = match?.takeIf { it.second.isFinite() && it.second < Float.MAX_VALUE }
         gpsDiagnosticSamples.add(
             GpsTraceSample(
@@ -4721,8 +4722,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             ((incoming.time - previous.time).coerceAtLeast(1L)) / 1000f
         }.coerceAtLeast(0.001f)
-        val previousSpeed = if (previous.hasSpeed()) previous.speed else 0f
-        val incomingSpeed = if (incoming.hasSpeed()) incoming.speed else 0f
+        val previousSpeed = previous.speed.takeIf { previous.hasSpeed() && it.isFinite() && it >= 0f } ?: 0f
+        val incomingSpeed = incoming.speed.takeIf { incoming.hasSpeed() && it.isFinite() && it >= 0f } ?: 0f
         val plausibleSpeed = maxOf(previousSpeed, incomingSpeed, 8f)
         val uncertainty = (if (previous.hasAccuracy()) previous.accuracy else 25f) +
             (if (incoming.hasAccuracy()) incoming.accuracy else 25f)
@@ -5872,7 +5873,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             longitude = location.longitude,
             accuracyMeters = accuracy,
             bearingDegrees = heading,
-            speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
+            speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() && it.isFinite() && it >= 0f }?.toDouble(),
             elapsedRealtimeMs = elapsedMs
         ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
         val speedMps = location.speed.takeIf { location.hasSpeed() && it.isFinite() && it >= 0f } ?: 0f
