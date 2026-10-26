@@ -1202,8 +1202,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             refreshSavedPoiMarkers()
             refreshDestinationMarker()
             refreshManualSegmentMarkers()
-            refreshSavedPoiMarkers()
-            refreshDestinationMarker()
             currentLocation?.let { updateMapForLocation(it, true) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
@@ -1937,6 +1935,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsDiagnosticSamples.add(
             GpsTraceSample(
                 timestampEpochMs = location.time,
+                elapsedRealtimeMs = location.elapsedRealtimeNanos.takeIf { it > 0L }?.div(1_000_000L),
                 latitude = location.latitude,
                 longitude = location.longitude,
                 smoothedLatitude = smoothedLocation?.latitude,
@@ -2655,6 +2654,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showPlaceOnMap(place: PlaceResult) {
         destination = place
+        selectionMode = false
         if (fullScreenMap) exitMapFullScreen()
         destinationInput.setText(place.name)
         routeText.text = "DESTINAZIONE: ${place.name}\nPremi AVVIA NAVIGAZIONE"
@@ -4685,7 +4685,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         val motionLocation = Location(location).apply {
             motion.speedMetersPerSecond?.let { speed = it; setSpeed(it) }
+                ?: run { if (hasSpeed() && !speed.isFinite()) removeSpeed() }
             motion.bearingDegrees?.let { bearing = it; setBearing(it) }
+                ?: run { if (hasBearing() && !bearing.isFinite()) removeBearing() }
         }
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, motionLocation)

@@ -20,14 +20,16 @@ internal data class GpsTraceSample(
     val matchStatus: String,
     val reportedSpeedMetersPerSecond: Float? = null,
     val reportedBearingDegrees: Float? = null,
-    val motionSource: String = "UNKNOWN"
+    val motionSource: String = "UNKNOWN",
+    val elapsedRealtimeMs: Long? = null
 )
 
 internal object GpsTraceDiagnostics {
     fun toCsv(samples: List<GpsTraceSample>): String = buildString {
-        appendLine("timestamp_epoch_ms,latitude,longitude,smoothed_latitude,smoothed_longitude,gpx_point_status,accuracy_m,speed_mps,bearing_deg,reported_speed_mps,reported_bearing_deg,motion_source,satellites_used,satellites_visible,constellations,route_segment_index,route_distance_m,match_status")
+        appendLine("timestamp_epoch_ms,elapsed_realtime_ms,latitude,longitude,smoothed_latitude,smoothed_longitude,gpx_point_status,accuracy_m,speed_mps,bearing_deg,reported_speed_mps,reported_bearing_deg,motion_source,satellites_used,satellites_visible,constellations,route_segment_index,route_distance_m,match_status")
         for (s in samples) {
             append(s.timestampEpochMs).append(',')
+            append(s.elapsedRealtimeMs?.toString() ?: "").append(',')
             append(String.format(Locale.US, "%.7f", s.latitude)).append(',')
             append(String.format(Locale.US, "%.7f", s.longitude)).append(',')
             append(s.smoothedLatitude?.let { String.format(Locale.US, "%.7f", it) } ?: "").append(',')
