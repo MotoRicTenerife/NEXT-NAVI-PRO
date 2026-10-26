@@ -42,7 +42,7 @@ jobs:
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
-      - name: Test Jarvis backend (rate limiting, TomTom parsing; mocked upstream, no network or keys)
+      - name: Test backend archive policy, rate limiting and TomTom parsing (mocked; no network or keys)
         working-directory: backend/jarvis-render
         run: npm test
       - name: Prepare persistent debug signing (optional)
