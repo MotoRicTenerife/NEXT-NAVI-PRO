@@ -2198,7 +2198,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val previous = lastRecordedGpxPoint
         if (!force && previous != null) {
             val distance = GpxRouteService.distanceMeters(previous, point)
-            if (distance < 5.0 && nowElapsedRealtimeMs - lastGpxPointElapsedRealtimeMs < 5000L) return "FILTERED_NEAR_POINT"
+            val elapsedSincePreviousMs = (nowElapsedRealtimeMs - lastGpxPointElapsedRealtimeMs).coerceAtLeast(0L)
+            val speedMetersPerSecond = location.speed.takeIf {
+                location.hasSpeed() && it.isFinite() && it >= 0f
+            } ?: 0f
+
+            // Use a speed-adaptive distance threshold. A fixed 5 m threshold can
+            // erase useful low-speed geometry (turns, roundabouts and restarts).
+            val minimumDistanceMeters = when {
+                speedMetersPerSecond >= 12f -> 4.5
+                speedMetersPerSecond >= 5f -> 2.5
+                speedMetersPerSecond >= 1.5f -> 1.25
+                else -> 1.0
+            }
+            // Moving fixes must not disappear behind a long near-point window.
+            // At standstill, keep the wider window to suppress GNSS drift.
+            val maximumIntervalMs = if (speedMetersPerSecond >= 1.5f) 2500L else 5000L
+            if (distance < minimumDistanceMeters && elapsedSincePreviousMs < maximumIntervalMs) {
+                return "FILTERED_NEAR_POINT"
+            }
         }
         if (gpxRecordingPoints.size >= 100_000) {
             finishGpxRecording(save = true)
