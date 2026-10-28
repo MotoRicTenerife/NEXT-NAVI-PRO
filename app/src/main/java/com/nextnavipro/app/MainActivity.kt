@@ -677,7 +677,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         // In portrait, reduce the top spacer to lift the tachometer slightly.
         speedColumn.addView(View(this), LinearLayout.LayoutParams(-1, 0, if (isPortrait) 0.65f else 0.75f))
-        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, dp(184)))
+        speedColumn.addView(speedText, LinearLayout.LayoutParams(-1, adaptiveVisualDp(184)))
         val unit = TextView(this).apply {
             text = "km/h"
             textSize = 18f
@@ -881,11 +881,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             // Portrait: center the complete navigation group (arrow + instruction)
             // vertically against the speed-limit sign; avoid translating only the arrow.
             // Portrait physical targets: maneuver glyph about 1 cm; instruction text about 0.65 cm.
-            maneuverIcon.textSize = 88f
-            maneuverIcon.translationY = -dp(38).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(88)))
+            maneuverIcon.textSize = adaptiveVisualSp(88f)
+            maneuverIcon.translationY = -adaptiveVisualDp(38).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, adaptiveVisualDp(88)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(16).toFloat()
+            routeText.translationY = -adaptiveVisualDp(16).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             routeText.setPadding(dp(8), dp(2), dp(8), dp(2))
@@ -903,9 +903,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(weatherText, params(-1, dp(52)))
             content.addView(upper, LinearLayout.LayoutParams(-1, 0, 0.65f).apply {
                 // Lower the navigation instruction and speed-limit area by about 0.5 cm.
-                topMargin = dp(31)
+                topMargin = adaptiveVisualDp(31)
             })
-            speedText.textSize = 158f
+            speedText.textSize = adaptiveVisualSp(158f)
             // Keep the tachometer transparent in portrait so it cannot visually
             // obscure the navigation row. The colored outline remains on each digit.
             speedText.background = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
@@ -931,11 +931,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.translationY = 0f
             // Keep arrow and instruction as one centered group, sharing the sign's vertical center.
             // Landscape physical targets: maneuver glyph and instruction text about 0.75 cm.
-            maneuverIcon.textSize = 116f
-            maneuverIcon.translationY = -dp(73).toFloat()
-            navHalf.addView(maneuverIcon, params(-1, dp(116)))
+            maneuverIcon.textSize = adaptiveVisualSp(116f)
+            maneuverIcon.translationY = -adaptiveVisualDp(73).toFloat()
+            navHalf.addView(maneuverIcon, params(-1, adaptiveVisualDp(116)))
             routeText.textSize = 15f
-            routeText.translationY = -dp(47).toFloat()
+            routeText.translationY = -adaptiveVisualDp(47).toFloat()
             routeText.includeFontPadding = false
             routeText.maxLines = 3
             navHalf.addView(routeText, params(-1, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -943,7 +943,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
             }
-            limitValue.translationY = -dp(50).toFloat()
+            limitValue.translationY = -adaptiveVisualDp(50).toFloat()
             limitHalf.addView(limitValue, LinearLayout.LayoutParams(dp(96), dp(96)).apply { gravity = Gravity.CENTER })
             val navAndLimit = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -955,7 +955,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             content.addView(left, LinearLayout.LayoutParams(0, -1, 1f))
             // Landscape: group weather immediately above GPS and OSM radar status.
             mapColumn.addView(weatherText, 0, params(-1, dp(52)))
-            speedText.textSize = 158f
+            speedText.textSize = adaptiveVisualSp(158f)
             speedText.setShadowLayer(dp(1).toFloat(), 0f, 0f, if (negativeTheme) Color.BLACK else Color.WHITE)
             content.addView(speedColumn, LinearLayout.LayoutParams(0, -1, 1.2f))
             content.addView(mapColumn, LinearLayout.LayoutParams(0, -1, 1f))
@@ -6525,6 +6525,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             attributes.screenBrightness = desired
             window.attributes = attributes
         }
+    }
+
+    private fun adaptiveVisualDp(value: Int): Int {
+        val config = resources.configuration
+        val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
+        return dp(DashboardLayoutSizing.visualDp(value, config.screenHeightDp, isPortrait))
+    }
+
+    private fun adaptiveVisualSp(value: Float): Float {
+        val config = resources.configuration
+        val isPortrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
+        return value * DashboardLayoutSizing.visualScale(config.screenHeightDp, isPortrait)
     }
 
     private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
