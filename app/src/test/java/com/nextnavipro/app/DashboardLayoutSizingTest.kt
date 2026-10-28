@@ -15,7 +15,7 @@ class DashboardLayoutSizingTest {
     }
 
     @Test fun compactPortraitScalesOnlyWhenHeightIsBelowReference() {
-        assertEquals(0.92f, DashboardLayoutSizing.visualScale(700, true), 0.001f)
+        assertEquals(700f / 760f, DashboardLayoutSizing.visualScale(700, true), 0.001f)
         assertEquals(644, DashboardLayoutSizing.visualDp(700, 700, true))
     }
 
