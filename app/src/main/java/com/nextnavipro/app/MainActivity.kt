@@ -1212,6 +1212,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             refreshDestinationMarker()
             refreshManualSegmentMarkers()
             currentLocation?.let { updateMapForLocation(it, true) }
+            markerAnimationTarget?.let { animateGpsMarkerTo(it, 0L, it.speed) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
                 ?: routePreviewResult?.let { drawRoute(it, false) }
@@ -6386,7 +6387,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
-        if (forceCenter || (movedEnough && followGps)) {
+        // GPS callbacks pass updateMarker=false: after the initial center, the frame-driven
+        // follow loop alone moves the camera. This avoids snapping the camera to every new fix.
+        if (forceCenter || (updateMarker && movedEnough && followGps)) {
             val currentMap = map ?: return
             val oldCamera = currentMap.cameraPosition
             val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldCamera.bearing
@@ -6395,9 +6398,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            // Keep explicit recenter operations animated; normal GPS follow is handled by
-            // updateFollowCameraForMarker() at display-frame cadence.
-            if (forceCenter) {
+            // Explicit recenter actions may animate; the first raw GPS center must not start
+            // an animation that the frame-driven follow loop immediately interrupts.
+            if (forceCenter && updateMarker) {
                 currentMap.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
             } else {
                 currentMap.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
