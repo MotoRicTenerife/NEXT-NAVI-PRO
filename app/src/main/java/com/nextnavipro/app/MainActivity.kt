@@ -6302,7 +6302,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (activityResumed && gpsMarkerAnimator?.isStarted != true) {
             lastMarkerFrameElapsedMs = SystemClock.elapsedRealtime()
             gpsMarkerAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 16L
+                duration = 1_000L
                 repeatCount = ValueAnimator.INFINITE
                 repeatMode = ValueAnimator.RESTART
                 interpolator = LinearInterpolator()
