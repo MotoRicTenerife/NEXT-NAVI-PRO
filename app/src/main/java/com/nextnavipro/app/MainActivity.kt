@@ -162,6 +162,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var destinationPickerOpen = false
     private var gpsMarkerAnimator: ValueAnimator? = null
     private var displayedMarkerLocation: Location? = null
+    private var markerAnimationTarget: Location? = null
+    private var lastMarkerFrameElapsedMs = 0L
     private var dashboardStarted = false
     private var activityStarted = false
     private var activityResumed = false
@@ -1210,6 +1212,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             refreshDestinationMarker()
             refreshManualSegmentMarkers()
             currentLocation?.let { updateMapForLocation(it, true) }
+            markerAnimationTarget?.let { animateGpsMarkerTo(it, 0L, it.speed) }
             drawRadars()
             routeResult?.let { drawRoute(it, false) }
                 ?: routePreviewResult?.let { drawRoute(it, false) }
@@ -6281,55 +6284,84 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
         val snapped = snapMarkerToActiveRoute(target)
-        val markerTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
+        markerAnimationTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
+
         if (!mapStyleReady) {
-            displayedMarkerLocation = Location(markerTarget)
+            displayedMarkerLocation = Location(markerAnimationTarget!!)
             return
         }
-        val start = displayedMarkerLocation?.let { Location(it) }
-            ?: currentLocation?.let { snapMarkerToActiveRoute(it) }
-            ?: Location(markerTarget)
-        val distance = start.distanceTo(markerTarget)
-        gpsMarkerAnimator?.cancel()
-        if (!activityResumed || distance < 0.5f || distance > 80f) {
-            displayedMarkerLocation = Location(markerTarget)
-            updateUserMarker(markerTarget)
+
+        val destination = markerAnimationTarget!!
+        if (displayedMarkerLocation == null) {
+            displayedMarkerLocation = Location(destination)
+            updateUserMarker(destination)
+        }
+
+        val currentPosition = displayedMarkerLocation
+        // A large reacquisition jump should correct the marker immediately, not animate it
+        // across an obviously stale position for several seconds.
+        if (currentPosition != null && currentPosition.distanceTo(destination) > 80f) {
+            displayedMarkerLocation = Location(destination)
+            updateUserMarker(destination)
+            updateFollowCameraForMarker(destination)
             return
         }
-        val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
-        // Animate across nearly the whole interval between accepted fixes. The previous
-        // distance/speed duration often ended early, leaving the marker visibly paused before
-        // the next fix arrived (especially at low speeds or after smoothing).
-        val durationMs = if (movingTimeMs in 180L..2_000L) {
-            movingTimeMs.coerceIn(220L, 1_100L)
-        } else {
-            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
-        }
-        val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
-        val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
-        val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
-        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = durationMs
-            interpolator = LinearInterpolator()
-            addUpdateListener { animation ->
-                val fraction = animation.animatedValue as Float
-                val interpolated = Location(markerTarget).apply {
-                    latitude = start.latitude + (markerTarget.latitude - start.latitude) * fraction
-                    longitude = start.longitude + (markerTarget.longitude - start.longitude) * fraction
-                    if (hasBearing()) {
-                        bearing = (startBearing + bearingDelta * fraction + 360f) % 360f
+
+        // Keep one frame loop alive across incoming fixes. Each fix replaces the target;
+        // it does not cancel and restart the marker's motion.
+        if (activityResumed && gpsMarkerAnimator?.isStarted != true) {
+            lastMarkerFrameElapsedMs = SystemClock.elapsedRealtime()
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1_000L
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.RESTART
+                interpolator = LinearInterpolator()
+            }
+            animator.addUpdateListener {
+                if (!activityResumed || !mapStyleReady) return@addUpdateListener
+                val now = SystemClock.elapsedRealtime()
+                val dtMs = (now - lastMarkerFrameElapsedMs).coerceIn(1L, 100L)
+                lastMarkerFrameElapsedMs = now
+
+                val current = displayedMarkerLocation ?: markerAnimationTarget ?: return@addUpdateListener
+                val nextTarget = markerAnimationTarget ?: return@addUpdateListener
+                val distanceMeters = current.distanceTo(nextTarget)
+                val speedMps = if (nextTarget.hasSpeed()) nextTarget.speed else 0f
+                // Time-based exponential smoothing is independent of frame rate and does not
+                // restart its easing curve whenever another GPS fix arrives.
+                val tauSeconds = if (speedMps >= 8f) 0.14f else 0.20f
+                val alpha = (1.0 - kotlin.math.exp(-dtMs / (tauSeconds * 1000.0))).toFloat()
+                val fromBearing = if (current.hasBearing()) current.bearing
+                    else if (nextTarget.hasBearing()) nextTarget.bearing else 0f
+                val toBearing = if (nextTarget.hasBearing()) nextTarget.bearing else fromBearing
+                val bearingDelta = MarkerMotionMath.shortestBearingDelta(fromBearing, toBearing)
+
+                if (distanceMeters < 0.12f && abs(bearingDelta) < 0.5f) {
+                    displayedMarkerLocation = Location(nextTarget)
+                    updateUserMarker(nextTarget)
+                    updateFollowCameraForMarker(nextTarget)
+                    if (gpsMarkerAnimator === animator) {
+                        gpsMarkerAnimator = null
+                        animator.cancel()
+                    }
+                    return@addUpdateListener
+                }
+
+                val interpolated = Location(nextTarget).apply {
+                    latitude = current.latitude + (nextTarget.latitude - current.latitude) * alpha
+                    longitude = current.longitude + (nextTarget.longitude - current.longitude) * alpha
+                    if (nextTarget.hasBearing() || current.hasBearing()) {
+                        bearing = (fromBearing + bearingDelta * alpha + 360f) % 360f
                         setBearing(bearing)
                     }
                 }
-                displayedMarkerLocation = Location(interpolated)
+                displayedMarkerLocation = interpolated
                 updateUserMarker(interpolated)
-                if (animation.animatedFraction >= 1f && gpsMarkerAnimator === animation) {
-                    gpsMarkerAnimator = null
-                }
+                updateFollowCameraForMarker(interpolated)
             }
+            gpsMarkerAnimator = animator
+            animator.start()
         }
-        gpsMarkerAnimator = animator
-        animator.start()
     }
 
     private fun updateUserMarker(location: Location) {
@@ -6341,23 +6373,58 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(positionFeature)
     }
 
+    private fun updateFollowCameraForMarker(location: Location) {
+        if (!mapStyleReady || !followGps || !activityResumed) return
+        val currentMap = map ?: return
+        val previous = lastCameraLocation
+        if (previous != null && previous.distanceTo(location) < 0.05f) return
+
+        val oldCamera = currentMap.cameraPosition
+        val bearing = if (location.hasBearing() && location.speed >= 3f) {
+            location.bearing.toDouble()
+        } else {
+            oldCamera.bearing
+        }
+        // The marker and follow camera use the same interpolated position. A new GPS fix
+        // no longer restarts a 350 ms camera animation before the previous one can finish.
+        currentMap.moveCamera(
+            CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder(oldCamera)
+                    .target(LatLng(location.latitude, location.longitude))
+                    .bearing(bearing)
+                    .build()
+            )
+        )
+        lastCameraLocation = Location(location)
+    }
+
     private fun updateMapForLocation(location: Location, forceCenter: Boolean, updateMarker: Boolean = true) {
         if (!mapStyleReady) return
         if (updateMarker) {
             displayedMarkerLocation = Location(location)
+            markerAnimationTarget = Location(location)
             updateUserMarker(location)
         }
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
-        if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
-            val oldBearing = map?.cameraPosition?.bearing ?: 0.0
-            val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldBearing
-            val camera = CameraPosition.Builder()
+        // GPS callbacks pass updateMarker=false: after the initial center, the frame-driven
+        // follow loop alone moves the camera. This avoids snapping the camera to every new fix.
+        if (forceCenter || (updateMarker && movedEnough && followGps)) {
+            val currentMap = map ?: return
+            val oldCamera = currentMap.cameraPosition
+            val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldCamera.bearing
+            val camera = CameraPosition.Builder(oldCamera)
                 .target(LatLng(location.latitude, location.longitude))
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
+            // Explicit recenter actions may animate; the first raw GPS center must not start
+            // an animation that the frame-driven follow loop immediately interrupts.
+            if (forceCenter && updateMarker) {
+                currentMap.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
+            } else {
+                currentMap.moveCamera(CameraUpdateFactory.newCameraPosition(camera))
+            }
             lastCameraLocation = Location(location)
         }
     }
@@ -6437,7 +6504,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             ambientTemperatureSensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         }
         updateDeviceStatusText()
-        if (dashboardStarted) requestGps()
+        if (dashboardStarted) {
+            requestGps()
+            markerAnimationTarget?.let { animateGpsMarkerTo(it, 0L, it.speed) }
+        }
     }
 
     override fun onPause() {
@@ -6451,6 +6521,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Restore immediately when another app/system surface takes over.
         setNavigationBrightnessEnabled(false)
         activityResumed = false
+        gpsMarkerAnimator?.cancel()
+        gpsMarkerAnimator = null
+        lastMarkerFrameElapsedMs = 0L
         // While the explicit GPX+CSV recording service is active, keep location callbacks
         // registered even if the dashboard loses focus. Otherwise onPause creates long holes
         // in the trip trace whenever another app or system surface briefly takes over.
@@ -6508,6 +6581,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         speedAlertFlashRed = false
         gpsMarkerAnimator?.cancel()
         gpsMarkerAnimator = null
+        markerAnimationTarget = null
+        displayedMarkerLocation = null
         mapView?.onDestroy()
         mapView = null
         voiceGuide?.stop()
