@@ -2204,7 +2204,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val label = (destination?.name ?: "Viaggio registrato")
                     .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
                 // Human-readable session key shared by the GPX and CSV companion files.
-                val sessionTimeMs = points.firstOrNull()?.timeMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
+                val sessionTimeMs = points.firstOrNull()?.timestampEpochMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
                 val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
                     .format(java.util.Date(sessionTimeMs))
                 val gpxDir = gpxDirectory()
@@ -2406,8 +2406,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val dateFormat = java.text.SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                 val timeFormat = java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                 val labels = tracks.map { (gpxFile, track) ->
-                    val timestamp = gpxFile.nameWithoutExtension.substringBefore('_').toLongOrNull()
-                        ?: gpxFile.lastModified()
+                    val base = gpxFile.nameWithoutExtension
+                    val timestamp = try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
+                            .parse(base.take(19))?.time ?: base.substringBefore('_').toLongOrNull() ?: gpxFile.lastModified()
+                    } catch (_: Exception) {
+                        base.substringBefore('_').toLongOrNull() ?: gpxFile.lastModified()
+                    }
                     val date = dateFormat.format(java.util.Date(timestamp))
                     val time = timeFormat.format(java.util.Date(timestamp))
                     val csv = File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
