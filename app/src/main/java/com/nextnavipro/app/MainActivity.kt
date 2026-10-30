@@ -2128,30 +2128,29 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Servizio in background non disponibile: tieni NEXT NAVI PRO in primo piano durante la registrazione.", Toast.LENGTH_LONG).show()
         }
         lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
-        currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
+        lastRawGpsLocation?.let { appendGpxRecordingPoint(it, force = true) }
         saveGpsDiagnosticCheckpoint()
         saveGpxRecordingCheckpoint()
         Toast.makeText(this, "Registrazione GPX + CSV GPS avviata insieme.", Toast.LENGTH_LONG).show()
     }
 
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
-        if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 25f) return
+        // GPX and CSV must describe the same accepted raw GPS fixes. The CSV also
+        // keeps rejected fixes for diagnostics; those never reach this method.
+        if (!recordingGpx || !location.hasAccuracy() || location.accuracy > 50f) return
         val now = System.currentTimeMillis()
         val point = NavPoint(
             location.latitude,
             location.longitude,
             location.time.takeIf { it > 0L } ?: now
         )
-        val previous = lastRecordedGpxPoint
-        if (!force && previous != null) {
-            val distance = GpxRouteService.distanceMeters(previous, point)
-            if (distance < 5.0 && now - lastGpxPointTimeMs < 5000L) return
-        }
         if (gpxRecordingPoints.size >= 100_000) {
             finishGpxRecording(save = true)
             Toast.makeText(this, "Registrazione fermata: raggiunto il limite di sicurezza dei punti GPX.", Toast.LENGTH_LONG).show()
             return
         }
+        // Do not thin points by distance/time: preserve the original GPS cadence,
+        // including slow manoeuvres and stops, so GPX aligns with accepted CSV rows.
         gpxRecordingPoints.add(point)
         lastRecordedGpxPoint = point
         lastGpxPointTimeMs = now
