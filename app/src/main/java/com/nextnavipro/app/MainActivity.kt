@@ -2203,9 +2203,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             try {
                 val label = (destination?.name ?: "Viaggio registrato")
                     .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
-                val baseName = "${System.currentTimeMillis()}_$label"
+                // Human-readable session key shared by the GPX and CSV companion files.
+                val sessionTimeMs = points.firstOrNull()?.timeMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
+                val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
+                    .format(java.util.Date(sessionTimeMs))
                 val gpxDir = gpxDirectory()
                 val csvDir = gpsDiagnosticsDirectory()
+                var baseName = stamp
+                var suffix = 1
+                while (File(gpxDir, "$baseName.gpx").exists() || File(csvDir, "$baseName.csv").exists()) {
+                    suffix++
+                    baseName = "${stamp}_$suffix"
+                }
                 val gpxTemp = File(gpxDir, "$baseName.gpx.tmp")
                 val csvTemp = File(csvDir, "$baseName.csv.tmp")
                 if (points.isNotEmpty()) {
@@ -6356,8 +6365,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
-        val snapped = snapMarkerToActiveRoute(target)
-        markerAnimationTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
+        // Marker position/course follow accepted GPS, never the planned route geometry.
+        // This prevents route snapping from turning the arrow back toward a route the rider left.
+        markerAnimationTarget = Location(target)
 
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerAnimationTarget!!)
