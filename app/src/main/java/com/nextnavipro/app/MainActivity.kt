@@ -6457,7 +6457,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val alpha = (1.0 - kotlin.math.exp(-dtMs / (tauSeconds * 1000.0))).toFloat()
                 val fromBearing = if (current.hasBearing()) current.bearing
                     else if (nextTarget.hasBearing()) nextTarget.bearing else 0f
-                val toBearing = if (nextTarget.hasBearing()) nextTarget.bearing else fromBearing
+                // Course over ground is unreliable at low speed and can be stale while stopped.
+                // Also reject a course explicitly reported with poor Android bearing accuracy.
+                val targetCourseReliable = nextTarget.hasBearing() && nextTarget.hasSpeed() &&
+                    nextTarget.speed >= 3f &&
+                    (!nextTarget.hasBearingAccuracy() || nextTarget.bearingAccuracyDegrees <= 35f)
+                val toBearing = if (targetCourseReliable) nextTarget.bearing else fromBearing
                 val bearingDelta = MarkerMotionMath.shortestBearingDelta(fromBearing, toBearing)
 
                 if (distanceMeters < 0.12f && abs(bearingDelta) < 0.5f) {
@@ -6504,11 +6509,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (previous != null && previous.distanceTo(location) < 0.05f) return
 
         val oldCamera = currentMap.cameraPosition
-        val bearing = if (location.hasBearing() && location.speed >= 3f) {
-            location.bearing.toDouble()
-        } else {
-            oldCamera.bearing
-        }
+        val reliableCourse = location.hasBearing() && location.hasSpeed() &&
+            location.speed >= 3f &&
+            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
+        val bearing = if (reliableCourse) location.bearing.toDouble() else oldCamera.bearing
         // The marker and follow camera use the same interpolated position. A new GPS fix
         // no longer restarts a 350 ms camera animation before the previous one can finish.
         currentMap.moveCamera(
