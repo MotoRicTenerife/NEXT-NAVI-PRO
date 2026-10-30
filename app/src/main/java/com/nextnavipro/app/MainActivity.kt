@@ -2396,26 +2396,58 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     Toast.makeText(this, "Nessun file GPX valido nella libreria.", Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
-                val totalBytes = tracks.sumOf { it.first.length() }
                 val pairedCsvFiles = tracks.map { (gpxFile, _) ->
                     File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
                 }.filter { it.isFile }
-                val csvBytes = pairedCsvFiles.sumOf { it.length() }
-                val totalMb = totalBytes / (1024.0 * 1024.0)
-                val csvMb = csvBytes / (1024.0 * 1024.0)
-                // Android AlertDialog cannot reliably show both setMessage() and setItems()
-                // in the same dialog: on some devices the message replaces the selectable list.
-                // Put the storage summary in the title so every saved GPX remains selectable.
-                val libraryTitle = String.format(
-                    Locale.getDefault(),
-                    "Libreria GPX • %d • %.2f MB | CSV: %d • %.2f MB",
-                    tracks.size, totalMb, pairedCsvFiles.size, csvMb
-                )
+                val totalBytes = tracks.sumOf { it.first.length() } + pairedCsvFiles.sumOf { it.length() }
+                val libraryTitle = String.format(Locale.getDefault(),
+                    "ARCHIVIO VIAGGI • %d GPX • %d CSV • %.2f MB",
+                    tracks.size, pairedCsvFiles.size, totalBytes / (1024.0 * 1024.0))
+                val dateFormat = java.text.SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val timeFormat = java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                val labels = tracks.map { (gpxFile, track) ->
+                    val timestamp = gpxFile.nameWithoutExtension.substringBefore('_').toLongOrNull()
+                        ?: gpxFile.lastModified()
+                    val date = dateFormat.format(java.util.Date(timestamp))
+                    val time = timeFormat.format(java.util.Date(timestamp))
+                    val csv = File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
+                    "$date  •  $time  •  ${String.format(Locale.getDefault(), "%.1f km", track.distanceKm)}" +
+                        if (csv.isFile) "  •  GPX + CSV" else "  •  SOLO GPX"
+                }.toTypedArray()
+                val selected = BooleanArray(tracks.size)
                 AlertDialog.Builder(this).setTitle(libraryTitle)
-                    .setItems(tracks.map { (_, track) ->
-                        track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
-                    }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
-                    .setNeutralButton("Seleziona / elimina file") { _, _ -> showBulkDeleteSavedTripFiles() }
+                    .setMultiChoiceItems(labels, selected) { _, which, checked -> selected[which] = checked }
+                    .setPositiveButton("Elimina selezionati") { _, _ ->
+                        val chosen = tracks.indices.filter { selected[it] }
+                        if (chosen.isEmpty()) {
+                            Toast.makeText(this, "Seleziona almeno un viaggio.", Toast.LENGTH_SHORT).show()
+                            showSavedGpxRoutes()
+                        } else {
+                            AlertDialog.Builder(this).setTitle("Conferma eliminazione")
+                                .setMessage("Verranno eliminati i GPX selezionati e i CSV associati con lo stesso identificativo data/ora. I file non selezionati resteranno intatti.")
+                                .setNegativeButton("Annulla", null)
+                                .setPositiveButton("Elimina") { _, _ ->
+                                    var gpxDeleted = 0
+                                    var csvDeleted = 0
+                                    var failures = 0
+                                    chosen.forEach { index ->
+                                        val gpx = tracks[index].first
+                                        val csv = File(gpsDiagnosticsDirectory(), gpx.nameWithoutExtension + ".csv")
+                                        if (gpx.delete()) gpxDeleted++ else failures++
+                                        if (csv.exists()) {
+                                            if (csv.delete()) csvDeleted++ else failures++
+                                        }
+                                    }
+                                    Toast.makeText(this, "Eliminati $gpxDeleted GPX e $csvDeleted CSV • errori: $failures", Toast.LENGTH_LONG).show()
+                                    showSavedGpxRoutes()
+                                }.show()
+                        }
+                    }
+                    .setNeutralButton("Apri / esporta") { _, _ ->
+                        val chosen = tracks.indices.filter { selected[it] }
+                        if (chosen.size == 1) showSavedGpxActions(tracks[chosen[0]].first, tracks[chosen[0]].second)
+                        else Toast.makeText(this, "Seleziona un solo viaggio per aprirlo o esportarlo.", Toast.LENGTH_SHORT).show()
+                    }
                     .setNegativeButton("Chiudi", null).show()
             }
         }
