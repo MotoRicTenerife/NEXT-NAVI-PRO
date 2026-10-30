@@ -4729,7 +4729,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
         appendGpsDiagnosticSample(location)
-        appendGpxRecordingPoint(smoothed)
+        // GPX and CSV accepted samples must use the same original GPS fix.
+        // The smoothed position is reserved for map rendering and navigation UI.
+        appendGpxRecordingPoint(location)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
