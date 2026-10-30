@@ -2058,6 +2058,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "Salva percorso attivo",
             "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
             "Esporta GPX attivo…",
+            "Gestisci file GPX / CSV singoli…",
             "DEBUG: CSV GPS e memoria"
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
@@ -2067,7 +2068,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 2 -> saveActiveGpx()
                 3 -> showSavedGpxRoutes()
                 4 -> exportActiveGpx()
-                5 -> showGpsDiagnosticsMenu()
+                5 -> showBulkDeleteSavedTripFiles()
+                6 -> showGpsDiagnosticsMenu()
             }
         }.setNegativeButton("Chiudi", null).show()
     }
