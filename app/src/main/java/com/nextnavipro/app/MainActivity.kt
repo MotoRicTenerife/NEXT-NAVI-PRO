@@ -2298,6 +2298,79 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private data class SavedTripFileEntry(val file: File, val label: String, val kind: String)
+
+    private fun savedTripFileEntries(): List<SavedTripFileEntry> {
+        val gpxFiles = gpxDirectory().listFiles()
+            ?.filter { it.isFile && it.extension.equals("gpx", true) && it.name != "gpx_recording_in_progress.gpx" }
+            .orEmpty()
+        val csvFiles = savedGpsDiagnosticFiles()
+        val entries = mutableListOf<SavedTripFileEntry>()
+        gpxFiles.forEach { gpx ->
+            entries += SavedTripFileEntry(gpx, "GPX  •  ${gpx.nameWithoutExtension}", "GPX")
+        }
+        csvFiles.forEach { csv ->
+            val paired = File(gpxDirectory(), csv.nameWithoutExtension + ".gpx").isFile
+            val label = if (paired) "CSV  •  ${csv.nameWithoutExtension}" else "CSV senza GPX  •  ${csv.nameWithoutExtension}"
+            entries += SavedTripFileEntry(csv, label, "CSV")
+        }
+        return entries.sortedWith(compareByDescending<SavedTripFileEntry> { it.file.lastModified() }.thenBy { it.kind })
+    }
+
+    private fun showBulkDeleteSavedTripFiles() {
+        if (recordingGpx || gpsDiagnosticRecording) {
+            Toast.makeText(this, "Ferma prima la registrazione attiva: i file in corso non sono eliminabili.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val entries = savedTripFileEntries()
+        if (entries.isEmpty()) {
+            Toast.makeText(this, "Non ci sono file GPX o CSV da gestire.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val checked = BooleanArray(entries.size)
+        val labels = entries.map { entry ->
+            val date = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(java.util.Date(entry.file.lastModified()))
+            "${entry.label}\n$date  •  ${String.format(Locale.getDefault(), "%.1f", entry.file.length() / 1024.0)} KB"
+        }.toTypedArray()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Seleziona file da eliminare")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
+            .setNeutralButton("Seleziona tutto", null)
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Elimina selezionati", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                for (i in checked.indices) {
+                    checked[i] = true
+                    dialog.listView.setItemChecked(i, true)
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selected = entries.indices.filter { checked[it] }.map { entries[it] }
+                if (selected.isEmpty()) {
+                    Toast.makeText(this, "Seleziona almeno un file.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val summary = selected.groupingBy { it.kind }.eachCount()
+                    .entries.joinToString(" • ") { "${it.value} ${it.key}" }
+                AlertDialog.Builder(this)
+                    .setTitle("Conferma eliminazione")
+                    .setMessage("Saranno eliminati definitivamente $summary. I file non selezionati resteranno intatti.")
+                    .setNegativeButton("Annulla", null)
+                    .setPositiveButton("Elimina") { _, _ ->
+                        val deleted = selected.count { it.file.exists() && it.file.delete() }
+                        val failed = selected.size - deleted
+                        Toast.makeText(this, if (failed == 0) "Eliminati $deleted file." else "Eliminati $deleted file; $failed non eliminati.", Toast.LENGTH_LONG).show()
+                        showSavedGpxRoutes()
+                    }
+                    .show()
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
     private fun showSavedGpxRoutes() {
         val files = gpxDirectory().listFiles()?.filter { it.isFile && it.extension.equals("gpx", true) && it.name != "gpx_recording_in_progress.gpx" }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
@@ -2333,6 +2406,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .setItems(tracks.map { (_, track) ->
                         track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
                     }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
+                    .setNeutralButton("Seleziona / elimina file") { _, _ -> showBulkDeleteSavedTripFiles() }
                     .setNegativeButton("Chiudi", null).show()
             }
         }
