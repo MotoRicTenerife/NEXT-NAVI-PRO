@@ -57,6 +57,40 @@ class TrafficDecisionEngineTest {
         )
     }
 
+    @Test fun confirmedClosureOnActiveRouteIsNeverSilentlyDiscarded() {
+        val closedActiveRoute = route("active", 2_400, closed = true)
+        val closure = hazard(
+            id = "active-route-closure",
+            distance = 500.0,
+            severity = TrafficDecisionEngine.Severity.CLOSED
+        )
+        val result = TrafficDecisionEngine.evaluate(
+            context(hazards = listOf(closure)).copy(activeRoute = closedActiveRoute)
+        )!!
+        assertEquals(TrafficDecisionEngine.Action.WARN_HAZARD, result.action)
+        assertEquals("active-route-closure", result.hazardId)
+        assertNull(result.alternativeRouteId)
+    }
+
+    @Test fun confirmedClosureDoesNotProduceUnvalidatedDetourRecommendations() {
+        val closedActiveRoute = route("active", 2_400, closed = true)
+        val closure = hazard(distance = 500.0, severity = TrafficDecisionEngine.Severity.CLOSED)
+        val unvalidatedAlternative = route("alternative", 900)
+        val result = TrafficDecisionEngine.evaluate(
+            context(hazards = listOf(closure), alternatives = listOf(unvalidatedAlternative))
+                .copy(activeRoute = closedActiveRoute)
+        )!!
+        assertEquals(TrafficDecisionEngine.Action.WARN_HAZARD, result.action)
+        assertNull(result.alternativeRouteId)
+    }
+
+    @Test fun confirmedClosureRequiresAValidClosureObservation() {
+        val closedActiveRoute = route("active", 2_400, closed = true)
+        assertNull(
+            TrafficDecisionEngine.evaluate(context(hazards = listOf(hazard())).copy(activeRoute = closedActiveRoute))
+        )
+    }
+
     @Test fun rejectsStaleLowConfidenceOrWrongDirectionHazards() {
         val stale = hazard(observed = now - 181_000L)
         val weak = hazard(confidence = 0.4)
