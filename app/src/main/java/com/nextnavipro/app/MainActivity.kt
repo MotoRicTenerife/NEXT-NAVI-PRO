@@ -3798,6 +3798,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .put("trafficObservedAtEpochMs", report.observedAtEpochMs)
                     .put("trafficCache", report.cache)
                     .put("incidents", incidentArray)
+                val routeOrigin = currentLocation?.takeIf {
+                    it.latitude.isFinite() && it.longitude.isFinite() &&
+                        it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
+                        it.accuracy <= 50f && System.currentTimeMillis() - it.time in 0..120_000L
+                }
+                if (routeOrigin != null) {
+                    context.put("routeRequest", JSONObject()
+                        .put("origin", JSONObject()
+                            .put("latitude", routeOrigin.latitude)
+                            .put("longitude", routeOrigin.longitude))
+                        .put("destination", JSONObject()
+                            .put("latitude", place.point.latitude)
+                            .put("longitude", place.point.longitude))
+                        .put("waypoints", JSONArray())
+                        .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+                }
                 pendingJarvisTrafficQuestion = null
                 jarvisStatusText.text = jarvisAssistantName() + " • dati traffico ricevuti"
                 askJarvisOnline(question, context)
