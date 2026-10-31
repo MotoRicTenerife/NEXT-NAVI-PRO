@@ -3893,6 +3893,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (!waypointDistance.isFinite() || waypointDistance > 250.0) {
                     throw IllegalStateException("Il motore di percorso non ha confermato il passaggio sulla strada richiesta.")
                 }
+                if (alternativeRoute.distanceKm > maxOf(directRoute.distanceKm * 2.5, directRoute.distanceKm + 20.0)) {
+                    throw IllegalStateException("La variante trovata è eccessivamente lunga rispetto al percorso diretto.")
+                }
                 val fetchedAt = System.currentTimeMillis()
                 runOnUiThread {
                     if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
