@@ -1158,7 +1158,7 @@ async function handle(req, res) {
   let weatherResult = null;
   let weatherFailureCode = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
+  const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|wetter|regen|pluie|temps actuel|chuva|previsao do tempo|tempo agora|weer|rain|wind)\b/.test(normalizedMessage);
   const asksTraffic = isTrafficQuery(message);
 
   if (asksWeather && location) {
