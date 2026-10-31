@@ -35,23 +35,31 @@ def post_json(path, payload):
 
 
 def wait_for_feature_activation():
-    deadline = time.monotonic() + 360
+    deadline = time.monotonic() + 600
+    expected_revision = os.environ.get("RENDER_EXPECTED_REVISION", "").strip()
     last = None
     while time.monotonic() < deadline:
         try:
             status, _, body = get("/traffic/status")
             payload = json.loads(body.decode("utf-8"))
-            last = payload
-            if (status == 200 and payload.get("tomtomConfigured") is True
+            health_status, _, health_body = get("/health")
+            health = json.loads(health_body.decode("utf-8"))
+            revision = str(health.get("revision") or "")
+            revision_matches = (not expected_revision or
+                                (revision and (expected_revision.startswith(revision) or revision.startswith(expected_revision))))
+            last = {"traffic": payload, "revision": revision, "expectedRevision": expected_revision}
+            if (status == 200 and health_status == 200 and revision_matches
+                    and payload.get("tomtomConfigured") is True
                     and payload.get("trafficFlowEnabled") is True
-                    and payload.get("incidentDetailsEnabled") is True):
-                print("TomTom traffic status PASSED:", json.dumps(payload, ensure_ascii=False))
+                    and payload.get("incidentDetailsEnabled") is True
+                    and payload.get("trafficSegmentEnabled") is True):
+                print("TomTom traffic deployment PASSED:", json.dumps(last, ensure_ascii=False))
                 return
         except Exception as error:
             last = str(error)
-        print("Waiting for Render deployment to expose enabled TomTom traffic:", last)
+        print("Waiting for Render to deploy the expected revision and enable all TomTom traffic services:", last)
         time.sleep(15)
-    raise RuntimeError("TomTom traffic features did not become active on Render within 6 minutes: " + repr(last))
+    raise RuntimeError("Expected Render traffic revision was not active within 10 minutes: " + repr(last))
 
 
 def main():
