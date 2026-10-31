@@ -103,6 +103,12 @@ class JarvisCommandParserTest {
         )
     }
 
+    @Test fun parsesRoadWaypointFollowUpsFromConversation() {
+        assertEquals(JarvisCommand.TrafficVia("TF-1"), JarvisCommandParser.parse("E passando dalla TF-1?"))
+        assertEquals(JarvisCommand.TrafficVia("TF-82"), JarvisCommandParser.parse("E se prendo la TF-82?"))
+        assertEquals(JarvisCommand.TrafficVia("Calle Morro Afonso Alto"), JarvisCommandParser.parse("Passando per Calle Morro Afonso Alto?"))
+    }
+
     @Test fun stressParserWithRepeatedAndMalformedVoiceInput() {
         val inputs = listOf(
             "Voglio andare a Guaza, cosa mi aspetta per la strada?",
