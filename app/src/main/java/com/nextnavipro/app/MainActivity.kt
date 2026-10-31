@@ -65,6 +65,8 @@ import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.android.style.sources.TileSet
+import org.maplibre.android.style.sources.VectorSource
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback as FusedLocationCallback
 import com.google.android.gms.location.LocationRequest as FusedLocationRequest
@@ -105,6 +107,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
         private const val SOURCE_ROUTE = "next-active-route"
+        private const val SOURCE_TRAFFIC_FLOW = "next-live-traffic-flow"
         private const val SOURCE_RADARS = "next-speed-cameras"
         private const val SOURCE_MANUAL_SEGMENTS = "next-manual-speed-segments"
         private const val SOURCE_MANUAL_ARROWS = "next-manual-speed-arrows"
@@ -1129,6 +1132,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun trafficTileTemplate(): String? {
+        // The public app never receives the TomTom key. Render proxies and briefly caches
+        // vector tiles so credentials and provider quota remain server-side.
+        val configured = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+        if (!configured.startsWith("https://") || !configured.endsWith("/jarvis")) return null
+        return configured.removeSuffix("/jarvis").trimEnd('/') + "/traffic/flow/{z}/{x}/{y}"
+    }
+
     private fun applyMapStyle(readyMap: MapLibreMap) {
         mapStyleReady = false
         val satelliteStyle = """{"version":8,"name":"NEXT NAVI PRO Satellite","sources":{"satellite":{"type":"raster","tiles":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],"tileSize":256,"maxzoom":19,"attribution":"Imagery © Esri, Maxar, Earthstar Geographics and the GIS community"}},"layers":[{"id":"satellite-imagery","type":"raster","source":"satellite","minzoom":0,"maxzoom":22}]}"""
@@ -1162,6 +1173,44 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             style.addImage("next-user-arrow-icon", createGpsArrowBitmap())
             style.addImage("next-place-flag-icon", createPlaceFlagBitmap())
             style.addImage("next-manual-direction-icon", createGpsArrowBitmap())
+            // Live traffic is a separate vector layer, not a recoloring of the basemap.
+            // TomTom Orbis v2 relative_speed: 0 = stopped, 1 = free-flow.
+            trafficTileTemplate()?.let { tileTemplate ->
+                val tileSet = TileSet("2.0.0", tileTemplate).apply {
+                    name = "NEXT NAVI PRO live traffic"
+                    attribution = "Traffic data © TomTom"
+                    minZoom = 6f
+                    maxZoom = 22f
+                }
+                style.addSource(VectorSource(SOURCE_TRAFFIC_FLOW, tileSet))
+                val trafficColor = Expression.step(
+                    Expression.get("relative_speed"),
+                    Expression.literal("#D50000"),
+                    Expression.stop(0.25f, "#D50000"),
+                    Expression.stop(0.45f, "#F57C00"),
+                    Expression.stop(0.65f, "#FBC02D"),
+                    Expression.stop(0.80f, "#2EAD54")
+                )
+                val trafficWidth = Expression.interpolate(
+                    Expression.linear(),
+                    Expression.zoom(),
+                    arrayOf(
+                        Expression.stop(6f, 1.2f),
+                        Expression.stop(11f, 2.2f),
+                        Expression.stop(16f, 4.0f),
+                        Expression.stop(20f, 5.5f)
+                    )
+                )
+                style.addLayer(LineLayer("next-live-traffic-lines", SOURCE_TRAFFIC_FLOW)
+                    .withSourceLayer("Traffic flow")
+                    .withProperties(
+                        PropertyFactory.lineColor(trafficColor),
+                        PropertyFactory.lineWidth(trafficWidth),
+                        PropertyFactory.lineOpacity(0.92f),
+                        PropertyFactory.lineCap("round"),
+                        PropertyFactory.lineJoin("round")
+                    ))
+            }
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
