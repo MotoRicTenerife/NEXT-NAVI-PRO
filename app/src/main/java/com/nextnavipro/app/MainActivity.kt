@@ -3354,7 +3354,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
-        speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
+        val accepted = speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
+        if (!accepted) setJarvisOrbActive(false)
     }
 
     private fun onJarvisButtonPressed() {
@@ -3363,6 +3364,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
         stopManagedSpeech()
+        setJarvisOrbActive(false)
         if (jarvisListening) {
             speechRecognizer?.cancel()
             setJarvisOrbActive(false)
