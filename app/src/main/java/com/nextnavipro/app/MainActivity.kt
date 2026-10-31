@@ -3493,17 +3493,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             )
             return
         }
-        if (JarvisIntentClassifier.isTrafficQuestion(spokenTranscript) &&
-            routeResult != null && destination != null && activeRouteFetchedAt > 0L) {
-            answerJarvisTrafficForRoute(
-                spokenTranscript,
-                destination!!,
-                routeResult!!,
-                activeRouteFetchedAt,
-                lastRouteAlongMeters
-            )
-            return
-        }
         // When the rider explicitly asked to change destination, the next utterance
         // is treated as the requested destination unless it is another known command.
         if (jarvisAwaitingDestination) {
