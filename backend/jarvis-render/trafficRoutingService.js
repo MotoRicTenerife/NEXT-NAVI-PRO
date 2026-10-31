@@ -24,7 +24,7 @@ export function validateTomTomRouteRequest(input) {
   };
 }
 
-export function buildTomTomRouteUrl(input, apiKey) {
+export function buildTomTomRouteUrl(input, apiKey, language = "en-GB") {
   const request = validateTomTomRouteRequest(input);
   if (!request) throw new TypeError("Invalid TomTom route request");
   if (typeof apiKey !== "string" || !apiKey.trim()) throw new TypeError("TomTom API key is missing");
@@ -41,7 +41,8 @@ export function buildTomTomRouteUrl(input, apiKey) {
   url.searchParams.append("sectionType", "travelMode");
   url.searchParams.append("sectionType", "traffic");
   url.searchParams.set("report", "effectiveSettings");
-  url.searchParams.set("language", "it-IT");
+  const safeLanguage = typeof language === "string" && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) ? language : "en-GB";
+  url.searchParams.set("language", safeLanguage);
   return url;
 }
 
@@ -139,7 +140,8 @@ export function normalizeTomTomTrafficRoutes(payload, vehicleMode, observedAtEpo
 export async function fetchTomTomTrafficRoutes(input, {
   apiKey,
   fetchImpl = globalThis.fetch,
-  now = Date.now()
+  now = Date.now(),
+  language = "en-GB"
 } = {}) {
   const request = validateTomTomRouteRequest(input);
   if (!request) {
@@ -147,7 +149,7 @@ export async function fetchTomTomTrafficRoutes(input, {
     error.statusCode = 400;
     throw error;
   }
-  const url = buildTomTomRouteUrl(request, apiKey);
+  const url = buildTomTomRouteUrl(request, apiKey, language);
   const response = await fetchImpl(url, {
     method: "GET",
     headers: { accept: "application/json" },
