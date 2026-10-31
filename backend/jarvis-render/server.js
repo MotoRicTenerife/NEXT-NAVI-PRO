@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
+import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -426,32 +427,33 @@ async function handle(req, res) {
     if (type !== "way" || !idRaw || !Number.isSafeInteger(osmId) || osmId <= 0) return send(res, 400, { error: "A valid OSM way id is required" });
     const ip = getClientIp(req);
     if (roadSearchRateLimited(ip, Date.now())) return send(res, 429, { error: "Too many road geometry requests; try again later" });
-    const query = "[out:json][timeout:12];way(" + osmId + ");out tags geom;";
+
+    const providerErrors = [];
+    const userAgent = "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)";
+    const overpassQuery = "[out:json][timeout:12];way(" + osmId + ");out tags geom;";
     const endpoints = [
       "https://overpass-api.de/api/interpreter",
       "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
       "https://overpass.private.coffee/api/interpreter"
     ];
-    const providerErrors = [];
+
     for (const endpoint of endpoints) {
       try {
         const upstream = await fetch(endpoint, {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", accept: "application/json", "User-Agent": "NEXT-NAVI-PRO/0.3 (https://github.com/MotoRicTenerife/NEXT-NAVI-PRO)" },
-          body: new URLSearchParams({ data: query }),
-          signal: AbortSignal.timeout(11000)
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", accept: "application/json", "User-Agent": userAgent },
+          body: new URLSearchParams({ data: overpassQuery }),
+          signal: AbortSignal.timeout(9000)
         });
-        const body = await upstream.text();
-        if (!upstream.ok) { providerErrors.push("HTTP " + upstream.status); continue; }
-        const data = JSON.parse(body);
-        const way = Array.isArray(data.elements) ? data.elements.find(item => item.type === "way" && Number(item.id) === osmId) : null;
-        if (!way || !Array.isArray(way.geometry) || way.geometry.length < 2) { providerErrors.push("way geometry missing"); continue; }
-        const geometry = way.geometry.filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lon)).map(point => ({ latitude: point.lat, longitude: point.lon }));
-        if (geometry.length < 2) { providerErrors.push("invalid way coordinates"); continue; }
+        if (!upstream.ok) { providerErrors.push("Overpass HTTP " + upstream.status); continue; }
+        const data = await upstream.json();
+        const parsed = parseOverpassWayGeometry(data, osmId);
+        if (!parsed) { providerErrors.push("Overpass geometry missing or incomplete"); continue; }
+        const way = parsed.way;
         return send(res, 200, {
           ok: true, source: "OpenStreetMap/Overpass", fetchedAt: new Date().toISOString(),
           osmType: "way", osmId, name: way.tags?.name || way.tags?.ref || null,
-          tags: way.tags || {}, geometry,
+          tags: way.tags || {}, geometry: parsed.geometry,
           direction: {
             oneway: way.tags?.oneway || null,
             junction: way.tags?.junction || null,
@@ -461,11 +463,51 @@ async function handle(req, res) {
           }
         });
       } catch (error) {
-        providerErrors.push(error instanceof Error ? error.name : "provider error");
+        providerErrors.push("Overpass " + (error instanceof Error ? error.name : "provider error"));
       }
     }
-    console.warn("OSM road geometry unavailable", { osmId, providersTried: providerErrors.length });
-    return send(res, 502, { error: "OpenStreetMap road geometry unavailable", providersTried: providerErrors.length });
+
+    // Overpass mirrors can all be unavailable or rate-limited. The official OSM API
+    // provides the way's ordered node IDs and their coordinates in one bounded request.
+    try {
+      const upstream = await fetch("https://api.openstreetmap.org/api/0.6/way/" + osmId + "/full.json", {
+        method: "GET",
+        headers: { accept: "application/json", "User-Agent": userAgent },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!upstream.ok) {
+        providerErrors.push("OSM API HTTP " + upstream.status);
+      } else {
+        const data = await upstream.json();
+        const parsed = parseOsmApiFullWayGeometry(data, osmId);
+        if (!parsed) {
+          providerErrors.push("OSM API way nodes missing or incomplete");
+        } else {
+          const way = parsed.way;
+          return send(res, 200, {
+            ok: true, source: "OpenStreetMap API", fetchedAt: new Date().toISOString(),
+            osmType: "way", osmId, name: way.tags?.name || way.tags?.ref || null,
+            tags: way.tags || {}, geometry: parsed.geometry,
+            direction: {
+              oneway: way.tags?.oneway || null,
+              junction: way.tags?.junction || null,
+              motorVehicle: way.tags?.motor_vehicle || null,
+              access: way.tags?.access || null,
+              note: "Geometry follows the ordered OSM way nodes; direction tags must be checked separately."
+            }
+          });
+        }
+      }
+    } catch (error) {
+      providerErrors.push("OSM API " + (error instanceof Error ? error.name : "provider error"));
+    }
+
+    console.warn("OSM road geometry unavailable", { osmId, providerErrors });
+    return send(res, 502, {
+      error: "OpenStreetMap road geometry unavailable",
+      providersTried: providerErrors.length,
+      providerErrors
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/speed-limit/status") {
