@@ -18,6 +18,7 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 - `POST /jarvis`: accepts JSON containing `message`, optional `language`, and optional `personality` (`preset`, `irony`, `warmth`, `energy`, `concision`); returns `{"reply":"..."}`. Personality fields are bounded and allow-listed by the server. Voice speed and pitch are applied locally by Android and are not sent to the backend.
 - `GET /speed-limit/status`: reports whether TomTom is configured and the provider guard state without exposing credentials. OSM road-editor endpoints are separate and do not supply automatic legal speed limits.
 - `POST /speed-limit`: accepts 2–8 recent valid GPS points and uses TomTom Snap to Roads. It reads only explicit maximum speed limits from the matched road segment. If TomTom cannot return an explicit, unambiguous limit, the result remains unknown/null; neither the Android automatic display nor the road-editor proposal falls back to OSM `maxspeed`. TomTom is requested in metric mode. Unknown or missing units are rejected instead of being guessed. Requests are rate-limited on the server. Provider keys remain server-side.
+- Live traffic questions sent to `POST /jarvis` use the current GPS point to query TomTom Traffic Flow (observed speed vs free-flow speed, travel time and confidence) and TomTom Traffic Incidents v5 (nearby jams, accidents, works and closures). Results are passed to Gemini for a contextual explanation; the DGT feed is only a secondary incident cross-check/fallback and is never presented as a measurement of traffic speed. Nearby traffic responses are cached for 45 seconds and are queried only on explicit traffic questions. Both TomTom traffic endpoints use the same server-side token bucket, cooldown and global daily budget as Snap to Roads; the budget is shared across all non-tile TomTom calls.
 - Gemini key remains server-side in `GEMINI_API_KEY`.
 - The server listens on `0.0.0.0` and Render's `PORT`.
 - Request body is capped at 16 KiB, user text is capped by `MAX_REQUEST_CHARS`, and an in-memory best-effort per-IP rate limit is applied. This is not authentication and is not a robust global abuse-control system.
@@ -30,9 +31,9 @@ GitHub Actions defaults `NEXT_NAVI_AI_ENDPOINT` to the Render URL above. If the 
 
 ## TomTom quota and rate limiting
 
-`POST /speed-limit` calls TomTom Snap to Roads, which counts against TomTom's free allowance of
+`POST /speed-limit` calls TomTom Snap to Roads and the Traffic Flow/Incident Details endpoints, which count against TomTom's free allowance of
 2,500 non-tile requests per day (shared by every non-tile API on the key; Snap to Roads default
-QPS is 5). Admission is decided in `speedLimitGuard.js`, independently from the manual-segment
+QPS is 5). Admission for every TomTom non-tile request is decided in `speedLimitGuard.js`, independently from the manual-segment
 archive (`/speed-limit-segments*`, 20 requests / 10 minutes per client, unchanged):
 
 | Control | Default | Environment override |
