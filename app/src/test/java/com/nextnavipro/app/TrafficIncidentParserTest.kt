@@ -1,7 +1,6 @@
 package com.nextnavipro.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,6 +70,25 @@ class TrafficIncidentParserTest {
     @Test fun malformedCoordinatesAreRejected() {
         val malformed = response(geometry = """{"type":"Point","coordinates":[999,28.12]}""")
         assertTrue(TrafficIncidentParser.parse(malformed, now).isEmpty())
+    }
+
+    @Test fun missingTimeValidityIsNotAssumedToBePresent() {
+        val missing = response().replace("\"timeValidity\":\"present\",", "")
+        assertTrue(TrafficIncidentParser.parse(missing, now).isEmpty())
+    }
+
+    @Test fun malformedLineStringVertexRejectsTheWholeIncident() {
+        val malformed = response(
+            geometry = """{"type":"LineString","coordinates":[[-16.75,28.12],null]}"""
+        )
+        assertTrue(TrafficIncidentParser.parse(malformed, now).isEmpty())
+    }
+
+    @Test fun lineStringRequiresAtLeastTwoVertices() {
+        val incomplete = response(
+            geometry = """{"type":"LineString","coordinates":[[-16.75,28.12]]}"""
+        )
+        assertTrue(TrafficIncidentParser.parse(incomplete, now).isEmpty())
     }
 
     @Test fun missingIdentityOrGeometryIsRejected() {
