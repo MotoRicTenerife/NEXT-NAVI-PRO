@@ -44,6 +44,15 @@ export function sanitizeTripContext(raw, now = Date.now()) {
       baselineRoute = { distanceKm: Math.round(baselineDistanceKm * 10) / 10, durationSeconds: baselineDurationSeconds, routeSource: baselineSource };
     }
   }
+  let baselineRouteRequest = null;
+  if (raw.baselineRouteRequest && typeof raw.baselineRouteRequest === "object" && !Array.isArray(raw.baselineRouteRequest)) {
+    const origin = cleanPoint(raw.baselineRouteRequest.origin);
+    const destination = cleanPoint(raw.baselineRouteRequest.destination);
+    const requestMode = raw.baselineRouteRequest.vehicleMode;
+    if (origin && destination && requestMode === vehicleMode) {
+      baselineRouteRequest = { origin, destination, waypoints: [], vehicleMode };
+    }
+  }
   let routeRequest = null;
   if (raw.routeRequest && typeof raw.routeRequest === "object" && !Array.isArray(raw.routeRequest)) {
     const origin = cleanPoint(raw.routeRequest.origin);
@@ -105,6 +114,7 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     trafficObservedAtEpochMs,
     trafficCache,
     routeRequest,
+    baselineRouteRequest,
     viaRoadName,
     baselineRoute,
     routeFresh: true,
