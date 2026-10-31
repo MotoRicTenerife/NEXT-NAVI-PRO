@@ -1385,6 +1385,7 @@ async function handle(req, res) {
     diagnostics: {
       responseMode,
       model,
+      language,
       historyMessages: history.length,
       tripContextAccepted: Boolean(tripContext),
       trafficContext: tripContext
