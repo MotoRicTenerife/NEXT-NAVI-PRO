@@ -9,8 +9,15 @@ import org.junit.Test
 class TrafficDecisionEngineTest {
     private val now = 1_800_000_000_000L
 
-    private fun route(id: String, eta: Int, confidence: Double = 0.9, closed: Boolean = false) =
-        TrafficDecisionEngine.RouteEstimate(id, eta, 20_000.0, confidence, now, closed)
+    private fun route(
+        id: String,
+        eta: Int,
+        confidence: Double = 0.9,
+        closed: Boolean = false,
+        vehicleAccessVerified: Boolean = false
+    ) = TrafficDecisionEngine.RouteEstimate(
+        id, eta, 20_000.0, confidence, now, closed, vehicleAccessVerified
+    )
 
     private fun hazard(
         id: String = "incident-1",
@@ -39,11 +46,25 @@ class TrafficDecisionEngineTest {
 
     @Test fun offersOnlyMaterialFreshAlternativeAndNeverChangesRouteItself() {
         val result = TrafficDecisionEngine.evaluate(context(
-            alternatives = listOf(route("alternative", 1_900))
+            alternatives = listOf(route("alternative", 1_900, vehicleAccessVerified = true))
         ))!!
         assertEquals(TrafficDecisionEngine.Action.OFFER_ALTERNATIVE, result.action)
         assertEquals("alternative", result.alternativeRouteId)
         assertEquals(500, result.estimatedSavingsSeconds)
+    }
+
+    @Test fun neverOffersAlternativeWithoutExplicitVehicleAccessValidation() {
+        val unverified = route("unverified", 1_500)
+        val result = TrafficDecisionEngine.evaluate(context(alternatives = listOf(unverified)))!!
+        assertEquals(TrafficDecisionEngine.Action.WARN_HAZARD, result.action)
+        assertNull(result.alternativeRouteId)
+    }
+
+    @Test fun offersAlternativeOnlyAfterVehicleAccessValidation() {
+        val verified = route("verified-motorcycle-route", 1_900, vehicleAccessVerified = true)
+        val result = TrafficDecisionEngine.evaluate(context(alternatives = listOf(verified)))!!
+        assertEquals(TrafficDecisionEngine.Action.OFFER_ALTERNATIVE, result.action)
+        assertEquals("verified-motorcycle-route", result.alternativeRouteId)
     }
 
     @Test fun rejectsAlternativeThatSavesTooLittleOrHasClosure() {
