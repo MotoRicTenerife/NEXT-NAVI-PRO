@@ -25,7 +25,7 @@ test("TomTom incident parser sorts nearby incidents and rejects malformed geomet
       id: "near", iconCategory: 6, magnitudeOfDelay: 2,
       events: [{ description: "Coda" }], roadNumbers: ["TF-1"], delay: 240
     }},
-    { geometry: { type: "Point", coordinates: [-16.9, 28.3] }, properties: { id: "far" } },
+    { geometry: { type: "Point", coordinates: [-17.0, 29.0] }, properties: { id: "far" } },
     { geometry: { type: "Point", coordinates: ["bad", 28] }, properties: { id: "bad" } }
   ]}, { latitude: 28.1001, longitude: -16.7001 });
   assert.equal(incidents.length, 1);
