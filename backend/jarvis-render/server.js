@@ -15,9 +15,9 @@ const roadSearchIpWindows = new Map();
 const archiveLimiter = createFixedWindowLimiter({ max: 20, windowMs: WINDOW_MS });
 // Traffic vector tiles are shared across riders through a short server cache. Keep
 // a per-client guard as well: a public APK must never expose or burn the provider key.
-const trafficTileLimiter = createFixedWindowLimiter({ max: 900, windowMs: WINDOW_MS });
+const trafficTileLimiter = createFixedWindowLimiter({ max: 240, windowMs: WINDOW_MS });
 const trafficTileCache = new Map();
-const TRAFFIC_TILE_CACHE_MS = 25000;
+const TRAFFIC_TILE_CACHE_MS = 60000;
 const TRAFFIC_TILE_CACHE_MAX = 600;
 // Incident corridor lookups are far less frequent than visible map tiles.
 const trafficIncidentLimiter = createFixedWindowLimiter({ max: 24, windowMs: WINDOW_MS });
@@ -401,6 +401,10 @@ async function handleCloudSpeedSegments(req, res, url) {
 
 async function handleTrafficFlowTile(req, res, url) {
   if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+  // Do not consume shared provider quota until Render entitlement and client abuse controls are approved.
+  if (process.env.TRAFFIC_FLOW_ENABLED !== "true") {
+    return send(res, 503, { error: "Traffic flow overlay is not enabled" });
+  }
   const tile = parseTrafficTilePath(url.pathname);
   if (!tile) return send(res, 400, { error: "Invalid traffic tile coordinates" });
   const apiKey = process.env.TOMTOM_API_KEY;
