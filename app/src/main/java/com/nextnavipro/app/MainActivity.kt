@@ -409,9 +409,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val languageStatus = voiceGuide?.setLanguage(preferredJarvisTtsLocale()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 voiceGuide?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-                    override fun onDone(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
-                    override fun onError(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
+                    override fun onStart(utteranceId: String?) {
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(true) }
+                        }
+                    }
+                    override fun onDone(utteranceId: String?) {
+                        clearCompletedSpeech(utteranceId)
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(false) }
+                        }
+                    }
+                    override fun onError(utteranceId: String?) {
+                        clearCompletedSpeech(utteranceId)
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(false) }
+                        }
+                    }
                 })
                 if (voiceGuideReady) {
                     applyJarvisVoicePreference()
