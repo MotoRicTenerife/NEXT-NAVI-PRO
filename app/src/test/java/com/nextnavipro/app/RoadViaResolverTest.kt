@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RoadViaResolverTest {
@@ -50,8 +51,8 @@ class RoadViaResolverTest {
     fun measuresWaypointDistanceToRouteSegments() {
         val point = NavPoint(28.05, -16.65)
         val route = listOf(NavPoint(28.05, -16.70), NavPoint(28.05, -16.60))
-        assert(RoadViaResolver.distanceToRouteMeters(point, route) < 1.0)
-        assert(RoadViaResolver.distanceToRouteMeters(NavPoint(28.10, -16.65), route) > 5_000.0)
+        assertTrue(RoadViaResolver.distanceToRouteMeters(point, route) < 1.0)
+        assertTrue(RoadViaResolver.distanceToRouteMeters(NavPoint(28.10, -16.65), route) > 5_000.0)
     }
 
     @Test
