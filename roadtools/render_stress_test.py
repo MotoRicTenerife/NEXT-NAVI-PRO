@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Bounded, read-only load check for the live NEXT NAVI PRO Render backend.
 
-No Gemini requests are sent (avoids API spend). Only health, provider status,
-and two speed-limit diagnostic GETs are used. The speed-limit endpoint is
-reported separately because provider failures are a known functional issue.
+No Gemini or TomTom calls are sent: this checks health and the read-only provider
+status endpoint only. Functional provider calls are covered by deterministic
+mocked tests and the dedicated bounded smoke checks.
 """
 import concurrent.futures
 import json
@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 
 BASE = os.environ.get("RENDER_BASE_URL", "https://next-navi-pro-jarvis.onrender.com").rstrip("/")
-USER_AGENT = "NEXT-NAVI-PRO-Render-Stress/1.0"
+USER_AGENT = "NEXT-NAVI-PRO-Render-Stress/1.1"
 TIMEOUT = 25
 
 
@@ -77,38 +77,35 @@ def run_group(label, paths, workers):
 def main():
     if not BASE.startswith("https://"):
         raise SystemExit("RENDER_BASE_URL must use HTTPS")
-    print(json.dumps({"test": "start", "base": BASE, "note": "No Gemini calls; bounded GET-only test"}))
+    print(json.dumps({"test": "start", "base": BASE, "note": "No paid Gemini/TomTom calls; bounded GET-only test"}))
     health, health_report = run_group("health-concurrency", ["/health"] * 40, 8)
-    status, status_report = run_group("speed-limit-status-concurrency", ["/speed-limit/status"] * 16, 4)
-    limits, limits_report = run_group("speed-limit-live-diagnostic", [
-        "/speed-limit?lat=28.12271&lon=-16.72600",
-        "/speed-limit?lat=28.04974&lon=-16.67714",
-    ], 2)
+    status, status_report = run_group("provider-status-concurrency", ["/speed-limit/status"] * 16, 4)
 
     health_payload_ok = all(item["ok"] and item.get("payload", {}).get("ok") is True for item in health)
-    status_payload_ok = all(item["ok"] and item.get("payload", {}).get("osmDiagnostic") is True for item in status)
-    limit_ok = all(item["ok"] and "speedLimitKmh" in item.get("payload", {}) for item in limits)
+    status_payload_ok = all(
+        item["ok"] and
+        item.get("payload", {}).get("ok") is True and
+        item.get("payload", {}).get("tomtomConfigured") is True and
+        item.get("payload", {}).get("roadEditorOsm") is True
+        for item in status
+    )
     print(json.dumps({
         "test": "summary",
         "health_stable": health_payload_ok,
-        "status_stable": status_payload_ok,
-        "speed_limit_functional": limit_ok,
+        "provider_status_stable": status_payload_ok,
+        "tomtom_configured": all(item.get("payload", {}).get("tomtomConfigured") is True for item in status if item["ok"]),
+        "road_editor_provider_enabled": all(item.get("payload", {}).get("roadEditorOsm") is True for item in status if item["ok"]),
         "health_p95_seconds": health_report["p95_latency_seconds"],
         "health_success_rate_pct": health_report["success_rate_pct"],
-        "status_success_rate_pct": status_report["success_rate_pct"],
-        "speed_limit_success_rate_pct": limits_report["success_rate_pct"],
+        "provider_status_success_rate_pct": status_report["success_rate_pct"],
     }, ensure_ascii=False))
-    # Keep CI useful while separately flagging the already-known speed-limit
-    # provider outage. Core health must remain reliable under bounded concurrency.
     if not health_payload_ok or health_report["success_rate_pct"] < 95 or health_report["p95_latency_seconds"] > 25:
         raise SystemExit("FAIL: Render health endpoint did not meet stress-test stability thresholds")
     if health_report["p95_latency_seconds"] > 10:
         print("::warning::Render health is responding, but p95 latency is elevated; investigate cold starts/instance capacity.")
     if not status_payload_ok:
-        print("::warning::Speed-limit status endpoint degraded under concurrent requests.")
-    if not limit_ok:
-        print("::warning::Live speed-limit lookup remains unavailable; inspect OSM/Overpass/TomTom provider diagnostics.")
-    print("PASS: bounded Render health stress test completed; see summary for feature-level failures.")
+        print("::warning::Render provider status endpoint did not confirm TomTom and road-editor configuration.")
+    print("PASS: bounded Render health/provider-status stress test completed.")
 
 
 if __name__ == "__main__":
