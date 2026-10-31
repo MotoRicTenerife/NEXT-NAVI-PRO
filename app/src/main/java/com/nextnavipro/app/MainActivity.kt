@@ -2656,7 +2656,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             is Int -> editor.putInt(key, value)
                             is Long -> editor.putLong(key, value)
                             is Float -> editor.putFloat(key, value)
-                            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toMutableSet())
                         }
                     }
                     if (!editor.commit()) throw IllegalStateException("Impossibile salvare le impostazioni ripristinate.")
