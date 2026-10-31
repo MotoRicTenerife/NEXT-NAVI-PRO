@@ -3477,6 +3477,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         pendingJarvisWeather = false
         val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
         if (spokenTranscript.isNotBlank()) jarvisMemory.addMessage("user", spokenTranscript)
+        if (JarvisCommandParser.parse(spokenTranscript) !is JarvisCommand.TrafficPreview) {
+            pendingJarvisTrafficQuestion = null
+        }
         // Live weather requests take priority over any pending destination clarification.
         if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
             answerJarvisWeather()
@@ -3741,15 +3744,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val now = System.currentTimeMillis()
         if (routeFetchedAtEpochMs <= 0L || routeFetchedAtEpochMs > now || now - routeFetchedAtEpochMs > 30L * 60L * 1000L) {
             pendingJarvisTrafficQuestion = null
-            speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Ricalcolo prima il percorso.")
+            speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Aggiorna il percorso e poi ripeto il controllo.")
             return
         }
         val requestGeneration = jarvisResponseGeneration
         jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico TomTom sul percorso…"
         thread(name = "jarvis-route-traffic") {
+            var failureDetail = ""
             val report = try {
                 TrafficIncidentClient.fetchForRoute(route.points, currentRouteDistanceMeters)
             } catch (error: Exception) {
+                failureDetail = error.message.orEmpty()
                 android.util.Log.w("NEXT_NAVI_TRAFFIC", "Route traffic lookup failed", error)
                 null
             }
@@ -3758,7 +3763,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (report == null) {
                     pendingJarvisTrafficQuestion = null
                     jarvisStatusText.text = jarvisAssistantName() + " • traffico non verificato"
-                    speakJarvis("Non riesco a verificare le segnalazioni TomTom lungo questo percorso. Non posso dedurre che la strada sia libera.")
+                    val spokenFailure = when {
+                        failureDetail.contains("TRAFFIC_HTTP_503") -> "Il servizio delle segnalazioni TomTom su Render non risulta abilitato o configurato. Non posso verificare il traffico su questo percorso."
+                        failureDetail.contains("TRAFFIC_HTTP_429") -> "Il servizio TomTom ha raggiunto il limite temporaneo di richieste. Riprovo più tardi."
+                        failureDetail.contains("TRAFFIC_HTTP_502") -> "TomTom non sta rispondendo correttamente. Il traffico su questo percorso non è verificabile in questo momento."
+                        else -> "Non riesco a verificare le segnalazioni TomTom lungo questo percorso."
+                    }
+                    speakJarvis(spokenFailure + " Non posso dedurre che la strada sia libera.")
                     return@runOnUiThread
                 }
                 val incidentArray = JSONArray()
@@ -4155,7 +4166,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         showCachedRoutePreview(place, cached)
                     } else {
                         routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
-                        if (voiceCommand) speakJarvis("La ricerca online non è disponibile e non ho una copia locale utilizzabile per questa destinazione.")
+                        if (voiceCommand) {
+                            val trafficQuestion = pendingJarvisTrafficQuestion
+                            pendingJarvisTrafficQuestion = null
+                            if (trafficQuestion != null) speakJarvis("La ricerca della destinazione non è disponibile, quindi non posso verificare il traffico.")
+                            else speakJarvis("La ricerca online non è disponibile e non ho una copia locale utilizzabile per questa destinazione.")
+                        }
                         pendingJarvisPreview = false
                     }
                 }
@@ -4406,7 +4422,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (origin == null) {
             val cached = RouteInsightCache.loadForDestination(this, place.name, anyOrigin)
             if (cached != null) showCachedRoutePreview(place, cached, announce)
-            else if (announce) speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            else if (pendingJarvisTrafficQuestion != null) {
+                pendingJarvisTrafficQuestion = null
+                speakJarvis("Per controllare il traffico verso questa destinazione mi serve una posizione GPS affidabile.")
+            } else if (announce) {
+                speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            }
             return
         }
         if (isCalculatingRoute) return
