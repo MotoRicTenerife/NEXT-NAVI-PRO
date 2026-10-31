@@ -206,6 +206,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
+    private lateinit var jarvisOrbView: JarvisOrbView
     private var jarvisListening = false
     private var jarvisAwaitingDestination = false
     private var jarvisResponseGeneration = 0
@@ -561,6 +562,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setTextColor(if (negativeTheme) cyan else Color.rgb(0, 85, 105))
         }
         jarvisRow.addView(jarvisStatusText, LinearLayout.LayoutParams(0, dp(38), 1f))
+        jarvisOrbView = JarvisOrbView(this).apply {
+            contentDescription = appText("Jarvis attivo")
+            setActive(false)
+        }
+        jarvisRow.addView(jarvisOrbView, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+            setMargins(dp(3), 0, dp(3), 0)
+        })
         root.addView(jarvisRow, params(-1, dp(40)))
 
         val content = LinearLayout(this).apply {
@@ -3320,7 +3328,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun setJarvisOrbActive(active: Boolean) {
+        if (::jarvisOrbView.isInitialized) jarvisOrbView.setActive(active)
+    }
+
     private fun speakJarvis(message: String, remember: Boolean = true) {
+        setJarvisOrbActive(true)
         if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
             pendingJarvisSpeech = message
@@ -3338,6 +3351,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         stopManagedSpeech()
         if (jarvisListening) {
             speechRecognizer?.cancel()
+            setJarvisOrbActive(false)
             jarvisListening = false
             jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Ascolto annullato")
@@ -3360,18 +3374,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Ti ascolto…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Ti ascolto…")
+                        }
                     }
                     override fun onBeginningOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Sto ascoltando…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Sto ascoltando…")
+                        }
                     }
                     override fun onRmsChanged(rmsdB: Float) = Unit
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
                     override fun onEndOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Elaboro…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Elaboro…")
+                        }
                     }
                     override fun onError(error: Int) {
                         runOnUiThread {
+                            setJarvisOrbActive(false)
                             jarvisListening = false
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             if (::jarvisStatusText.isInitialized) {
@@ -3386,6 +3410,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                     override fun onResults(results: Bundle?) {
                         runOnUiThread {
+                            setJarvisOrbActive(true)
                             jarvisListening = false
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -6872,6 +6897,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Stop user-started speech recognition when the app loses foreground focus.
         if (jarvisListening) {
             try { speechRecognizer?.cancel() } catch (_: Exception) { }
+            setJarvisOrbActive(false)
             jarvisListening = false
             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
             if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Premi il microfono e parla")
@@ -6957,4 +6983,94 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+
+
+/** Small animated Jarvis status orb. Slow rotation means ready; faster rotation means active. */
+private class JarvisOrbView(context: android.content.Context) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+    }
+    private var rotationDegrees = 0f
+    private var active = false
+    private var animator: ValueAnimator? = null
+
+    fun setActive(value: Boolean) {
+        if (active == value) return
+        active = value
+        startRotation()
+        invalidate()
+    }
+
+    private fun startRotation() {
+        animator?.cancel()
+        animator = ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = if (active) 1900L else 7200L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                rotationDegrees = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        startRotation()
+    }
+
+    override fun onDetachedFromWindow() {
+        animator?.cancel()
+        animator = null
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val cx = width / 2f
+        val cy = height / 2f
+        val radius = (minOf(width, height) / 2f) - 2.5f * density
+        if (radius <= 0f) return
+
+        val outer = android.graphics.Path().apply {
+            addCircle(cx, cy, radius, android.graphics.Path.Direction.CW)
+        }
+        val save = canvas.save()
+        canvas.clipPath(outer)
+        fillPaint.shader = android.graphics.RadialGradient(
+            cx - radius * 0.28f, cy - radius * 0.32f, radius * 1.45f,
+            intArrayOf(Color.rgb(255, 105, 105), Color.rgb(175, 0, 28), Color.rgb(35, 0, 12)),
+            null, android.graphics.Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, radius, fillPaint)
+
+        canvas.save()
+        canvas.rotate(rotationDegrees, cx, cy)
+        fillPaint.shader = android.graphics.SweepGradient(
+            cx, cy,
+            intArrayOf(
+                Color.rgb(255, 25, 35), Color.rgb(105, 0, 18),
+                Color.rgb(255, 70, 70), Color.rgb(190, 0, 45),
+                Color.rgb(255, 15, 25), Color.rgb(75, 0, 15),
+                Color.rgb(255, 25, 35)
+            ), null
+        )
+        canvas.drawCircle(cx, cy, radius, fillPaint)
+        canvas.restore()
+        canvas.restoreToCount(save)
+
+        glowPaint.color = if (active) Color.argb(235, 255, 65, 75) else Color.argb(175, 220, 35, 55)
+        glowPaint.strokeWidth = (if (active) 2.1f else 1.4f) * density
+        canvas.drawCircle(cx, cy, radius, glowPaint)
+        letterPaint.textSize = radius * 1.22f
+        val baseline = cy - (letterPaint.ascent() + letterPaint.descent()) / 2f
+        canvas.drawText("J", cx, baseline, letterPaint)
+    }
 }
