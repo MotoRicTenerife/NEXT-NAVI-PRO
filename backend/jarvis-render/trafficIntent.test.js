@@ -10,7 +10,9 @@ test("recognizes live traffic questions in supported device languages", () => {
     "Quelle est la circulation vers Los Cristianos ?",
     "Wie ist der Verkehr nach Los Cristianos?",
     "Como está o trânsito até Los Cristianos?",
-    "Hoe is het verkeer naar Los Cristianos?"
+    "Hoe is het verkeer naar Los Cristianos?",
+    "Com\u0027è il traffico intorno a me adesso?",
+    "How is traffic around my current location?"
   ]) assert.equal(isTrafficQuery(phrase), true, phrase);
 });
 
