@@ -5,8 +5,10 @@ export function normalizeLanguageTag(value, acceptLanguage = "en-GB") {
   const candidates = [value, ...String(acceptLanguage || "").split(",").map(part => part.split(";")[0].trim())];
   for (const candidate of candidates) {
     if (typeof candidate !== "string") continue;
-    const tag = candidate.trim().replace(/_/g, "-").slice(0, 35);
-    if (tag.length <= 35 && LANGUAGE_TAG.test(tag)) return tag;
+    const rawTag = candidate.trim();
+    if (rawTag.length > 35) continue;
+    const tag = rawTag.replace(/_/g, "-");
+    if (LANGUAGE_TAG.test(tag)) return tag;
   }
   return "en-GB";
 }
