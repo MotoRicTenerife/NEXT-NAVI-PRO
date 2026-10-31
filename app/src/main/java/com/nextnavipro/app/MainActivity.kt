@@ -1234,6 +1234,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         renderSpeedDigits(speed)
         updateSpeedGaugeBorder(speed)
         updateSpeedingAlertState()
+        // Re-evaluate the voice warning on every fresh speed sample, not only when
+        // TomTom publishes a new limit. Otherwise the warning can wait for the next
+        // road-limit lookup even though the rider is already over the known limit.
+        updateSpeedLimitDisplay()
     }
 
     private fun renderSpeedDigits(speed: Int?) {
@@ -2058,6 +2062,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "Salva percorso attivo",
             "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
             "Esporta GPX attivo…",
+            "Gestisci file GPX / CSV singoli…",
             "DEBUG: CSV GPS e memoria"
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
@@ -2067,7 +2072,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 2 -> saveActiveGpx()
                 3 -> showSavedGpxRoutes()
                 4 -> exportActiveGpx()
-                5 -> showGpsDiagnosticsMenu()
+                5 -> showBulkDeleteSavedTripFiles()
+                6 -> showGpsDiagnosticsMenu()
             }
         }.setNegativeButton("Chiudi", null).show()
     }
@@ -2186,6 +2192,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateGpxButtonState()
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
+        // Capture the trip label before navigation cleanup can clear destination.
+        val recordingLabel = (destination?.name ?: "Viaggio registrato")
+            .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim()
+            .ifBlank { "Viaggio registrato" }.take(60)
         gpsDiagnosticRecording = false
         stopService(Intent(this, GpsRecordingForegroundService::class.java))
         if (!save) {
@@ -2201,11 +2211,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             var finalGpx: File? = null
             var finalCsv: File? = null
             try {
-                val label = (destination?.name ?: "Viaggio registrato")
-                    .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
-                val baseName = "${System.currentTimeMillis()}_$label"
+                val label = recordingLabel
+                // Human-readable session key shared by the GPX and CSV companion files.
+                val sessionTimeMs = points.firstOrNull()?.timestampEpochMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
+                val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
+                    .format(java.util.Date(sessionTimeMs))
                 val gpxDir = gpxDirectory()
                 val csvDir = gpsDiagnosticsDirectory()
+                var baseName = stamp
+                var suffix = 1
+                while (File(gpxDir, "$baseName.gpx").exists() || File(csvDir, "$baseName.csv").exists()) {
+                    suffix++
+                    baseName = "${stamp}_$suffix"
+                }
                 val gpxTemp = File(gpxDir, "$baseName.gpx.tmp")
                 val csvTemp = File(csvDir, "$baseName.csv.tmp")
                 if (points.isNotEmpty()) {
@@ -2387,26 +2405,63 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     Toast.makeText(this, "Nessun file GPX valido nella libreria.", Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
-                val totalBytes = tracks.sumOf { it.first.length() }
                 val pairedCsvFiles = tracks.map { (gpxFile, _) ->
                     File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
                 }.filter { it.isFile }
-                val csvBytes = pairedCsvFiles.sumOf { it.length() }
-                val totalMb = totalBytes / (1024.0 * 1024.0)
-                val csvMb = csvBytes / (1024.0 * 1024.0)
-                // Android AlertDialog cannot reliably show both setMessage() and setItems()
-                // in the same dialog: on some devices the message replaces the selectable list.
-                // Put the storage summary in the title so every saved GPX remains selectable.
-                val libraryTitle = String.format(
-                    Locale.getDefault(),
-                    "Libreria GPX • %d • %.2f MB | CSV: %d • %.2f MB",
-                    tracks.size, totalMb, pairedCsvFiles.size, csvMb
-                )
+                val totalBytes = tracks.sumOf { it.first.length() } + pairedCsvFiles.sumOf { it.length() }
+                val libraryTitle = String.format(Locale.getDefault(),
+                    "ARCHIVIO VIAGGI • %d GPX • %d CSV • %.2f MB",
+                    tracks.size, pairedCsvFiles.size, totalBytes / (1024.0 * 1024.0))
+                val dateFormat = java.text.SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val timeFormat = java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                val labels = tracks.map { (gpxFile, track) ->
+                    val base = gpxFile.nameWithoutExtension
+                    val timestamp = try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
+                            .parse(base.take(19))?.time ?: base.substringBefore('_').toLongOrNull() ?: gpxFile.lastModified()
+                    } catch (_: Exception) {
+                        base.substringBefore('_').toLongOrNull() ?: gpxFile.lastModified()
+                    }
+                    val date = dateFormat.format(java.util.Date(timestamp))
+                    val time = timeFormat.format(java.util.Date(timestamp))
+                    val csv = File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
+                    "$date  •  $time  •  ${String.format(Locale.getDefault(), "%.1f km", track.distanceKm)}" +
+                        if (csv.isFile) "  •  GPX + CSV" else "  •  SOLO GPX"
+                }.toTypedArray()
+                val selected = BooleanArray(tracks.size)
                 AlertDialog.Builder(this).setTitle(libraryTitle)
-                    .setItems(tracks.map { (_, track) ->
-                        track.name + " • " + String.format(Locale.getDefault(), "%.1f km", track.distanceKm)
-                    }.toTypedArray()) { _, which -> showSavedGpxActions(tracks[which].first, tracks[which].second) }
-                    .setNeutralButton("Seleziona / elimina file") { _, _ -> showBulkDeleteSavedTripFiles() }
+                    .setMultiChoiceItems(labels, selected) { _, which, checked -> selected[which] = checked }
+                    .setPositiveButton("Elimina selezionati") { _, _ ->
+                        val chosen = tracks.indices.filter { selected[it] }
+                        if (chosen.isEmpty()) {
+                            Toast.makeText(this, "Seleziona almeno un viaggio.", Toast.LENGTH_SHORT).show()
+                            showSavedGpxRoutes()
+                        } else {
+                            AlertDialog.Builder(this).setTitle("Conferma eliminazione")
+                                .setMessage("Verranno eliminati i GPX selezionati e i CSV associati con lo stesso identificativo data/ora. I file non selezionati resteranno intatti.")
+                                .setNegativeButton("Annulla", null)
+                                .setPositiveButton("Elimina") { _, _ ->
+                                    var gpxDeleted = 0
+                                    var csvDeleted = 0
+                                    var failures = 0
+                                    chosen.forEach { index ->
+                                        val gpx = tracks[index].first
+                                        val csv = File(gpsDiagnosticsDirectory(), gpx.nameWithoutExtension + ".csv")
+                                        if (gpx.delete()) gpxDeleted++ else failures++
+                                        if (csv.exists()) {
+                                            if (csv.delete()) csvDeleted++ else failures++
+                                        }
+                                    }
+                                    Toast.makeText(this, "Eliminati $gpxDeleted GPX e $csvDeleted CSV • errori: $failures", Toast.LENGTH_LONG).show()
+                                    showSavedGpxRoutes()
+                                }.show()
+                        }
+                    }
+                    .setNeutralButton("Apri / esporta") { _, _ ->
+                        val chosen = tracks.indices.filter { selected[it] }
+                        if (chosen.size == 1) showSavedGpxActions(tracks[chosen[0]].first, tracks[chosen[0]].second)
+                        else Toast.makeText(this, "Seleziona un solo viaggio per aprirlo o esportarlo.", Toast.LENGTH_SHORT).show()
+                    }
                     .setNegativeButton("Chiudi", null).show()
             }
         }
@@ -4683,7 +4738,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
         appendGpsDiagnosticSample(location)
-        appendGpxRecordingPoint(smoothed)
+        // GPX and CSV accepted samples must use the same original GPS fix.
+        // The smoothed position is reserved for map rendering and navigation UI.
+        appendGpxRecordingPoint(location)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
@@ -5701,7 +5758,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (distanceToDestination > arrivalRadius && !movingAwayAfterPassing && !parkedJustBeyond) return false
 
         navigationArrived = true
-        // Stop the route/recording exactly once, then leave a durable arrival message on screen.
+        // Arrival ends the navigation trip even when recording was started independently
+        // from the dashboard. Finalize the paired GPX + CSV before clearRoute clears
+        // the destination and its label.
+        if (recordingGpx || gpsDiagnosticRecording) {
+            finishGpxRecording(save = true)
+        }
+        // Stop the route exactly once, then leave a durable arrival message on screen.
         clearRoute()
         routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
         if (voiceGuideReady) {
@@ -5956,8 +6019,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
-        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
+        // Give the rider more reaction time: first cue targets about 30 seconds,
+        // second cue about 12 seconds. Distance caps prevent excessive early prompts
+        // in fast traffic and minimums keep low-speed manoeuvres readable.
+        val earlyThreshold = (speedMps * 30f).coerceIn(180f, 900f)
+        val mediumThreshold = (speedMps * 12f).coerceIn(70f, 300f)
         val stage = when {
             distanceToTurn <= 10.0 -> 4
             distanceToTurn <= 50.0 -> 3
@@ -5972,7 +6038,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (stage > announcedStage) {
             announcedStage = stage
             val spoken = when (stage) {
-                1 -> "Tra poco, " + instruction
+                1 -> "Preparati. Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
                 2 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
                 3 -> "Tra cinquanta metri, " + instruction
                 4 -> instruction
@@ -6356,8 +6422,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
-        val snapped = snapMarkerToActiveRoute(target)
-        markerAnimationTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
+        // Marker position/course follow accepted GPS, never the planned route geometry.
+        // This prevents route snapping from turning the arrow back toward a route the rider left.
+        markerAnimationTarget = Location(target)
 
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerAnimationTarget!!)
@@ -6406,7 +6473,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val alpha = (1.0 - kotlin.math.exp(-dtMs / (tauSeconds * 1000.0))).toFloat()
                 val fromBearing = if (current.hasBearing()) current.bearing
                     else if (nextTarget.hasBearing()) nextTarget.bearing else 0f
-                val toBearing = if (nextTarget.hasBearing()) nextTarget.bearing else fromBearing
+                // Course over ground is unreliable at low speed and can be stale while stopped.
+                // Also reject a course explicitly reported with poor Android bearing accuracy.
+                val targetCourseReliable = nextTarget.hasBearing() && nextTarget.hasSpeed() &&
+                    nextTarget.speed >= 3f &&
+                    (!nextTarget.hasBearingAccuracy() || nextTarget.bearingAccuracyDegrees <= 35f)
+                val toBearing = if (targetCourseReliable) nextTarget.bearing else fromBearing
                 val bearingDelta = MarkerMotionMath.shortestBearingDelta(fromBearing, toBearing)
 
                 if (distanceMeters < 0.12f && abs(bearingDelta) < 0.5f) {
@@ -6453,11 +6525,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (previous != null && previous.distanceTo(location) < 0.05f) return
 
         val oldCamera = currentMap.cameraPosition
-        val bearing = if (location.hasBearing() && location.speed >= 3f) {
-            location.bearing.toDouble()
-        } else {
-            oldCamera.bearing
-        }
+        val reliableCourse = location.hasBearing() && location.hasSpeed() &&
+            location.speed >= 3f &&
+            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
+        val bearing = if (reliableCourse) location.bearing.toDouble() else oldCamera.bearing
         // The marker and follow camera use the same interpolated position. A new GPS fix
         // no longer restarts a 350 ms camera animation before the previous one can finish.
         currentMap.moveCamera(
