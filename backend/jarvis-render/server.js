@@ -8,6 +8,7 @@ import { sanitizeTripContext } from "./tripContextPolicy.js";
 import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
 import { normalizeLanguageTag } from "./languagePolicy.js";
 import { isTrafficQuery } from "./trafficIntent.js";
+import { isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -536,7 +537,7 @@ async function fetchTomTomTrafficRoutesCached(input, clientIp, language = "en-GB
 
 async function handleTomTomTrafficRoute(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
-  if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true") {
+  if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
     return send(res, 503, { error: "TomTom traffic-aware routing is not enabled" });
   }
   const apiKey = process.env.TOMTOM_API_KEY;
@@ -619,7 +620,7 @@ async function handle(req, res) {
       ok: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
       incidentDetailsEnabled: process.env.TRAFFIC_INCIDENTS_ENABLED === "true",
-      trafficAwareRoutingEnabled: process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true"
+      trafficAwareRoutingEnabled: isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)
     });
   }
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
@@ -1048,7 +1049,7 @@ async function handle(req, res) {
   let trafficFailureCode = null;
   const tripContext = sanitizeTripContext(input?.tripContext);
   if (tripContext?.routeRequest) {
-    if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
+    if (isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
       const routeJobs = [
         {
           label: tripContext.viaRoadName ? "TOMTOM WAYPOINT ROUTE VIA " + tripContext.viaRoadName : "TOMTOM REQUESTED ROUTE",
@@ -1191,7 +1192,7 @@ async function handle(req, res) {
     } else if (!trafficDestination) {
       trafficFailureCode = "missing_destination";
       liveContext += "\nNO EXPLICIT DESTINATION WAS FOUND: ask the user where they want to go. Do not guess a destination and do not substitute a generic nearby-incident lookup.";
-    } else if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true" || !process.env.TOMTOM_API_KEY) {
+    } else if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
       trafficFailureCode = "tomtom_routing_disabled";
       liveContext += "\nTOMTOM LIVE TRAFFIC ROUTING IS NOT ENABLED OR CONFIGURED ON THE SERVER. State that TomTom traffic cannot currently be verified. Do not use another provider as a fallback and do not invent traffic conditions.";
     } else {
