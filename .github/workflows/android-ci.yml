@@ -152,6 +152,22 @@ jobs:
                           "tomtomConfigured": provider_status.get("tomtomConfigured"),
                           "roadEditorOsm": provider_status.get("roadEditorOsm")
                       })
+
+                      base_url = endpoint[:-len("/jarvis")]
+                      with urllib.request.urlopen(base_url + "/test", timeout=20) as response:
+                          test_html = response.read(100000).decode("utf-8", "replace")
+                          if response.status != 200 or "JARVIS LAB" not in test_html or "Conversazione con Jarvis" not in test_html:
+                              raise RuntimeError("Jarvis Lab test console page is missing or invalid")
+                      print("Render Jarvis Lab test console PASSED")
+
+                      status, traffic_status = get_json(base_url + "/traffic/status", 20)
+                      if status != 200 or traffic_status.get("ok") is not True:
+                          raise RuntimeError("Render traffic diagnostics endpoint returned an invalid payload")
+                      print("Render traffic feature status:", {
+                          "tomtomConfigured": traffic_status.get("tomtomConfigured"),
+                          "incidentDetailsEnabled": traffic_status.get("incidentDetailsEnabled"),
+                          "trafficAwareRoutingEnabled": traffic_status.get("trafficAwareRoutingEnabled")
+                      })
                   except Exception as error:
                       if isinstance(error, urllib.error.HTTPError):
                           detail = error.read(400).decode("utf-8", "replace")
