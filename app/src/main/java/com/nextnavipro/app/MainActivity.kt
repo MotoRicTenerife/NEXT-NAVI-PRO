@@ -89,6 +89,8 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sqrt
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity(), LocationListener, SensorEventListener {
     companion object {
@@ -112,6 +114,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val SOURCE_DESTINATION = "next-destination"
         private const val SOURCE_ROUTE = "next-active-route"
         private const val SOURCE_TRAFFIC_FLOW = "next-live-traffic-flow"
+        private const val SOURCE_TRAFFIC_INCIDENTS = "next-live-traffic-incidents"
         private const val SOURCE_RADARS = "next-speed-cameras"
         private const val SOURCE_MANUAL_SEGMENTS = "next-manual-speed-segments"
         private const val SOURCE_MANUAL_ARROWS = "next-manual-speed-arrows"
@@ -165,6 +168,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var selectionMode = false
     private var map: MapLibreMap? = null
     private var mapStyleReady = false
+    private var lastTrafficIncidentFetchAtMs = 0L
+    private var trafficIncidentRequestInFlight = false
+    private var lastTrafficIncidentLocation: Location? = null
     private var mapLayer = "standard"
     private var destinationPickerOpen = false
     private var gpsMarkerAnimator: ValueAnimator? = null
@@ -1245,6 +1251,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         PropertyFactory.lineJoin("round")
                     ))
             }
+            // Live incident geometry is fetched through Render; no TomTom key is shipped in the APK.
+            style.addSource(GeoJsonSource(SOURCE_TRAFFIC_INCIDENTS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(LineLayer("next-live-traffic-incident-lines", SOURCE_TRAFFIC_INCIDENTS).withProperties(
+                PropertyFactory.lineColor("#D50000"),
+                PropertyFactory.lineWidth(4.5f),
+                PropertyFactory.lineOpacity(0.96f),
+                PropertyFactory.lineCap("round"),
+                PropertyFactory.lineJoin("round")
+            ))
+            style.addLayer(CircleLayer("next-live-traffic-incident-points", SOURCE_TRAFFIC_INCIDENTS).withProperties(
+                PropertyFactory.circleColor("#F57C00"),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2f)
+            ))
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
                 PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
@@ -7123,6 +7144,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             displayedMarkerLocation = Location(location)
             updateUserMarker(location)
         }
+        refreshTrafficIncidents(location)
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
         if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
@@ -7135,6 +7157,82 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .build()
             map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
             lastCameraLocation = Location(location)
+        }
+    }
+
+    /**
+     * Polls TomTom incident details for a bounded area around the rider. The backend
+     * enforces provider-side rate limits and caching; the APK never contains the TomTom key.
+     */
+    private fun refreshTrafficIncidents(location: Location, force: Boolean = false) {
+        if (!mapStyleReady || trafficIncidentRequestInFlight) return
+        val endpoint = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+        if (!endpoint.startsWith("https://") || !endpoint.endsWith("/jarvis")) return
+
+        val now = SystemClock.elapsedRealtime()
+        val previous = lastTrafficIncidentLocation
+        val movedEnough = previous == null || previous.distanceTo(location) >= 1000f
+        if (!force && !movedEnough && now - lastTrafficIncidentFetchAtMs < 60_000L) return
+        if (!force && now - lastTrafficIncidentFetchAtMs < 60_000L) return
+
+        lastTrafficIncidentFetchAtMs = now
+        lastTrafficIncidentLocation = Location(location)
+        trafficIncidentRequestInFlight = true
+        val base = endpoint.removeSuffix("/jarvis").trimEnd('/')
+        val minLon = location.longitude - 0.06
+        val maxLon = location.longitude + 0.06
+        val minLat = location.latitude - 0.04
+        val maxLat = location.latitude + 0.04
+        val bbox = String.format(Locale.US, "%.6f,%.6f,%.6f,%.6f", minLon, minLat, maxLon, maxLat)
+        val language = Locale.getDefault().toLanguageTag()
+
+        thread(name = "tomtom-traffic-incidents") {
+            var featureCollection: String? = null
+            var connection: HttpURLConnection? = null
+            try {
+                val url = URL("$base/traffic/incidents?bbox=$bbox")
+                connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 5000
+                    readTimeout = 9000
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Accept-Language", language)
+                    useCaches = true
+                }
+                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    val payload = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val incidents = JSONObject(payload).optJSONArray("incidents") ?: JSONArray()
+                    val bounded = JSONArray()
+                    for (index in 0 until minOf(incidents.length(), 250)) {
+                        val incident = incidents.optJSONObject(index) ?: continue
+                        val geometry = incident.optJSONObject("geometry") ?: continue
+                        val geometryType = geometry.optString("type")
+                        if (geometryType != "Point" && geometryType != "LineString") continue
+                        if (!geometry.has("coordinates")) continue
+                        bounded.put(incident)
+                    }
+                    featureCollection = JSONObject()
+                        .put("type", "FeatureCollection")
+                        .put("features", bounded)
+                        .toString()
+                }
+            } catch (_: Exception) {
+                // Keep the last known incident layer on transient network/provider errors.
+            } finally {
+                connection?.disconnect()
+                runOnUiThread {
+                    trafficIncidentRequestInFlight = false
+                    if (!isFinishing && !isDestroyed && mapStyleReady) {
+                        featureCollection?.let { json ->
+                            try {
+                                map?.style?.getSourceAs<GeoJsonSource>(SOURCE_TRAFFIC_INCIDENTS)?.setGeoJson(json)
+                            } catch (_: Exception) {
+                                // A style replacement may race this response; the next GPS update retries.
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
