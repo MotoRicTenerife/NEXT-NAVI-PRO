@@ -1020,10 +1020,14 @@ async function handle(req, res) {
           observedAtEpochMs: routeResult.observedAtEpochMs,
           vehicleMode: routeResult.vehicleMode,
           motorcycleModeBeta: routeResult.motorcycleModeBeta,
+          status: routeResult.status,
           routes: compactRoutes,
           rejectedRoutes: routeResult.rejectedRoutes,
           distanceDiscrepancy
         });
+        if (!routeResult.routes.length) {
+          liveContext += "\nNO TOMTOM ROUTE WAS VERIFIED FOR THE REQUESTED VEHICLE MODE. Do not provide a TomTom live ETA or alternative route.";
+        }
         if (tripContext.vehicleMode === "motorcycle") {
           liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom travelMode=motorcycle is beta and restriction data is not complete in every area. Use it only as a traffic-aware cross-check when every returned travel-mode section is verified. Keep the Valhalla motorcycle route as the navigation baseline; never silently replace it or claim full legal-access certainty.";
         }
