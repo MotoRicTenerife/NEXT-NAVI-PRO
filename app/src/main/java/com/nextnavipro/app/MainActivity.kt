@@ -3761,15 +3761,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             runOnUiThread {
                 if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
                 if (report == null) {
-                    pendingJarvisTrafficQuestion = null
-                    jarvisStatusText.text = jarvisAssistantName() + " • traffico non verificato"
-                    val spokenFailure = when {
-                        failureDetail.contains("TRAFFIC_HTTP_503") -> "Il servizio delle segnalazioni TomTom su Render non risulta abilitato o configurato. Non posso verificare il traffico su questo percorso."
-                        failureDetail.contains("TRAFFIC_HTTP_429") -> "Il servizio TomTom ha raggiunto il limite temporaneo di richieste. Riprovo più tardi."
-                        failureDetail.contains("TRAFFIC_HTTP_502") -> "TomTom non sta rispondendo correttamente. Il traffico su questo percorso non è verificabile in questo momento."
-                        else -> "Non riesco a verificare le segnalazioni TomTom lungo questo percorso."
+                    val context = JSONObject()
+                        .put("destinationName", place.name)
+                        .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
+                        .put("distanceKm", route.distanceKm)
+                        .put("durationSeconds", route.durationSeconds)
+                        .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
+                        .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
+                        .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
+                        .put("trafficUnavailable", true)
+                        .put("incidents", JSONArray())
+                    val routeOrigin = currentLocation?.takeIf {
+                        it.latitude.isFinite() && it.longitude.isFinite() &&
+                            it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
+                            it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L &&
+                            System.currentTimeMillis() - it.time <= 120_000L
                     }
-                    speakJarvis(spokenFailure + " Non posso dedurre che la strada sia libera.")
+                    if (routeOrigin != null) {
+                        context.put("routeRequest", JSONObject()
+                            .put("origin", JSONObject()
+                                .put("latitude", routeOrigin.latitude)
+                                .put("longitude", routeOrigin.longitude))
+                            .put("destination", JSONObject()
+                                .put("latitude", place.point.latitude)
+                                .put("longitude", place.point.longitude))
+                            .put("waypoints", JSONArray())
+                            .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+                    }
+                    pendingJarvisTrafficQuestion = null
+                    jarvisStatusText.text = jarvisAssistantName() + " • verifico i dati di percorso disponibili"
+                    askJarvisOnline(question, context)
                     return@runOnUiThread
                 }
                 val incidentArray = JSONArray()
