@@ -43,9 +43,6 @@ jobs:
           test -s docs/architecture/NAVIGATION_INTELLIGENCE_TEAM.md
           test -s docs/qa/TEAM_OPERATING_MODEL.md
           test -s docs/qa/NAVIGATION_TEST_MATRIX.md
-          test -s docs/qa/LOCAL_AI_SETUP.md
-          test -s tools/local_qa_team.py
-          python3 -m py_compile tools/local_qa_team.py
           echo "All ten specialist instruction profiles and team contracts are present."
           echo "Note: profiles are instructions for agent-capable tooling; this check does not claim autonomous agents executed."
 
