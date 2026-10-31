@@ -184,12 +184,26 @@ object NavigationServices {
      * Builds a Valhalla request for the selected vehicle. The motorcycle profile is
      * explicitly configured for paved-road touring (not adventure trails).
      */
-    internal fun buildRouteRequest(origin: NavPoint, destination: NavPoint, motorcycle: Boolean, alternatives: Int = 0): JSONObject {
+    internal fun buildRouteRequest(
+        origin: NavPoint,
+        destination: NavPoint,
+        motorcycle: Boolean,
+        alternatives: Int = 0,
+        viaPoints: List<NavPoint> = emptyList()
+    ): JSONObject {
         require(alternatives in 0..3) { "Valhalla alternatives must be between 0 and 3." }
+        require(viaPoints.size <= 3 && viaPoints.all {
+            it.latitude.isFinite() && it.latitude in -90.0..90.0 &&
+                it.longitude.isFinite() && it.longitude in -180.0..180.0
+        }) { "Valhalla accepts at most three valid through-points." }
+        val locations = JSONArray()
+            .put(JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
+        viaPoints.forEach { point ->
+            locations.put(JSONObject().put("lat", point.latitude).put("lon", point.longitude).put("type", "through"))
+        }
+        locations.put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude))
         val request = JSONObject()
-            .put("locations", JSONArray()
-                .put(JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
-                .put(JSONObject().put("lat", destination.latitude).put("lon", destination.longitude)))
+            .put("locations", locations)
             .put("costing", if (motorcycle) "motorcycle" else "auto")
             .put("units", "kilometers")
             .put("language", Locale.getDefault().toLanguageTag())
@@ -201,6 +215,31 @@ object NavigationServices {
                 JSONObject().put("use_trails", 0.0)))
         }
         return request
+    }
+
+    fun calculateRouteVia(
+        origin: NavPoint,
+        viaPoints: List<NavPoint>,
+        destination: NavPoint,
+        motorcycle: Boolean
+    ): RouteResult {
+        require(viaPoints.isNotEmpty() && viaPoints.size <= 3) { "Specifica da 1 a 3 punti intermedi." }
+        val request = buildRouteRequest(origin, destination, motorcycle, viaPoints = viaPoints)
+        val connection = URL("https://valhalla1.openstreetmap.de/route").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("X-Client-Id", "NEXT-NAVI-PRO (github.com/MotoRicTenerife/NEXT-NAVI-PRO)")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
+            return parseRouteOptions(JSONObject(readResponse(connection))).primary
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun calculateRoute(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): RouteResult {
