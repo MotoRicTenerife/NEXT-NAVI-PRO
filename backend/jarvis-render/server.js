@@ -1158,7 +1158,7 @@ async function handle(req, res) {
   let weatherFailureCode = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
-  const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
+  const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code|circulation|embouteillage|bouchon|verkehr|stau|transito|engarrafamento|verkeer|file)\b/.test(normalizedMessage);
 
   if (asksWeather && location) {
     try {
