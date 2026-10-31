@@ -47,6 +47,14 @@ class RoadViaResolverTest {
     }
 
     @Test
+    fun measuresWaypointDistanceToRouteSegments() {
+        val point = NavPoint(28.05, -16.65)
+        val route = listOf(NavPoint(28.05, -16.70), NavPoint(28.05, -16.60))
+        assert(RoadViaResolver.distanceToRouteMeters(point, route) < 1.0)
+        assert(RoadViaResolver.distanceToRouteMeters(NavPoint(28.10, -16.65), route) > 5_000.0)
+    }
+
+    @Test
     fun refusesVeryShortTrips() {
         val road = RoadGeometryResult(
             osmId = 125L,
