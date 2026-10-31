@@ -3773,14 +3773,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@runOnUiThread
                 }
                 val incidentArray = JSONArray()
-                report.incidents.forEach { incident ->
+                report.incidents.take(10).forEach { incident ->
                     incidentArray.put(JSONObject()
                         .put("id", incident.id)
                         .put("severity", incident.severity.name)
                         .put("distanceAheadMeters", incident.distanceAheadMeters)
                         .put("delaySeconds", incident.delaySeconds ?: JSONObject.NULL)
                         .put("road", incident.road ?: JSONObject.NULL)
-                        .put("description", incident.description)
+                        .put("description", incident.description.take(160))
                         .put("observedAtEpochMs", incident.observedAtEpochMs)
                         .put("validUntilEpochMs", incident.validUntilEpochMs)
                         .put("geometryFitScore", incident.geometryFitScore)
@@ -3823,9 +3823,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // in Gemini's contents while preserving context across app restarts.
         val recentTurns = jarvisMemory.recent(11)
         // The current utterance was recorded by handleJarvisCommand; send it only once.
+        val historyLimit = if (tripContext != null) 6 else 10
         val history = if (recentTurns.lastOrNull()?.let {
                 it.role == "user" && it.content == transcript
-            } == true) recentTurns.dropLast(1).takeLast(10) else recentTurns.takeLast(10)
+            } == true) recentTurns.dropLast(1).takeLast(historyLimit) else recentTurns.takeLast(historyLimit)
         val summary = jarvisMemory.summary()
         val personalityPrefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val personality = JarvisOnlineAiClient.Personality(
