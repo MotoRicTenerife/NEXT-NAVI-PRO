@@ -192,6 +192,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
     private var routeProgressInitialized = false
     private var lastRouteProgressIndex = 0
+    private var lastRouteAlongMeters = 0.0
     private var voiceGuide: TextToSpeech? = null
     private var voiceGuideReady = false
     private var speechRecognizer: SpeechRecognizer? = null
@@ -5768,11 +5769,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * accepted GPS fix. No ETA/distance is shown as a real value unless a route and GPS fix exist.
      */
     private val routeProgressTracker = RouteProgressTracker()
+    private val maneuverLifecycle = ManeuverLifecycle()
 
     private fun resetRouteProgress() {
         routeProgressInitialized = false
         lastRouteProgressIndex = 0
+        lastRouteAlongMeters = 0.0
         routeProgressTracker.reset()
+        maneuverLifecycle.reset()
     }
 
     /**
@@ -5803,6 +5807,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
         val confidenceLimit = minOf(30.0, maxOf(12.0, accuracy * 1.5))
         if (match.distanceMeters <= confidenceLimit) {
+            lastRouteAlongMeters = match.alongRouteMeters
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, match.segmentIndex) else match.segmentIndex
             routeProgressInitialized = true
             return lastRouteProgressIndex to match.distanceMeters.toFloat()
@@ -5913,14 +5918,40 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
-        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
-        val stage = when {
-            distanceToTurn <= 10.0 -> 4
-            distanceToTurn <= 50.0 -> 3
-            distanceToTurn <= mediumThreshold -> 2
-            distanceToTurn <= earlyThreshold -> 1
-            else -> 0
+        val targetIndex = maneuver.pointIndex.coerceIn(0, route.points.lastIndex)
+        var maneuverAlongRouteMeters = 0.0
+        for (i in 0 until targetIndex) {
+            val a = route.points[i]
+            val b = route.points[i + 1]
+            val segment = FloatArray(1)
+            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
+            maneuverAlongRouteMeters += segment[0].toDouble()
+        }
+        val fixElapsedRealtimeMs = if (here.elapsedRealtimeNanos > 0L) {
+            here.elapsedRealtimeNanos / 1_000_000L
+        } else {
+            SystemClock.elapsedRealtime()
+        }
+        val matchConfidence = (0.55 + 0.44 *
+            (1.0 - nearestMeters.toDouble() / confidenceLimit.toDouble())).coerceIn(0.55, 0.99)
+        val lifecycleUpdate = maneuverLifecycle.update(
+            ManeuverLifecycle.Observation(
+                maneuverId = "$maneuverIndex-${maneuver.pointIndex}-${maneuver.type}",
+                distanceMeters = distanceToTurn,
+                speedMetersPerSecond = speedMps.toDouble(),
+                matchedAlongRouteMeters = lastRouteAlongMeters,
+                maneuverAlongRouteMeters = maneuverAlongRouteMeters,
+                matchConfidence = matchConfidence,
+                fixElapsedRealtimeMs = fixElapsedRealtimeMs,
+                isRoundabout = roundabout
+            )
+        ) ?: return
+        val stage = when (lifecycleUpdate.current) {
+            ManeuverLifecycle.State.APPROACH -> 0
+            ManeuverLifecycle.State.PREPARE -> 1
+            ManeuverLifecycle.State.IMMINENT -> 2
+            ManeuverLifecycle.State.EXECUTING -> 4
+            ManeuverLifecycle.State.COMPLETED, ManeuverLifecycle.State.MISSED -> 0
         }
         if (maneuverIndex != announcedManeuverIndex) {
             announcedManeuverIndex = maneuverIndex
@@ -5929,9 +5960,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (stage > announcedStage) {
             announcedStage = stage
             val spoken = when (stage) {
-                1 -> "Tra poco, " + instruction
-                2 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
-                3 -> "Tra cinquanta metri, " + instruction
+                1 -> "Preparati: " + instruction
+                2 -> "Tra poco, " + instruction
                 4 -> instruction
                 else -> ""
             }
