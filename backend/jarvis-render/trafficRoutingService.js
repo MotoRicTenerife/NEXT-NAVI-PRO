@@ -51,7 +51,9 @@ function cleanSection(section) {
   if (sectionType === "TRAVEL_MODE") {
     return {
       sectionType,
-      travelMode: typeof section.travelMode === "string" ? section.travelMode.toLowerCase() : ""
+      travelMode: typeof section.travelMode === "string" ? section.travelMode.toLowerCase() : "",
+      startPointIndex: Number.isInteger(section.startPointIndex) ? section.startPointIndex : null,
+      endPointIndex: Number.isInteger(section.endPointIndex) ? section.endPointIndex : null
     };
   }
   if (sectionType !== "TRAFFIC") return null;
@@ -79,7 +81,6 @@ export function normalizeTomTomTrafficRoutes(payload, vehicleMode, observedAtEpo
     const summary = route?.summary;
     const sections = Array.isArray(route?.sections) ? route.sections.map(cleanSection).filter(Boolean) : [];
     const modeSections = sections.filter(s => s.sectionType === "TRAVEL_MODE");
-    const modeVerified = modeSections.length > 0 && modeSections.every(s => s.travelMode === vehicleMode);
     const legs = Array.isArray(route?.legs) ? route.legs : [];
     const points = [];
     for (const leg of legs) {
@@ -90,7 +91,22 @@ export function normalizeTomTomTrafficRoutes(payload, vehicleMode, observedAtEpo
       if (points.length >= 500) break;
     }
     const validSummary = Number.isFinite(summary?.lengthInMeters) && summary.lengthInMeters > 0 &&
-      Number.isInteger(summary?.travelTimeInSeconds) && summary.travelTimeInSeconds > 0;
+      summary.lengthInMeters <= 5_000_000 &&
+      Number.isInteger(summary?.travelTimeInSeconds) && summary.travelTimeInSeconds > 0 &&
+      summary.travelTimeInSeconds <= 86400;
+    const orderedModeSections = [...modeSections].sort((a, b) => (a.startPointIndex ?? -1) - (b.startPointIndex ?? -1));
+    let coveredThrough = 0;
+    let modeVerified = orderedModeSections.length > 0;
+    for (const section of orderedModeSections) {
+      if (section.travelMode !== vehicleMode || !Number.isInteger(section.startPointIndex) ||
+          !Number.isInteger(section.endPointIndex) || section.startPointIndex > coveredThrough ||
+          section.endPointIndex < section.startPointIndex) {
+        modeVerified = false;
+        break;
+      }
+      coveredThrough = Math.max(coveredThrough, section.endPointIndex + 1);
+    }
+    modeVerified = modeVerified && coveredThrough >= points.length - 1;
     if (!modeVerified || !validSummary || points.length < 2) {
       rejectedRoutes += 1;
       continue;
