@@ -2114,7 +2114,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
             "Esporta GPX attivo…",
             "DEBUG: CSV GPS e memoria",
-            "BACKUP COMPLETO: impostazioni + GPX + CSV…",
+            "BACKUP COMPLETO: impostazioni + GPX + CSV + Jarvis…",
             "RIPRISTINA BACKUP COMPLETO…"
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
@@ -2626,13 +2626,21 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             REQUEST_EXPORT_APP_BACKUP -> thread(name = "export-app-backup") {
                 try {
                     val preferences = getSharedPreferences(PREFS, MODE_PRIVATE).all
-                    val summary = contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                        AppDataBackupService.export(output, preferences, gpxDirectory(), gpsDiagnosticsDirectory())
-                    } ?: throw IllegalStateException("Impossibile creare il file di backup.")
-                    runOnUiThread {
-                        Toast.makeText(this,
-                            "Backup completo creato: ${summary.gpxCount} GPX, ${summary.csvCount} CSV e ${summary.settingsCount} impostazioni.",
-                            Toast.LENGTH_LONG).show()
+                    val memorySnapshot = File(cacheDir, "jarvis_memory_backup_${System.currentTimeMillis()}.db")
+                    try {
+                        jarvisMemory.exportDatabaseSnapshot(memorySnapshot)
+                        val summary = contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                            AppDataBackupService.export(
+                                output, preferences, gpxDirectory(), gpsDiagnosticsDirectory(), memorySnapshot
+                            )
+                        } ?: throw IllegalStateException("Impossibile creare il file di backup.")
+                        runOnUiThread {
+                            Toast.makeText(this,
+                                "Backup completo creato: ${summary.gpxCount} GPX, ${summary.csvCount} CSV, ${summary.settingsCount} impostazioni e memoria Jarvis.",
+                                Toast.LENGTH_LONG).show()
+                        }
+                    } finally {
+                        memorySnapshot.delete()
                     }
                 } catch (error: Exception) {
                     runOnUiThread { Toast.makeText(this, "Backup non riuscito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
@@ -2644,6 +2652,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     val plan = contentResolver.openInputStream(uri)?.use { input ->
                         AppDataBackupService.import(input, staging)
                     } ?: throw IllegalStateException("Impossibile leggere il backup selezionato.")
+                    plan.jarvisMemoryDatabase?.let { jarvisMemory.restoreDatabaseSnapshot(it) }
                     val gpxDir = gpxDirectory()
                     val csvDir = gpsDiagnosticsDirectory()
                     plan.gpxFiles.forEach { source -> source.copyTo(File(gpxDir, source.name), overwrite = true) }
@@ -2662,7 +2671,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     if (!editor.commit()) throw IllegalStateException("Impossibile salvare le impostazioni ripristinate.")
                     runOnUiThread {
                         Toast.makeText(this,
-                            "Backup ripristinato: ${plan.gpxFiles.size} GPX e ${plan.csvFiles.size} CSV. Riavvia l'app per ricaricare tutte le impostazioni.",
+                            "Backup ripristinato: ${plan.gpxFiles.size} GPX, ${plan.csvFiles.size} CSV, impostazioni e memoria Jarvis. Riavvia l'app per ricaricare tutte le impostazioni.",
                             Toast.LENGTH_LONG).show()
                     }
                 } catch (error: Exception) {
