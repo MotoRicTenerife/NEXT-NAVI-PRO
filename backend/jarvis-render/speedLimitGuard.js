@@ -110,7 +110,7 @@ export function createSpeedLimitGuard({
   let cooldownReason = null;
 
   return {
-    /** Decide whether one TomTom upstream call may be made on behalf of `clientKey`. */
+    /** Decide whether one TomTom non-tile upstream call may be made on behalf of `clientKey`. */
     admit(clientKey) {
       const t = now();
       if (t < cooldownUntil) return deny("provider_cooldown", cooldownUntil - t);
