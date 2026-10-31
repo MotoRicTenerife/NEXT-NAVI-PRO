@@ -16,6 +16,11 @@ const valid = {
   trafficCache: "MISS",
   viaRoadName: "TF-1",
   baselineRoute: { distanceKm: 17.8, durationSeconds: 1260, routeSource: "Valhalla motorcycle" },
+  baselineRouteRequest: {
+    origin: { latitude: 28.05, longitude: -16.72 },
+    destination: { latitude: 28.06, longitude: -16.68 },
+    vehicleMode: "motorcycle"
+  },
   routeRequest: {
     origin: { latitude: 28.05, longitude: -16.72 },
     destination: { latitude: 28.06, longitude: -16.68 },
@@ -51,6 +56,16 @@ test("rejects malformed or mismatched route requests without rejecting valid tri
   assert.equal(result.routeRequest, null);
   const validResult = sanitizeTripContext(valid, now);
   assert.equal(validResult.routeRequest.vehicleMode, "motorcycle");
+});
+
+test("accepts a direct baseline request for a named-road alternative", () => {
+  const result = sanitizeTripContext(valid, now);
+  assert.equal(result.baselineRouteRequest.vehicleMode, "motorcycle");
+  const invalid = sanitizeTripContext({
+    ...valid,
+    baselineRouteRequest: { ...valid.baselineRouteRequest, vehicleMode: "car" }
+  }, now);
+  assert.equal(invalid.baselineRouteRequest, null);
 });
 
 test("validates a calculated baseline route for a named-road comparison", () => {
