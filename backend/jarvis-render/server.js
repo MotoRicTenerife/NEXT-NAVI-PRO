@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
+import { fetchTomTomTraffic } from "./trafficService.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -786,6 +787,7 @@ async function handle(req, res) {
   let weatherResult = null;
   let weatherFailureCode = null;
   let trafficResult = null;
+  let dgtTrafficResult = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
   const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
@@ -813,13 +815,28 @@ async function handle(req, res) {
 
   if (asksTraffic && location) {
     try {
-      trafficResult = await fetchDgtTraffic(location);
-      liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(trafficResult);
-    } catch {
-      liveContext += "\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
+      trafficResult = await fetchTomTomTraffic(location, process.env.TOMTOM_API_KEY);
+      liveContext += "\nVERIFIED TOMTOM LIVE TRAFFIC FLOW AND INCIDENTS: " + JSON.stringify(trafficResult);
+    } catch (error) {
+      console.warn("TomTom live traffic unavailable; trying DGT secondary feed", {
+        errorType: error instanceof Error ? error.name : "UnknownError",
+        reason: error instanceof Error ? error.message.slice(0, 160) : "unknown"
+      });
+    }
+    // DGT is a secondary incident cross-check, never a substitute for observed traffic speed.
+    if (!trafficResult || !trafficResult.flow || !trafficResult.incidents) {
+      try {
+        dgtTrafficResult = await fetchDgtTraffic(location);
+        liveContext += "\nSECONDARY DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(dgtTrafficResult);
+      } catch {
+        liveContext += "\nDGT SECONDARY TRAFFIC FEED UNAVAILABLE.";
+      }
+    }
+    if (!trafficResult && !dgtTrafficResult) {
+      liveContext += "\nLIVE TRAFFIC COULD NOT BE VERIFIED FROM TOMTOM OR DGT. Say so clearly; do not guess or imply roads are clear.";
     }
   } else if (asksTraffic) {
-    liveContext += "\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
+    liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask the user for a location or say live local traffic cannot be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/.";
   }
 
   const instructions = "You are " + assistantName + ", the user-renamed spoken conversational assistant for NEXT NAVI PRO. Your name is exactly " +
@@ -831,7 +848,7 @@ async function handle(req, res) {
     liveContext;
 
   // Live-data questions use verified provider results directly, so they still work if Gemini is unavailable or misconfigured.
-  if (!apiKey || asksWeather || asksTraffic) {
+  if (!apiKey || asksWeather) {
     const fallbackReplies = [];
     if (asksWeather) {
       if (weatherResult) {
@@ -853,19 +870,35 @@ async function handle(req, res) {
     }
     if (asksTraffic) {
       if (trafficResult) {
-        if (trafficResult.incidents.length) {
+        const flow = trafficResult.flow;
+        if (flow) {
+          fallbackReplies.push("TomTom Traffic: " + flow.roadCondition + ", velocità rilevata " +
+            flow.currentSpeedKmh + " km/h rispetto a " + flow.freeFlowSpeedKmh +
+            " km/h a traffico libero" +
+            (flow.delayPercent !== null ? " (scostamento " + flow.delayPercent + "%)" : "") +
+            (flow.confidence !== null ? ", affidabilità " + Math.round(flow.confidence * 100) + "%" : "") + ".");
+        }
+        if (trafficResult.incidents?.length) {
           const summaries = trafficResult.incidents.slice(0, 3)
             .map(item => [item.road, item.description].filter(Boolean).join(": "))
             .filter(Boolean);
-          fallbackReplies.push("La DGT segnala " + trafficResult.incidents.length +
-            " incidenza/e geolocalizzata/e entro 30 km. " +
-            (summaries.length ? summaries.join(". ") + ". " : "") +
-            "Sono segnalazioni di incidenti, non una misura completa della velocità del traffico.");
-        } else {
-          fallbackReplies.push("Nel feed DGT non ho trovato incidenti geolocalizzati entro 30 km. Questo non significa che il traffico sia scorrevole.");
+          fallbackReplies.push("TomTom segnala " + trafficResult.incidents.length + " eventi nelle vicinanze: " +
+            (summaries.join(". ") || "dettagli non disponibili") + ".");
+        } else if (trafficResult.incidents) {
+          fallbackReplies.push("TomTom non segnala incidenti o chiusure nell'area interrogata; il dato di velocità del tratto resta quello indicato sopra.");
         }
-      } else {
-        fallbackReplies.push("Non riesco a verificare il traffico in tempo reale. Puoi consultare la mappa ufficiale DGT su infocar.dgt.es/etraffic.");
+      }
+      if (dgtTrafficResult?.incidents?.length) {
+        fallbackReplies.push("Riscontro DGT: " + dgtTrafficResult.incidents.slice(0, 2)
+          .map(item => [item.road, item.description].filter(Boolean).join(": "))
+          .filter(Boolean).join(". ") + ".");
+      }
+      if (!trafficResult && dgtTrafficResult) {
+        fallbackReplies.push("TomTom non è disponibile. La DGT riporta " + dgtTrafficResult.incidents.length +
+          " incidenti geolocalizzati nell'area; il feed DGT non misura la velocità di scorrimento.");
+      }
+      if (!trafficResult && !dgtTrafficResult) {
+        fallbackReplies.push("Non riesco a verificare il traffico in tempo reale da TomTom o DGT. Non posso quindi confermare che la strada sia libera.");
       }
     }
     if (fallbackReplies.length) {
