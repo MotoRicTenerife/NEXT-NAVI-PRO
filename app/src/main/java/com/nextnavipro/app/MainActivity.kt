@@ -198,6 +198,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRouteAlongMeters = 0.0
     private var voiceGuide: TextToSpeech? = null
     private var voiceGuideReady = false
+    private val speechStateLock = Any()
+    @Volatile private var activeSpeechPriority = Int.MIN_VALUE
+    @Volatile private var activeSpeechId: String? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
@@ -402,6 +405,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (status == TextToSpeech.SUCCESS) {
                 val languageStatus = voiceGuide?.setLanguage(preferredJarvisTtsLocale()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
+                voiceGuide?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+                    override fun onDone(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
+                    override fun onError(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
+                })
                 if (voiceGuideReady) {
                     applyJarvisVoicePreference()
                     // Navigation announcements keep a steady, safety-oriented pace.
@@ -2941,7 +2949,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 edit.putFloat("jarvis_voice_pitch", ((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
                 edit.apply()
                 applyJarvisVoicePreference()
-                voiceGuide?.setSpeechRate((prefs.getInt("jarvis_voice_rate", 96) / 100f).coerceIn(0.7f, 1.2f))
                 Toast.makeText(this, "Personalità di Jarvis salvata", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
@@ -2956,9 +2963,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     selected == "discreet" -> "Sono qui. Dimmi."
                     else -> "Ciao! Sono qui, pronto ad aiutarti."
                 }
-                voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
+                val previewRate = ((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f
                 voiceGuide?.setPitch(((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
-                if (voiceGuideReady) voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, "jarvis-personality-preview")
+                if (voiceGuideReady) speakManaged(line, NavigationSpeechPriority.JARVIS, "jarvis-personality-preview", previewRate)
             }
         }
         dialog.show()
@@ -3146,6 +3153,56 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    /**
+     * Single speech gate for navigation, safety alerts, radar and Jarvis.
+     * Higher priorities may interrupt lower ones; lower priorities never cut
+     * off an active safety or maneuver instruction. Accepted utterances replace
+     * the previous one, preventing a stale queue from accumulating.
+     */
+    private fun speakManaged(message: String, priority: Int, requestId: String, rate: Float = 0.96f): Boolean {
+        val tts = voiceGuide ?: return false
+        if (!voiceGuideReady || message.isBlank()) return false
+        val utteranceId = requestId + "-" + SystemClock.elapsedRealtime()
+        synchronized(speechStateLock) {
+            if (!NavigationSpeechPriority.mayInterrupt(activeSpeechId != null, activeSpeechPriority, priority)) return false
+            try {
+                tts.stop()
+                activeSpeechId = utteranceId
+                activeSpeechPriority = priority
+                tts.setSpeechRate(rate.coerceIn(0.70f, 1.20f))
+                if (tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId) == TextToSpeech.ERROR) {
+                    activeSpeechId = null
+                    activeSpeechPriority = Int.MIN_VALUE
+                    return false
+                }
+                return true
+            } catch (_: Exception) {
+                if (activeSpeechId == utteranceId) {
+                    activeSpeechId = null
+                    activeSpeechPriority = Int.MIN_VALUE
+                }
+                return false
+            }
+        }
+    }
+
+    private fun clearCompletedSpeech(utteranceId: String?) {
+        synchronized(speechStateLock) {
+            if (utteranceId != null && activeSpeechId == utteranceId) {
+                activeSpeechId = null
+                activeSpeechPriority = Int.MIN_VALUE
+            }
+        }
+    }
+
+    private fun stopManagedSpeech() {
+        synchronized(speechStateLock) {
+            try { voiceGuide?.stop() } catch (_: Exception) { }
+            activeSpeechId = null
+            activeSpeechPriority = Int.MIN_VALUE
+        }
+    }
+
     private fun speakJarvis(message: String, remember: Boolean = true) {
         if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
@@ -3153,8 +3210,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
-        voiceGuide?.setSpeechRate(voiceRate)
-        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+        speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
     }
 
     private fun onJarvisButtonPressed() {
@@ -3162,7 +3218,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // discard queued speech and invalidate an in-flight online answer before listening.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
-        try { voiceGuide?.stop() } catch (_: Exception) { }
+        stopManagedSpeech()
         if (jarvisListening) {
             speechRecognizer?.cancel()
             jarvisListening = false
@@ -3418,7 +3474,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             JarvisCommand.Silence -> {
                 pendingJarvisSpeech = null
-                voiceGuide?.stop()
+                stopManagedSpeech()
                 jarvisStatusText.text = "Va bene. Voce in pausa."
             }
             JarvisCommand.Help -> speakJarvis(
@@ -3592,8 +3648,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, appText("Voce non pronta o lingua TTS non disponibile."), Toast.LENGTH_LONG).show()
             return
         }
-        voiceGuide?.setSpeechRate(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f)
-        voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, "voice-test")
+        val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
+        speakManaged(localizedVoiceTestPhrase(), NavigationSpeechPriority.VOICE_TEST, "voice-test", voiceRate)
     }
 
     private fun applyTheme() {
@@ -4256,7 +4312,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start") }
+                    if (voiceGuideReady) speakManaged("Avvio la navigazione", NavigationSpeechPriority.MANEUVER_PREPARATION, "navigation-start")
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
@@ -5548,11 +5604,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     speedingVoiceActive = true
                     lastSpeedingVoiceMs = nowElapsed
                     if (voiceGuideReady) {
-                        voiceGuide?.setSpeechRate(0.96f)
-                        voiceGuide?.speak(
+                        speakManaged(
                             if (firstWarning) "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari."
                             else "Attenzione, sei ancora sopra il limite di $limit chilometri orari.",
-                            TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
+                            NavigationSpeechPriority.SAFETY_ALERT,
+                            "speed-limit-overspeed"
                         )
                     }
                 }
@@ -5652,10 +5708,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
         lastRadarAlertId = candidates.first.osmId
         lastRadarAlertMs = now
-        if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak(
+        if (voiceGuideReady) speakManaged(
             "Attenzione, possibile autovelox tra circa " + candidates.second.toInt() + " metri",
-            TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
-        ) }
+            NavigationSpeechPriority.RADAR,
+            "radar-" + candidates.first.osmId
+        )
         radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
         updateRadarStatusColor()
     }
@@ -5710,7 +5767,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         clearRoute()
         routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
         if (voiceGuideReady) {
-            voiceGuide?.speak("Sei arrivato a destinazione.", TextToSpeech.QUEUE_FLUSH, null, "navigation-arrived")
+            speakManaged("Sei arrivato a destinazione.", NavigationSpeechPriority.SAFETY_ALERT, "navigation-arrived")
         }
         Toast.makeText(this, "Sei arrivato a destinazione", Toast.LENGTH_LONG).show()
         return true
@@ -5800,7 +5857,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_FLUSH, null, "reroute") }
+                    if (voiceGuideReady) speakManaged("Percorso ricalcolato", NavigationSpeechPriority.MANEUVER_PREPARATION, "reroute")
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -6006,8 +6063,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> ""
             }
             if (spoken.isNotBlank() && voiceGuideReady) {
-                voiceGuide?.setSpeechRate(0.96f)
-                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
+                val priority = when (stage) {
+                    1 -> NavigationSpeechPriority.MANEUVER_PREPARATION
+                    2 -> NavigationSpeechPriority.MANEUVER_IMMINENT
+                    else -> NavigationSpeechPriority.MANEUVER_EXECUTION
+                }
+                speakManaged(spoken, priority, "turn-" + maneuverIndex + "-stage-" + stage)
             }
         }
     }
@@ -6613,7 +6674,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsMarkerAnimator = null
         mapView?.onDestroy()
         mapView = null
-        voiceGuide?.stop()
+        stopManagedSpeech()
         voiceGuide?.shutdown()
         voiceGuide = null
         super.onDestroy()
