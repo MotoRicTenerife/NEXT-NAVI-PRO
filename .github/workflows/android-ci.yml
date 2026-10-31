@@ -104,21 +104,26 @@ jobs:
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
-            # Render's service is rooted in backend/jarvis-render and may not redeploy
-            # for later Android-only commits. Compare against the last commit that
-            # actually changed backend files, not the current repository HEAD.
-            export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
-            if [ -z "$EXPECTED_RENDER_REVISION" ]; then
-              echo "::error::Could not identify the last backend commit."
-              exit 1
-            fi
-            echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
-          else
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Pull requests are validated before merge and must never require a Render deployment.
+            # Live smoke checks still verify the currently deployed service, but revision equality
+            # is enforced only by push/workflow_dispatch after an authorized deployment.
             export EXPECTED_RENDER_REVISION=""
-            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+            echo "Pull request build: no Render deployment is expected; checking live service health only."
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
+              export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+              if [ -z "$EXPECTED_RENDER_REVISION" ]; then
+                echo "::error::Could not identify the last backend commit."
+                exit 1
+              fi
+              echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
+            else
+              export EXPECTED_RENDER_REVISION=""
+              echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+            fi
           fi
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
