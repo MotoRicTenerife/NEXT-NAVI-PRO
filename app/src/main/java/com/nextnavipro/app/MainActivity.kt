@@ -5919,14 +5919,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
         val targetIndex = maneuver.pointIndex.coerceIn(0, route.points.lastIndex)
-        var maneuverAlongRouteMeters = 0.0
-        for (i in 0 until targetIndex) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val segment = FloatArray(1)
-            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
-            maneuverAlongRouteMeters += segment[0].toDouble()
-        }
+        val maneuverAlongRouteMeters = routeProgressTracker.alongRouteDistance(route.points, targetIndex)
         val fixElapsedRealtimeMs = if (here.elapsedRealtimeNanos > 0L) {
             here.elapsedRealtimeNanos / 1_000_000L
         } else {
