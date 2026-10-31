@@ -15,32 +15,32 @@ export function extractTrafficDestination(message) {
   if (typeof message !== "string" || message.length > 1000) return "";
   const patterns = [
     // Italian
-    /\\bda qui\\s+(?:fino\\s+)?a\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:per andare|devo andare|vorrei andare|voglio andare|sto andando|andare|raggiungere|arrivare)\\s+(?:da qui\\s+)?(?:a|ad|al|alla|allo|ai|agli|alle)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\bverso\\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bda qui\s+(?:fino\s+)?a\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:per andare|devo andare|vorrei andare|voglio andare|sto andando|andare|raggiungere|arrivare)\s+(?:da qui\s+)?(?:a|ad|al|alla|allo|ai|agli|alle)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bverso\s+(.+?)(?=[?.!,;]|$)/i,
     // English
-    /\\bfrom here\\s+(?:to|towards)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:to get to|go to|going to|head(?:ing)? to|travel(?:ling|ing)? to|reach)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\btowards?\\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bfrom here\s+(?:to|towards)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:to get to|go to|going to|head(?:ing)? to|travel(?:ling|ing)? to|reach)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\btowards?\s+(.+?)(?=[?.!,;]|$)/i,
     // Spanish
-    /\\bdesde aqu[ií]\\s+(?:hasta|a)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:para ir|quiero ir|voy|ir|llegar)\\s+(?:desde aqu[ií]\\s+)?(?:a|al|a la|hasta)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\bhacia\\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bdesde aqu[ií]\s+(?:hasta|a)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:para ir|quiero ir|voy|ir|llegar)\s+(?:desde aqu[ií]\s+)?(?:a|al|a la|hasta)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bhacia\s+(.+?)(?=[?.!,;]|$)/i,
     // French
-    /\\bd['’]ici\\s+(?:à|jusqu['’]à)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:pour aller|je vais|aller|rejoindre)\\s+(?:à|au|aux|vers)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\bvers\\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bd['’]ici\s+(?:à|jusqu['’]à)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:pour aller|je vais|aller|rejoindre)\s+(?:à|au|aux|vers)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bvers\s+(.+?)(?=[?.!,;]|$)/i,
     // German
-    /\\bvon hier\\s+nach\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:nach|richtung)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:um nach)\\s+(.+?)\\s+zu\\s+(?:fahren|kommen)(?=[?.!,;]|$)/i,
+    /\bvon hier\s+nach\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:nach|richtung)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:um nach)\s+(.+?)\s+zu\s+(?:fahren|kommen)(?=[?.!,;]|$)/i,
     // Portuguese
-    /\\bdaqui\\s+(?:até|a)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:para ir|quero ir|vou|ir|chegar)\\s+(?:para|a|até)\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\bem dire[cç][aã]o\\s+a\\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bdaqui\s+(?:até|a)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:para ir|quero ir|vou|ir|chegar)\s+(?:para|a|até)\s+(.+?)(?=[?.!,;]|$)/i,
+    /\bem dire[cç][aã]o\s+a\s+(.+?)(?=[?.!,;]|$)/i,
     // Dutch
-    /\\bvan hier\\s+naar\\s+(.+?)(?=[?.!,;]|$)/i,
-    /\\b(?:naar|richting)\\s+(.+?)(?=[?.!,;]|$)/i
+    /\bvan hier\s+naar\s+(.+?)(?=[?.!,;]|$)/i,
+    /\b(?:naar|richting)\s+(.+?)(?=[?.!,;]|$)/i
   ];
   for (const pattern of patterns) {
     const match = message.match(pattern);
