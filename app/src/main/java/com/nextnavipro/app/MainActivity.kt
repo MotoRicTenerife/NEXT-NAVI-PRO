@@ -3784,7 +3784,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto"))
         }
         val routeOrigin = currentLocation?.takeIf {
-            it.latitude.isFinite() && it.longitude.isFinite() &&
+            it.hasAccuracy() && it.latitude.isFinite() && it.longitude.isFinite() &&
                 it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
                 it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L &&
                 System.currentTimeMillis() - it.time <= 120_000L
