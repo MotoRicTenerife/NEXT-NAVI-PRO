@@ -1009,6 +1009,10 @@ async function handle(req, res) {
       })
     : [];
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
+  let liveContext = "";
+  let trafficRouteResult = null;
+  let trafficDestination = "";
+  let trafficFailureCode = null;
   const tripContext = sanitizeTripContext(input?.tripContext);
   if (tripContext?.routeRequest) {
     if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
@@ -1040,6 +1044,7 @@ async function handle(req, res) {
       }));
       for (const item of routeResults) {
         if (!item.result) {
+          if (item.job.includeAlternatives) trafficFailureCode = item.error || "provider_unavailable";
           liveContext += "\n" + item.job.label + " UNAVAILABLE (" + item.error + "). Do not invent its live ETA or traffic delay.";
           continue;
         }
@@ -1069,6 +1074,7 @@ async function handle(req, res) {
           distanceDiscrepancy
         });
         if (!primary) {
+          if (item.job.includeAlternatives) trafficFailureCode = "vehicle_mode_unverified";
           liveContext += "\nNO PRIMARY TOMTOM ROUTE WAS VERIFIED FOR " + item.job.label + ". Do not present a live ETA for it.";
         }
         if (distanceDiscrepancy) {
@@ -1120,12 +1126,8 @@ async function handle(req, res) {
     return send(res, 400, { error: "Message is required" });
   }
 
-  let liveContext = "";
   let weatherResult = null;
   let weatherFailureCode = null;
-  let trafficRouteResult = null;
-  let trafficDestination = "";
-  let trafficFailureCode = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
   const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
