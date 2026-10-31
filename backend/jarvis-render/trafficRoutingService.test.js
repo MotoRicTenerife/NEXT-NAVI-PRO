@@ -39,6 +39,12 @@ test("builds a traffic-aware motorcycle route request with waypoint and mode sec
   assert.equal(url.searchParams.get("key"), "secret");
 });
 
+test("localizes TomTom route metadata using the device language", () => {
+  assert.equal(buildTomTomRouteUrl(request, "secret", "es-ES").searchParams.get("language"), "es-ES");
+  assert.equal(buildTomTomRouteUrl(request, "secret", "fr-FR").searchParams.get("language"), "fr-FR");
+  assert.equal(buildTomTomRouteUrl(request, "secret", "bad language").searchParams.get("language"), "en-GB");
+});
+
 test("normalizes ETA, traffic delay and incident sections only for verified vehicle mode", () => {
   const result = normalizeTomTomTrafficRoutes({ routes: [validRoute] }, "motorcycle", 1_800_000_000_000);
   assert.equal(result.routes.length, 1);
