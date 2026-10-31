@@ -86,7 +86,6 @@ internal object TrafficDecisionEngine {
             .filter { it.routeId.isNotBlank() && it.routeId != context.activeRouteId }
             .filter { validRoute(it, context.nowEpochMs) && !it.hasConfirmedClosure }
             .filter { it.confidence >= MIN_ROUTE_CONFIDENCE }
-            .filter { it.observedAtEpochMs <= hazard.validUntilEpochMs }
             .filter {
                 val savings = context.activeRoute.etaSeconds - it.etaSeconds
                 savings >= MIN_SAVINGS_SECONDS &&
