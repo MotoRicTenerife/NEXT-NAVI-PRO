@@ -1333,7 +1333,19 @@ async function handle(req, res) {
     console.error("Jarvis provider response contained no text", { model });
     return send(res, 502, { error: "AI returned no text" });
   }
-  return send(res, 200, { reply });
+  return send(res, 200, {
+    reply,
+    diagnostics: {
+      responseMode,
+      model,
+      historyMessages: history.length,
+      tripContextAccepted: Boolean(tripContext),
+      trafficContext: tripContext
+        ? tripContext.trafficUnavailable ? "unavailable" : tripContext.incidents.length ? "fresh_incidents" : "fresh_no_route_match"
+        : asksTraffic ? trafficResult ? "dgt_feed_loaded" : "not_verified" : "not_requested",
+      weatherStatus: asksWeather ? weatherResult ? "verified" : weatherFailureCode || "not_verified" : "not_requested"
+    }
+  });
 }
 
 const server = http.createServer((req, res) => {
