@@ -2,6 +2,7 @@ import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
+import { sanitizeTripContext } from "./tripContextPolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -849,6 +850,12 @@ async function handle(req, res) {
       })
     : [];
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
+  const tripContext = sanitizeTripContext(input?.tripContext);
+  if (tripContext) {
+    liveContext += "\\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
+  } else if (input?.tripContext) {
+    liveContext += "\\nTRIP CONTEXT WAS STALE OR INVALID AND WAS IGNORED. Do not use it for current traffic claims.";
+  }
 
   const rawPersonality = input?.personality && typeof input.personality === "object" ? input.personality : {};
   const allowedPresets = new Set(["jarvis", "friendly", "ironic", "professional", "discreet"]);
