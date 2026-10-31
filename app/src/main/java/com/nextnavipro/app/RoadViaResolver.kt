@@ -43,7 +43,7 @@ object RoadViaResolver {
             .minByOrNull { it.third }
             ?.let { (road, point, distance) ->
                 ResolvedRoadWaypoint(
-                    roadName = road.name.takeIf { it.isNotBlank() } ?: "strada selezionata",
+                    roadName = road.name?.takeIf { it.isNotBlank() } ?: "strada selezionata",
                     osmId = road.osmId,
                     point = point,
                     distanceToTripMidpointMeters = distance
