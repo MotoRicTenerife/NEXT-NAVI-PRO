@@ -1624,7 +1624,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         AlertDialog.Builder(this)
             .setTitle(appText("JARVIS • Assistente"))
-            .setMessage(appText("Voce unica per conversazione, voce, personalità e memoria."))
+            // Android AlertDialog may replace setItems() with setMessage() on some devices.
+            // Keep the selectable actions as the only dialog body.
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> onJarvisButtonPressed()
@@ -2741,17 +2742,37 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Nessun indirizzo preferito salvato.", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Preferiti e luoghi salvati")
-            .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
-                val favorite = favorites[which]
-                val isHome = favorite.first.startsWith("⌂ Casa: ")
-                val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
-                val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getString("home_description", "").orEmpty() else "Indirizzo preferito"
-                destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
-                destinationInput.setText(displayName)
-                routeText.text = "DESTINAZIONE: " + displayName + "\nPremi AVVIA NAVIGAZIONE"
-            }.setNegativeButton("Chiudi", null).show()
+        showMapBackedPlaceList(
+            title = "Preferiti e luoghi salvati",
+            entries = favorites.map { it.first },
+            confirmLabel = "SELEZIONA",
+            onPreview = { index ->
+                favorites.getOrNull(index)?.let { favorite ->
+                    val isHome = favorite.first.startsWith("⌂ Casa: ")
+                    val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
+                    val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_description", "").orEmpty() else "Indirizzo preferito"
+                    destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
+                    refreshDestinationMarker()
+                    map?.animateCamera(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(favorite.second, favorite.third), 15.0),
+                        450
+                    )
+                }
+            },
+            onConfirm = { index ->
+                favorites.getOrNull(index)?.let { favorite ->
+                    val isHome = favorite.first.startsWith("⌂ Casa: ")
+                    val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
+                    val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_description", "").orEmpty() else "Indirizzo preferito"
+                    destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
+                    destinationInput.setText(displayName)
+                    routeText.text = "DESTINAZIONE: " + displayName + "\nPremi AVVIA NAVIGAZIONE"
+                    refreshDestinationMarker()
+                }
+            }
+        )
     }
 
     private fun deleteFavoriteAddress() {
@@ -4493,11 +4514,152 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Nessuna ricerca recente.", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Ricerche recenti")
-            .setItems(entries.toTypedArray()) { _, which ->
-                destinationInput.setText(entries[which])
-                searchDestination()
-            }.setNegativeButton("Chiudi", null).show()
+        showMapBackedPlaceList(
+            title = "Ricerche recenti",
+            entries = entries,
+            confirmLabel = "CERCA",
+            onPreview = { },
+            onConfirm = { index ->
+                entries.getOrNull(index)?.let { query ->
+                    destinationInput.setText(query)
+                    searchDestination()
+                }
+            }
+        )
+    }
+
+    /**
+     * Shared place browser: list and the existing live map remain visible together.
+     * Landscape uses list-left/map-right; portrait uses list-top/map-bottom.
+     * The existing MapView is reparented and restored, never recreated.
+     */
+    private fun showMapBackedPlaceList(
+        title: String,
+        entries: List<String>,
+        confirmLabel: String,
+        onPreview: (Int) -> Unit,
+        onConfirm: (Int) -> Unit
+    ) {
+        if (entries.isEmpty()) return
+        val activityMapView = mapView
+        if (activityMapView == null) {
+            AlertDialog.Builder(this).setTitle(title)
+                .setItems(entries.toTypedArray()) { _, which -> onConfirm(which) }
+                .setNegativeButton("Chiudi", null).show()
+            return
+        }
+
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val oldDestination = destination
+        val oldParent = activityMapView.parent as? android.view.ViewGroup
+        val oldIndex = oldParent?.indexOfChild(activityMapView) ?: -1
+        val oldParams = activityMapView.layoutParams
+        var accepted = false
+        var selectedIndex = 0
+
+        val dialog = Dialog(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            setBackgroundColor(if (negativeTheme) Color.rgb(15, 18, 21) else Color.rgb(235, 239, 241))
+        }
+        val heading = TextView(this).apply {
+            text = title.uppercase(Locale.ROOT) + " • ${entries.size}"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        page.addView(heading, params(-1, dp(44)))
+
+        val contentPane = LinearLayout(this).apply {
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
+        val resultList = ListView(this).apply {
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            adapter = android.widget.ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_list_item_activated_1,
+                entries
+            )
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 32, 36) else Color.WHITE)
+            setOnItemClickListener { _, _, which, _ ->
+                selectedIndex = which
+                setItemChecked(which, true)
+                onPreview(which)
+            }
+        }
+
+        oldParent?.removeView(activityMapView)
+        contentPane.addView(
+            resultList,
+            if (landscape) LinearLayout.LayoutParams(0, -1, 0.43f)
+            else LinearLayout.LayoutParams(-1, 0, 0.40f)
+        )
+        contentPane.addView(
+            activityMapView,
+            if (landscape) LinearLayout.LayoutParams(0, -1, 0.57f).apply { setMargins(dp(5), 0, 0, 0) }
+            else LinearLayout.LayoutParams(-1, 0, 0.60f).apply { setMargins(0, dp(5), 0, 0) }
+        )
+        page.addView(contentPane, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val confirmButton = makeButton(confirmLabel) {
+            val chosen = selectedIndex
+            accepted = true
+            dialog.dismiss()
+            onConfirm(chosen)
+        }
+        val cancelButton = makeButton("ANNULLA") { dialog.dismiss() }
+        actions.addView(confirmButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        page.addView(actions, params(-1, dp(54)))
+
+        dialog.setContentView(page)
+        dialog.setOnDismissListener {
+            destinationPickerOpen = false
+            (activityMapView.parent as? android.view.ViewGroup)?.removeView(activityMapView)
+            if (oldParent != null && activityMapView.parent == null) {
+                val restoreIndex = if (oldIndex < 0) oldParent.childCount else oldIndex.coerceAtMost(oldParent.childCount)
+                oldParent.addView(activityMapView, restoreIndex, oldParams)
+            }
+            if (!accepted) destination = oldDestination
+            refreshDestinationMarker()
+            followGps = true
+            lastCameraLocation = null
+            mapFollowHandler.removeCallbacks(mapFollowRunnable)
+            activityMapView.post {
+                if (dashboardStarted && !destinationPickerOpen && !fullScreenMap) {
+                    currentLocation?.let { updateMapForLocation(it, forceCenter = true) } ?: requestGps()
+                    mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+                }
+            }
+        }
+        destinationPickerOpen = true
+        followGps = false
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        dialog.show()
+        dialog.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        resultList.setItemChecked(0, true)
+        onPreview(0)
     }
 
     private fun rememberSearch(query: String) {
