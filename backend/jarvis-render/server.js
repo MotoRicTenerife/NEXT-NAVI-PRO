@@ -8,7 +8,7 @@ import { sanitizeTripContext } from "./tripContextPolicy.js";
 import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
 import { normalizeLanguageTag } from "./languagePolicy.js";
 import { isTrafficQuery } from "./trafficIntent.js";
-import { isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
+import { isTomTomTrafficFlowEnabled, isTomTomTrafficIncidentsEnabled, isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
