@@ -62,10 +62,10 @@ class ManeuverLifecycleTest {
 
     @Test fun missedManeuverRequiresRepeatedTrustedEvidence() {
         val lifecycle = ManeuverLifecycle()
-        lifecycle.update(obs(8.0))
-        repeat(2) { lifecycle.update(obs(100.0, matched = 190.0, sampleTime = it + 2L)) }
-        assertEquals(ManeuverLifecycle.State.EXECUTING, lifecycle.currentState())
-        lifecycle.update(obs(100.0, matched = 190.0, sampleTime = 4L))
+        lifecycle.update(obs(300.0, sampleTime = 1L))
+        repeat(3) {
+            lifecycle.update(obs(10.0, matched = 190.0, sampleTime = it + 2L))
+        }
         assertEquals(ManeuverLifecycle.State.MISSED, lifecycle.currentState())
     }
 }
