@@ -1234,6 +1234,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         renderSpeedDigits(speed)
         updateSpeedGaugeBorder(speed)
         updateSpeedingAlertState()
+        // Re-evaluate the voice warning on every fresh speed sample, not only when
+        // TomTom publishes a new limit. Otherwise the warning can wait for the next
+        // road-limit lookup even though the rider is already over the known limit.
+        updateSpeedLimitDisplay()
     }
 
     private fun renderSpeedDigits(speed: Int?) {
@@ -2188,6 +2192,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateGpxButtonState()
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
+        // Capture the trip label before navigation cleanup can clear destination.
+        val recordingLabel = (destination?.name ?: "Viaggio registrato")
+            .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim()
+            .ifBlank { "Viaggio registrato" }.take(60)
         gpsDiagnosticRecording = false
         stopService(Intent(this, GpsRecordingForegroundService::class.java))
         if (!save) {
@@ -2203,8 +2211,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             var finalGpx: File? = null
             var finalCsv: File? = null
             try {
-                val label = (destination?.name ?: "Viaggio registrato")
-                    .replace(Regex("[^A-Za-z0-9À-ÿ _-]"), "").trim().ifBlank { "Viaggio registrato" }.take(60)
+                val label = recordingLabel
                 // Human-readable session key shared by the GPX and CSV companion files.
                 val sessionTimeMs = points.firstOrNull()?.timestampEpochMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
                 val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
@@ -5751,7 +5758,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (distanceToDestination > arrivalRadius && !movingAwayAfterPassing && !parkedJustBeyond) return false
 
         navigationArrived = true
-        // Stop the route/recording exactly once, then leave a durable arrival message on screen.
+        // Arrival ends the navigation trip even when recording was started independently
+        // from the dashboard. Finalize the paired GPX + CSV before clearRoute clears
+        // the destination and its label.
+        if (recordingGpx || gpsDiagnosticRecording) {
+            finishGpxRecording(save = true)
+        }
+        // Stop the route exactly once, then leave a durable arrival message on screen.
         clearRoute()
         routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
         if (voiceGuideReady) {
