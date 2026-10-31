@@ -1,7 +1,7 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePolicy.js";
-import { buildTomTomIncidentDetailsUrl, parseIncidentBbox } from "./trafficIncidentPolicy.js";
+import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -505,7 +505,8 @@ async function handleTrafficIncidents(req, res, url) {
         "TomTom-Api-Key": apiKey,
         "TomTom-Api-Version": "2",
         "Accept": "application/json",
-        "Accept-Language": safeLanguage
+        "Accept-Language": safeLanguage,
+        "Attributes": TOMTOM_INCIDENT_ATTRIBUTES
       },
       signal: AbortSignal.timeout(9000)
     });
