@@ -6,6 +6,7 @@ import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRI
 import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { sanitizeTripContext } from "./tripContextPolicy.js";
 import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
+import { normalizeLanguageTag } from "./languagePolicy.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -500,14 +501,15 @@ async function handleTrafficIncidents(req, res, url) {
 }
 
 
-async function fetchTomTomTrafficRoutesCached(input, clientIp) {
+async function fetchTomTomTrafficRoutesCached(input, clientIp, language = "en-GB") {
   const normalized = validateTomTomRouteRequest(input);
   if (!normalized) {
     const error = new Error("Invalid route request");
     error.statusCode = 400;
     throw error;
   }
-  const cacheKey = JSON.stringify(normalized);
+  const safeLanguage = normalizeLanguageTag(language);
+  const cacheKey = JSON.stringify({ ...normalized, language: safeLanguage });
   const cached = trafficRoutingCache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
     return { ...cached.value, cache: "HIT" };
@@ -519,7 +521,7 @@ async function fetchTomTomTrafficRoutesCached(input, clientIp) {
     error.statusCode = 429;
     throw error;
   }
-  const result = await fetchTomTomTrafficRoutes(normalized, { apiKey: process.env.TOMTOM_API_KEY });
+  const result = await fetchTomTomTrafficRoutes(normalized, { apiKey: process.env.TOMTOM_API_KEY, language: safeLanguage });
   if (result.routes.length) {
     trafficRoutingCache.set(cacheKey, { cachedAt: Date.now(), value: result });
     while (trafficRoutingCache.size > TRAFFIC_ROUTING_CACHE_MAX) {
@@ -557,7 +559,8 @@ async function handleTomTomTrafficRoute(req, res) {
     return send(res, 200, { ...cached.value, cache: "HIT" });
   }
   try {
-    const result = await fetchTomTomTrafficRoutes(normalized, { apiKey });
+    const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
+    const result = await fetchTomTomTrafficRoutes(normalized, { apiKey, language });
     if (!result.routes.length) {
       return send(res, 409, { ...result, error: "TomTom did not verify the requested vehicle mode for a complete route" });
     }
@@ -1018,9 +1021,7 @@ async function handle(req, res) {
   const message = typeof input?.message === "string"
     ? input.message.trim().slice(0, MAX_REQUEST_CHARS)
     : "";
-  const language = typeof input?.language === "string"
-    ? input.language.trim().slice(0, 20) || "it-IT"
-    : "it-IT";
+  const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
   const assistantName = typeof input?.assistantName === "string"
     ? input.assistantName.trim().replace(/[<>\r\n]/g, "").slice(0, 30) || "Jarvis"
     : "Jarvis";
