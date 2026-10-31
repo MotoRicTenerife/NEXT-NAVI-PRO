@@ -3430,6 +3430,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull().orEmpty().trim()
                             if (transcript.isBlank()) {
+                                setJarvisOrbActive(false)
                                 jarvisStatusText.text = appText("Non ho ricevuto parole • riprova")
                             } else {
                                 jarvisStatusText.text = appText("Hai detto: ") + transcript
@@ -4563,7 +4564,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             title = "Ricerche recenti",
             entries = entries,
             confirmLabel = "CERCA",
-            onPreview = { },
+            onPreview = { index ->
+                entries.getOrNull(index)?.let { query -> previewRecentSearchOnMap(query) }
+            },
             onConfirm = { index ->
                 entries.getOrNull(index)?.let { query ->
                     destinationInput.setText(query)
@@ -4571,6 +4574,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
             }
         )
+    }
+
+    /** Resolve a recent query in the background and preview its nearest real result on the shared map. */
+    private fun previewRecentSearchOnMap(query: String) {
+        val origin = currentLocation?.let { NavPoint(it.latitude, it.longitude) }
+            ?: approximateLocation?.let { NavPoint(it.latitude, it.longitude) }
+        thread(name = "recent-place-preview") {
+            runCatching { NavigationServices.searchPlaces(query, origin) }
+                .onSuccess { results ->
+                    val sorted = if (origin != null) results.sortedBy { place ->
+                        val distance = FloatArray(1)
+                        Location.distanceBetween(
+                            origin.latitude, origin.longitude,
+                            place.point.latitude, place.point.longitude, distance
+                        )
+                        distance[0]
+                    } else results
+                    runOnUiThread {
+                        if (!destinationPickerOpen || sorted.isEmpty()) return@runOnUiThread
+                        val place = sorted.first()
+                        destination = place
+                        refreshDestinationMarker()
+                        map?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(place.point.latitude, place.point.longitude), 15.0
+                            ), 400
+                        )
+                    }
+                }
+        }
     }
 
     /**
