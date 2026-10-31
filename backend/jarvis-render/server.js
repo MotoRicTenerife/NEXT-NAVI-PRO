@@ -788,6 +788,7 @@ async function handle(req, res) {
   let weatherFailureCode = null;
   let trafficResult = null;
   let dgtTrafficResult = null;
+  let tomtomTrafficFailure = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
   const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
@@ -821,9 +822,12 @@ async function handle(req, res) {
       });
       liveContext += "\nVERIFIED TOMTOM LIVE TRAFFIC FLOW AND INCIDENTS: " + JSON.stringify(trafficResult);
     } catch (error) {
+      tomtomTrafficFailure = error instanceof Error ? error.message.slice(0, 160) : "provider_unavailable";
+      liveContext += "\nTOMTOM LIVE TRAFFIC LOOKUP FAILED: " + tomtomTrafficFailure +
+        ". DGT may be used only as a secondary incident feed, not as a traffic-speed measurement.";
       console.warn("TomTom live traffic unavailable; trying DGT secondary feed", {
         errorType: error instanceof Error ? error.name : "UnknownError",
-        reason: error instanceof Error ? error.message.slice(0, 160) : "unknown"
+        reason: tomtomTrafficFailure
       });
     }
     // DGT is a secondary incident cross-check, never a substitute for observed traffic speed.
