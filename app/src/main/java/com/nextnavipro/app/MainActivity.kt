@@ -76,6 +76,8 @@ import com.google.android.gms.location.Priority
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -194,6 +196,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastGpxPointTimeMs = 0L
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
+    private var activeRouteFetchedAt = 0L
     @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
     private var routeProgressInitialized = false
     private var lastRouteProgressIndex = 0
@@ -211,6 +214,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var jarvisAwaitingDestination = false
     private var jarvisResponseGeneration = 0
     private var pendingJarvisSpeech: String? = null
+    private var pendingJarvisTrafficQuestion: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var pendingJarvisLocality: String? = null
     private var pendingJarvisAddressMode = false
@@ -2521,6 +2525,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        activeRouteFetchedAt = 0L
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -3581,6 +3586,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 destinationInput.setText(command.destination)
                 searchDestination(voiceCommand = true)
             }
+            is JarvisCommand.TrafficPreview -> {
+                pendingJarvisPreview = true
+                pendingJarvisTrafficQuestion = spokenTranscript
+                destinationInput.setText(command.destination)
+                speakJarvis("Controllo il percorso verso " + command.destination + " e verifico le segnalazioni di traffico.")
+                searchDestination(voiceCommand = true)
+            }
             JarvisCommand.BriefRoute -> {
                 val route = routeResult ?: routePreviewResult
                 if (route == null) {
@@ -3707,7 +3719,71 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
 
-    private fun askJarvisOnline(transcript: String) {
+
+    private fun answerJarvisTrafficForRoute(
+        question: String,
+        place: PlaceResult,
+        route: RouteResult,
+        routeFetchedAtEpochMs: Long,
+        currentRouteDistanceMeters: Double
+    ) {
+        val now = System.currentTimeMillis()
+        if (routeFetchedAtEpochMs <= 0L || now - routeFetchedAtEpochMs !in 0..(30L * 60L * 1000L)) {
+            pendingJarvisTrafficQuestion = null
+            speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Ricalcolo prima il percorso.")
+            return
+        }
+        val requestGeneration = jarvisResponseGeneration
+        jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico TomTom sul percorso…"
+        thread(name = "jarvis-route-traffic") {
+            val report = try {
+                TrafficIncidentClient.fetchForRoute(route.points, currentRouteDistanceMeters)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_TRAFFIC", "Route traffic lookup failed", error)
+                null
+            }
+            runOnUiThread {
+                if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                if (report == null) {
+                    pendingJarvisTrafficQuestion = null
+                    jarvisStatusText.text = jarvisAssistantName() + " • traffico non verificato"
+                    speakJarvis("Non riesco a verificare le segnalazioni TomTom lungo questo percorso. Non posso dedurre che la strada sia libera.")
+                    return@runOnUiThread
+                }
+                val incidentArray = JSONArray()
+                report.incidents.forEach { incident ->
+                    incidentArray.put(JSONObject()
+                        .put("id", incident.id)
+                        .put("severity", incident.severity.name)
+                        .put("distanceAheadMeters", incident.distanceAheadMeters)
+                        .put("delaySeconds", incident.delaySeconds ?: JSONObject.NULL)
+                        .put("road", incident.road ?: JSONObject.NULL)
+                        .put("description", incident.description)
+                        .put("observedAtEpochMs", incident.observedAtEpochMs)
+                        .put("validUntilEpochMs", incident.validUntilEpochMs)
+                        .put("geometryFitScore", incident.geometryFitScore)
+                        .put("directionVerified", false))
+                }
+                val context = JSONObject()
+                    .put("destinationName", place.name)
+                    .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
+                    .put("distanceKm", route.distanceKm)
+                    .put("durationSeconds", route.durationSeconds)
+                    .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
+                    .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
+                    .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
+                    .put("trafficSource", report.source)
+                    .put("trafficObservedAtEpochMs", report.observedAtEpochMs)
+                    .put("trafficCache", report.cache)
+                    .put("incidents", incidentArray)
+                pendingJarvisTrafficQuestion = null
+                jarvisStatusText.text = jarvisAssistantName() + " • dati traffico ricevuti"
+                askJarvisOnline(question, context)
+            }
+        }
+    }
+
+    private fun askJarvisOnline(transcript: String, tripContext: JSONObject? = null) {
         // The online assistant answers conversational requests only. Navigation commands
         // are handled locally; no GPS-based stationary gate blocks ordinary use.
         if (!JarvisOnlineAiClient.isConfigured()) {
@@ -3743,7 +3819,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             location = liveLocation,
             history = history,
             summary = summary,
-            personality = personality
+            personality = personality,
+            tripContext = tripContext
         ) { result ->
             runOnUiThread {
                 // Never let a delayed online response restart speech after the rider
@@ -3997,7 +4074,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     searchButton.isEnabled = true
                     if (sortedResults.isEmpty()) {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
-                        if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
+                        if (voiceCommand) {
+                            pendingJarvisTrafficQuestion = null
+                            speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
+                        }
                         return@runOnUiThread
                     }
                     if (voiceCommand && !pendingJarvisPreview) {
@@ -4339,7 +4419,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         "ANTEPRIMA • %.1f km • circa %d min\n%s",
                         result.distanceKm, minutes, result.firstInstruction)
                     routeButton.text = appText("AVVIA NAVIGAZIONE")
-                    if (announce) speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                    val trafficQuestion = pendingJarvisTrafficQuestion
+                    if (trafficQuestion != null) {
+                        pendingJarvisTrafficQuestion = null
+                        answerJarvisTrafficForRoute(trafficQuestion, place, result, routePreviewFetchedAt, 0.0)
+                    } else if (announce) {
+                        speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                    }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -4371,7 +4457,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             cached.route.distanceKm, minutes, freshness)
         routeButton.text = appText("AVVIA NAVIGAZIONE")
         scheduleRoutePreviewRefresh()
-        if (announce) speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+        val trafficQuestion = pendingJarvisTrafficQuestion
+        if (trafficQuestion != null) {
+            pendingJarvisTrafficQuestion = null
+            if (cached.isFresh()) {
+                answerJarvisTrafficForRoute(trafficQuestion, place, cached.route, cached.fetchedAtEpochMs, 0.0)
+            } else {
+                speakJarvis("La copia del percorso è troppo vecchia per associare in modo affidabile le segnalazioni di traffico attuali. Ricalcolo prima il percorso.")
+            }
+        } else if (announce) {
+            speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+        }
     }
 
     private fun scheduleRoutePreviewRefresh() {
@@ -4464,6 +4560,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    activeRouteFetchedAt = System.currentTimeMillis()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     navigationArrived = false
@@ -4535,6 +4632,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        activeRouteFetchedAt = 0L
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -6184,6 +6282,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    activeRouteFetchedAt = System.currentTimeMillis()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
