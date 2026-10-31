@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTomTomIncidentDetailsUrl, parseIncidentBbox } from "./trafficIncidentPolicy.js";
+import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
 
 test("accepts a bounded valid incident corridor", () => {
   const bbox = parseIncidentBbox("-16.8,27.9,-16.5,28.2");
@@ -26,4 +26,13 @@ test("builds Orbis v2 incident URL without embedding provider credentials", () =
   assert.equal(url.searchParams.get("bbox"), bbox.value);
   assert.equal(url.searchParams.get("timeValidity"), "present");
   assert.equal(url.searchParams.has("key"), false);
+});
+
+test("requests all Orbis v2 incident properties consumed by the mobile parser", () => {
+  assert.match(TOMTOM_INCIDENT_ATTRIBUTES, /^incidents\(type,geometry\(type,coordinates\),properties\(/);
+  for (const field of [
+    "id", "iconCategory", "magnitudeOfDelay", "events(description,code,iconCategory)",
+    "startTime", "endTime", "from", "to", "lengthInMeters", "delayInSeconds",
+    "roadNumbers", "timeValidity", "probabilityOfOccurrence"
+  ]) assert.ok(TOMTOM_INCIDENT_ATTRIBUTES.includes(field), "missing Attributes field: " + field);
 });
