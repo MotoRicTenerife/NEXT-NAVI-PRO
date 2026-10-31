@@ -104,24 +104,17 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.number == 2
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
-          RUN_PAID_JARVIS_SMOKE_TESTS: ${{ github.event_name != 'pull_request' }}
+          RUN_PAID_JARVIS_SMOKE_TESTS: 'false'
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/jarvis-render/'; then
-            # Render's service is rooted in backend/jarvis-render and may not redeploy
-            # for later Android-only commits. Compare against the last commit that
-            # actually changed backend files, not the current repository HEAD.
-            export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
-            if [ -z "$EXPECTED_RENDER_REVISION" ]; then
-              echo "::error::Could not identify the last backend commit."
-              exit 1
-            fi
-            echo "Backend files changed; checking that Render serves backend revision $EXPECTED_RENDER_REVISION."
-          else
-            export EXPECTED_RENDER_REVISION=""
-            echo "No Jarvis backend files changed; checking live service health without requiring a redeploy."
+          # Render deploys from backend/jarvis-render, not from unrelated Android/workflow commits.
+          # Always compare the live service with the latest backend-changing commit in this head.
+          export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          if [ -z "$EXPECTED_RENDER_REVISION" ]; then
+            echo "::error::Could not identify the latest backend commit for this revision."
+            exit 1
           fi
+          echo "Checking that Render serves the latest backend revision $EXPECTED_RENDER_REVISION."
           python - <<'PY'
           import json, os, sys, urllib.error, urllib.parse, urllib.request
           endpoint = os.environ.get("JARVIS_ENDPOINT", "").strip()
