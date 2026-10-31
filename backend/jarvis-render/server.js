@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
+import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -831,7 +832,13 @@ async function handle(req, res) {
     liveContext;
 
   // Live-data questions use verified provider results directly, so they still work if Gemini is unavailable or misconfigured.
-  if (!apiKey || asksWeather || asksTraffic) {
+  const responseMode = selectJarvisResponseMode({
+    apiKey,
+    hasLiveIntent: asksWeather || asksTraffic,
+    hasVerifiedLiveData: Boolean(weatherResult || trafficResult)
+  });
+
+  if (responseMode !== "gemini") {
     const fallbackReplies = [];
     if (asksWeather) {
       if (weatherResult) {
