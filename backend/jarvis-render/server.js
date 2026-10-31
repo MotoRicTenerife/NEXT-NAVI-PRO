@@ -815,7 +815,10 @@ async function handle(req, res) {
 
   if (asksTraffic && location) {
     try {
-      trafficResult = await fetchTomTomTraffic(location, process.env.TOMTOM_API_KEY);
+      trafficResult = await fetchTomTomTraffic(location, process.env.TOMTOM_API_KEY, fetch, {
+        admit: () => speedLimitGuard.admit(getClientIp(req)),
+        noteUpstreamStatus: (status, retryAfter) => speedLimitGuard.noteUpstreamStatus(status, retryAfter)
+      });
       liveContext += "\nVERIFIED TOMTOM LIVE TRAFFIC FLOW AND INCIDENTS: " + JSON.stringify(trafficResult);
     } catch (error) {
       console.warn("TomTom live traffic unavailable; trying DGT secondary feed", {
