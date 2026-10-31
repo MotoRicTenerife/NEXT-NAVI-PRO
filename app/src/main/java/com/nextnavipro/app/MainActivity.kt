@@ -3880,7 +3880,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     val nameKey = road.name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
                     val displayKey = road.displayName.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
                     nameKey.contains(queryKey) || displayKey.contains(queryKey)
-                }.ifEmpty { roads }
+                }
+                if (matchingRoads.isEmpty()) {
+                    throw IllegalStateException("La ricerca non ha restituito la strada esatta richiesta.")
+                }
                 val geometries = matchingRoads.take(6).mapNotNull { road ->
                     runCatching { RenderRoadEditorService.fetchGeometry(road) }.getOrNull()
                 }
