@@ -21,7 +21,9 @@ export function extractTrafficDestination(message) {
   for (const pattern of patterns) {
     const match = message.match(pattern);
     if (!match) continue;
-    const candidate = cleanCandidate(match[1]);
+    const rawCandidate = String(match[1] || "").replace(/\\s+/g, " ").trim();
+    if (rawCandidate.length > MAX_DESTINATION_CHARS) return "";
+    const candidate = cleanCandidate(rawCandidate);
     if (candidate.length >= 2 && !/^(qui|casa mia|me)$/i.test(candidate)) return candidate;
   }
   return "";
