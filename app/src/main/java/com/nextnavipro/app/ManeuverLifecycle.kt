@@ -61,6 +61,7 @@ internal class ManeuverLifecycle(
             observation.fixElapsedRealtimeMs < 0L
         ) return null
 
+        val previous = state
         if (activeId != observation.maneuverId) {
             activeId = observation.maneuverId
             state = State.APPROACH
@@ -69,13 +70,12 @@ internal class ManeuverLifecycle(
             lastEvidenceTimestampMs = Long.MIN_VALUE
         }
 
-        val previous = state
         val trusted = observation.matchConfidence >= 0.55
         // Do not count the same Android Location twice if guidance and ETA both
         // evaluate it during one UI cycle. Also require accepted map-match confidence
         // before advancing any spoken maneuver stage.
         if (!trusted || observation.fixElapsedRealtimeMs <= lastEvidenceTimestampMs) {
-            return Update(observation.maneuverId, previous, state, false)
+            return Update(observation.maneuverId, previous, state, previous != state)
         }
         lastEvidenceTimestampMs = observation.fixElapsedRealtimeMs
         val speed = observation.speedMetersPerSecond.coerceAtLeast(2.0)
