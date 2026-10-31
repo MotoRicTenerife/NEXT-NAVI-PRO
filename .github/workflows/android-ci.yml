@@ -101,6 +101,7 @@ jobs:
           retention-days: 14
 
       - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
+        if: github.event_name != 'pull_request'
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
         run: |
