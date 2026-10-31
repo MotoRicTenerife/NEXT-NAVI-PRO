@@ -80,6 +80,19 @@ def main():
     print(json.dumps({"test": "start", "base": BASE, "note": "No Gemini calls; bounded GET-only test"}))
     health, health_report = run_group("health-concurrency", ["/health"] * 40, 8)
     status, status_report = run_group("speed-limit-status-concurrency", ["/speed-limit/status"] * 16, 4)
+    traffic_status = request("/traffic/status")
+    traffic_status_deployed = traffic_status["status"] == 200 and traffic_status.get("payload", {}).get("ok") is True
+    if traffic_status["status"] == 404:
+        print(json.dumps({"test": "traffic-status", "status": 404, "deployed": False, "note": "Render is still serving a backend revision without the new traffic feature-status endpoint."}, ensure_ascii=False))
+    elif traffic_status_deployed:
+        payload = traffic_status["payload"]
+        print(json.dumps({"test": "traffic-status", "status": 200, "deployed": True,
+                          "tomtomConfigured": payload.get("tomtomConfigured"),
+                          "incidentDetailsEnabled": payload.get("incidentDetailsEnabled"),
+                          "trafficAwareRoutingEnabled": payload.get("trafficAwareRoutingEnabled")}, ensure_ascii=False))
+    else:
+        print(json.dumps({"test": "traffic-status", "status": traffic_status["status"], "deployed": False,
+                          "error": traffic_status.get("error", "")}, ensure_ascii=False))
     limits, limits_report = run_group("speed-limit-live-diagnostic", [
         "/speed-limit?lat=28.12271&lon=-16.72600",
         "/speed-limit?lat=28.04974&lon=-16.67714",
@@ -93,6 +106,7 @@ def main():
         "health_stable": health_payload_ok,
         "status_stable": status_payload_ok,
         "speed_limit_functional": limit_ok,
+        "traffic_status_endpoint_deployed": traffic_status_deployed,
         "health_p95_seconds": health_report["p95_latency_seconds"],
         "health_success_rate_pct": health_report["success_rate_pct"],
         "status_success_rate_pct": status_report["success_rate_pct"],
@@ -108,6 +122,8 @@ def main():
         print("::warning::Speed-limit status endpoint degraded under concurrent requests.")
     if not limit_ok:
         print("::warning::Live speed-limit lookup remains unavailable; inspect OSM/Overpass/TomTom provider diagnostics.")
+    if not traffic_status_deployed:
+        print("::warning::TomTom route-traffic feature status is not yet exposed by the live Render revision; no route-traffic entitlement or ETA is claimed.")
     print("PASS: bounded Render health stress test completed; see summary for feature-level failures.")
 
 
