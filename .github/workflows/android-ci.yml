@@ -101,9 +101,10 @@ jobs:
           retention-days: 14
 
       - name: Smoke-test live Render Jarvis, weather source and Guaza geocoder
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' || github.event.pull_request.number == 2
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
+          RUN_PAID_JARVIS_SMOKE_TESTS: ${{ github.event_name != 'pull_request' }}
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
@@ -203,34 +204,37 @@ jobs:
                       else:
                           failures.append("Render road editor OSM search/geometry: " + str(error))
 
-                  try:
-                      status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
-                      reply = result.get("reply", "")
-                      if status != 200 or not reply.strip():
-                          raise RuntimeError("No reply in HTTP 200 response")
-                      print("Render Jarvis Gemini chat check PASSED:", reply[:180])
-                  except Exception as error:
-                      if isinstance(error, urllib.error.HTTPError):
-                          detail = error.read(400).decode("utf-8", "replace")
-                          failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
-                      else:
-                          failures.append("Jarvis chat/API key/model: " + str(error))
-                  try:
-                      status, weather_reply = post_json(endpoint, {
-                          "message":"Che condizioni meteo ci sono?",
-                          "language":"it-IT",
-                          "location":{"latitude":28.05,"longitude":-16.68}
-                      }, 30)
-                      reply = weather_reply.get("reply", "")
-                      if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
-                          raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
-                      print("Render Jarvis weather check PASSED:", reply[:180])
-                  except Exception as error:
-                      if isinstance(error, urllib.error.HTTPError):
-                          detail = error.read(400).decode("utf-8", "replace")
-                          failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
-                      else:
-                          failures.append("Render Jarvis weather: " + str(error))
+                  if os.environ.get("RUN_PAID_JARVIS_SMOKE_TESTS", "false").lower() == "true":
+                      try:
+                          status, result = post_json(endpoint, {"message":"Rispondi soltanto con OK.","language":"it-IT"}, 35)
+                          reply = result.get("reply", "")
+                          if status != 200 or not reply.strip():
+                              raise RuntimeError("No reply in HTTP 200 response")
+                          print("Render Jarvis Gemini chat check PASSED:", reply[:180])
+                      except Exception as error:
+                          if isinstance(error, urllib.error.HTTPError):
+                              detail = error.read(400).decode("utf-8", "replace")
+                              failures.append("Jarvis chat/API key/model HTTP " + str(error.code) + ": " + detail[:240])
+                          else:
+                              failures.append("Jarvis chat/API key/model: " + str(error))
+                      try:
+                          status, weather_reply = post_json(endpoint, {
+                              "message":"Che condizioni meteo ci sono?",
+                              "language":"it-IT",
+                              "location":{"latitude":28.05,"longitude":-16.68}
+                          }, 30)
+                          reply = weather_reply.get("reply", "")
+                          if status != 200 or not any(source in reply for source in ("Open-Meteo", "MET Norway")) or not reply.strip():
+                              raise RuntimeError("Render weather response is not verified live weather data; diagnostics=" + repr(weather_reply.get("weatherDiagnostics")) + "; reply=" + repr(reply[:240]))
+                          print("Render Jarvis weather check PASSED:", reply[:180])
+                      except Exception as error:
+                          if isinstance(error, urllib.error.HTTPError):
+                              detail = error.read(400).decode("utf-8", "replace")
+                              failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
+                          else:
+                              failures.append("Render Jarvis weather: " + str(error))
+                  else:
+                      print("Skipping paid Jarvis/Gemini POST smoke checks for pull-request validation.")
               except Exception as error:
                   failures.append("Render Jarvis health: " + str(error))
           else:
