@@ -589,8 +589,8 @@ async function handleTomTomTrafficRoute(req, res) {
     }
     trafficRoutingCache.set(cacheKey, { cachedAt: Date.now(), value: result });
     if (trafficRoutingCache.size > TRAFFIC_ROUTING_CACHE_MAX) {
-      for (const [key, value] of trafficRoutingCache) {
-        if (Date.now() - value.cachedAt >= TRAFFIC_ROUTING_CACHE_MS) trafficRoutingCache.delete(key);
+      for (const key of trafficRoutingCache.keys()) {
+        trafficRoutingCache.delete(key);
         if (trafficRoutingCache.size <= TRAFFIC_ROUTING_CACHE_MAX) break;
       }
     }
