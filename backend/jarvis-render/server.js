@@ -1002,82 +1002,67 @@ async function handle(req, res) {
   const tripContext = sanitizeTripContext(input?.tripContext);
   if (tripContext?.routeRequest) {
     if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
-      try {
-        const routeAdmission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
-        if (!routeAdmission.allowed) {
-          const limited = new Error("TomTom routing request limit reached");
-          limited.statusCode = 429;
-          throw limited;
+      const routeJobs = [
+        {
+          label: tripContext.viaRoadName ? "TOMTOM WAYPOINT ROUTE VIA " + tripContext.viaRoadName : "TOMTOM REQUESTED ROUTE",
+          request: tripContext.routeRequest,
+          referenceDistanceKm: tripContext.distanceKm,
+          includeAlternatives: true
+        },
+        ...(tripContext.baselineRouteRequest ? [{
+          label: "TOMTOM DIRECT BASELINE ROUTE",
+          request: tripContext.baselineRouteRequest,
+          referenceDistanceKm: tripContext.baselineRoute?.distanceKm || tripContext.distanceKm,
+          includeAlternatives: false
+        }] : [])
+      ];
+      const routeResults = await Promise.all(routeJobs.map(async job => {
+        const admission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
+        if (!admission.allowed) return { job, error: "rate_limited" };
+        try {
+          const result = await fetchTomTomTrafficRoutes(job.request, {
+            apiKey: process.env.TOMTOM_API_KEY
+          });
+          return { job, result };
+        } catch (error) {
+          return { job, error: Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable" };
         }
-        const routeResult = await fetchTomTomTrafficRoutes(tripContext.routeRequest, {
-          apiKey: process.env.TOMTOM_API_KEY
-        });
-        const compactRoutes = routeResult.routes.map(({ points, trafficSections, ...route }) => ({
+      }));
+      for (const item of routeResults) {
+        if (!item.result) {
+          liveContext += "\n" + item.job.label + " UNAVAILABLE (" + item.error + "). Do not invent its live ETA or traffic delay.";
+          continue;
+        }
+        const result = item.result;
+        const routes = item.job.includeAlternatives ? result.routes : result.routes.filter(route => route.routeId === "primary");
+        const compactRoutes = routes.map(({ points, trafficSections, ...route }) => ({
           ...route,
           trafficSections: trafficSections.slice(0, 12)
         }));
-        const baselineMeters = tripContext.distanceKm * 1000;
         const primary = compactRoutes.find(route => route.routeId === "primary");
+        const referenceMeters = item.job.referenceDistanceKm * 1000;
         const distanceDiscrepancy = primary
-          ? Math.abs(primary.lengthInMeters - baselineMeters) / baselineMeters > 0.35
+          ? Math.abs(primary.lengthInMeters - referenceMeters) / referenceMeters > 0.35
           : false;
-        liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING: " + JSON.stringify({
-          source: routeResult.source,
-          observedAtEpochMs: routeResult.observedAtEpochMs,
-          vehicleMode: routeResult.vehicleMode,
-          motorcycleModeBeta: routeResult.motorcycleModeBeta,
-          status: routeResult.status,
+        liveContext += "\n" + item.job.label + ": " + JSON.stringify({
+          source: result.source,
+          observedAtEpochMs: result.observedAtEpochMs,
+          vehicleMode: result.vehicleMode,
+          motorcycleModeBeta: result.motorcycleModeBeta,
+          status: result.status,
           routes: compactRoutes,
-          rejectedRoutes: routeResult.rejectedRoutes,
+          rejectedRoutes: result.rejectedRoutes,
           distanceDiscrepancy
         });
-        if (!routeResult.routes.length) {
-          liveContext += "\nNO TOMTOM ROUTE WAS VERIFIED FOR THE REQUESTED VEHICLE MODE. Do not provide a TomTom live ETA or alternative route.";
-        }
-        if (tripContext.vehicleMode === "motorcycle") {
-          liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom travelMode=motorcycle is beta and restriction data is not complete in every area. Use it only as a traffic-aware cross-check when every returned travel-mode section is verified. Keep the Valhalla motorcycle route as the navigation baseline; never silently replace it or claim full legal-access certainty.";
+        if (!primary) {
+          liveContext += "\nNO PRIMARY TOMTOM ROUTE WAS VERIFIED FOR " + item.job.label + ". Do not present a live ETA for it.";
         }
         if (distanceDiscrepancy) {
-          liveContext += "\nROUTE CROSS-CHECK WARNING: TomTom and Valhalla primary route distances differ by more than 35 percent. Do not recommend the TomTom route as a direct equivalent; explain the discrepancy and ask before changing route.";
+          liveContext += "\nROUTE CROSS-CHECK WARNING: TomTom and Valhalla distances differ by more than 35 percent for " + item.job.label + ". Do not recommend it as a direct equivalent.";
         }
-      } catch (error) {
-        console.warn("TomTom traffic-aware routing unavailable", {
-          providerStatus: Number.isInteger(error.statusCode) ? error.statusCode : null
-        });
-        liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS UNAVAILABLE. Do not provide a live-traffic-adjusted ETA or traffic-based alternative route. The Valhalla estimate remains a baseline only.";
       }
-      if (tripContext.baselineRouteRequest) {
-        try {
-          const baselineAdmission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
-          if (!baselineAdmission.allowed) throw new Error("TomTom route comparison limit reached");
-          const baselineResult = await fetchTomTomTrafficRoutes(tripContext.baselineRouteRequest, {
-            apiKey: process.env.TOMTOM_API_KEY
-          });
-          const baselinePrimary = baselineResult.routes.find(route => route.routeId === "primary");
-          if (baselinePrimary) {
-            const baselineMeters = (tripContext.baselineRoute?.distanceKm || tripContext.distanceKm) * 1000;
-            liveContext += "\nTOMTOM DIRECT-ROUTE TRAFFIC COMPARISON: " + JSON.stringify({
-              source: baselineResult.source,
-              observedAtEpochMs: baselineResult.observedAtEpochMs,
-              vehicleMode: baselineResult.vehicleMode,
-              motorcycleModeBeta: baselineResult.motorcycleModeBeta,
-              primaryRoute: {
-                lengthInMeters: baselinePrimary.lengthInMeters,
-                travelTimeInSeconds: baselinePrimary.travelTimeInSeconds,
-                trafficDelayInSeconds: baselinePrimary.trafficDelayInSeconds,
-                noTrafficTravelTimeInSeconds: baselinePrimary.noTrafficTravelTimeInSeconds,
-                liveTrafficIncidentsTravelTimeInSeconds: baselinePrimary.liveTrafficIncidentsTravelTimeInSeconds,
-                trafficLengthInMeters: baselinePrimary.trafficLengthInMeters,
-                trafficSections: baselinePrimary.trafficSections.slice(0, 12)
-              },
-              distanceDiscrepancy: Math.abs(baselinePrimary.lengthInMeters - baselineMeters) / baselineMeters > 0.35
-            });
-          } else {
-            liveContext += "\nTOMTOM DID NOT VERIFY THE DIRECT BASELINE ROUTE FOR THIS VEHICLE MODE. Do not compare live ETAs.";
-          }
-        } catch (error) {
-          liveContext += "\nTOMTOM DIRECT-ROUTE TRAFFIC COMPARISON IS UNAVAILABLE. Do not infer its live ETA from the earlier conversation.";
-        }
+      if (tripContext.vehicleMode === "motorcycle") {
+        liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom travelMode=motorcycle is beta and restriction data is not complete in every area. Use it only as a traffic-aware cross-check when every returned travel-mode section is verified. Keep the Valhalla motorcycle route as the navigation baseline; never silently replace it or claim full legal-access certainty.";
       }
     } else {
       liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS NOT ENABLED ON THE SERVER. Do not present the Valhalla baseline as a live-traffic ETA or claim a verified traffic delay.";
@@ -1087,7 +1072,7 @@ async function handle(req, res) {
     liveContext += "\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
     liveContext += "\nTRAFFIC SAFETY INTERPRETATION: the Valhalla duration is a baseline estimate, NOT a live-traffic-adjusted ETA. TomTom incident records are not a complete traffic-flow measurement. No matched incident does NOT prove free-flowing traffic. The current route matcher does NOT verify carriageway direction, so never claim an event is confirmed on the rider's lane. Do not add overlapping incident delays or invent an overall delay.";
     if (tripContext.viaRoadName && tripContext.baselineRoute) {
-      liveContext += "\\nNAMED-ROAD COMPARISON: the user requested a route via " + tripContext.viaRoadName + ". Compare the freshly calculated TomTom waypoint route against the freshly calculated direct route only when both TomTom results are present and vehicle-mode verified. Use the Valhalla direct/via metrics as baseline comparisons, not live ETAs. If either TomTom route is missing or unverified, say the live comparison is incomplete. Never reuse an earlier conversational ETA as current.";
+      liveContext += "\nNAMED-ROAD COMPARISON: the user requested a route via " + tripContext.viaRoadName + ". Compare the freshly calculated TomTom waypoint route against the freshly calculated direct route only when both TomTom results are present and vehicle-mode verified. Use the Valhalla direct/via metrics as baseline comparisons, not live ETAs. If either TomTom route is missing or unverified, say the live comparison is incomplete. Never reuse an earlier conversational ETA as current.";
     }
     if (tripContext.trafficUnavailable) {
       liveContext += "\nTOMTOM INCIDENT DETAILS ARE UNAVAILABLE FOR THIS REQUEST. This is missing data, not evidence that the route is clear. Use any independently verified TomTom traffic-aware route result if available; otherwise say live traffic could not be confirmed.";
