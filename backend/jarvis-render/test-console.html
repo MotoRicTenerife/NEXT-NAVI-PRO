@@ -45,19 +45,21 @@ button,input,select,textarea{font:inherit}button{border:1px solid #3b5668;backgr
    <div class="field"><label for="concision">Sintesi <b id="concisionV">75</b></label><input id="concision" type="range" min="0" max="100" value="75"></div>
   </div>
   <div class="divider"></div>
-  <div class="field"><label>Posizione GPS (facoltativa, necessaria per meteo/traffico locale)</label><div class="grid2"><input id="lat" inputmode="decimal" placeholder="Latitudine"><input id="lon" inputmode="decimal" placeholder="Longitudine"></div></div>
+  <div class="field"><label for="trafficDestination">Destinazione per la verifica traffico</label><input id="trafficDestination" value="Los Cristianos" maxlength="120" placeholder="Es. Los Cristianos"></div>
+  <div class="field"><label for="vehicleMode">Tipo di veicolo per TomTom</label><select id="vehicleMode"><option value="motorcycle" selected>Modalità moto</option><option value="car">Modalità auto</option></select></div>
+  <div class="field"><label>Posizione GPS attuale (necessaria per il percorso)</label><div class="grid2"><input id="lat" inputmode="decimal" placeholder="Latitudine"><input id="lon" inputmode="decimal" placeholder="Longitudine"></div></div>
   <div class="toolbar"><button id="getGps" class="small">Usa GPS del dispositivo</button><button id="clearGps" class="small">Rimuovi GPS</button></div>
   <div class="divider"></div>
   <h2 style="font-size:14px;margin:0 0 10px">Test guidati · conversazione reale</h2>
   <div class="quick">
    <button id="testMemory">① Continuità: ricorda una destinazione</button>
    <button id="testFollow">② Follow-up: “E passando dalla TF-1?”</button>
-   <button id="testTraffic">③ Traffico locale verificato</button>
+   <button id="testTraffic">③ Traffico TomTom sul percorso</button>
    <button id="testWeather">④ Meteo locale verificato</button>
   </div>
   <div id="suiteResult" class="result" hidden></div>
  </div>
- <div class="footer">I test ③ e ④ richiedono una posizione GPS autorizzata. Il test ② verifica anche che Jarvis non inventi tempi o percorsi se manca un itinerario calcolato. Non usare il telefono durante la guida.</div>
+ <div class="footer">Il test ③ richiede GPS e destinazione: calcola un percorso senza avviare la navigazione e interroga TomTom. Il test ④ richiede GPS. La modalità moto usa il profilo TomTom motorcycle beta, se abilitato sul server. Non usare il telefono durante la guida.</div>
 </aside>
 </main>
 <script>
@@ -82,7 +84,7 @@ async function sendMessage(text){
  addMessage("user",text);messages.push({role:"user",content:text});input.value="";setBusy(true);
  const started=performance.now();let bubble=null;
  try{
-  const body={message:text,language:"it-IT",assistantName:$("name").value.trim()||"Jarvis",personality:personality(),history:messages.slice(0,-1).slice(-10)};
+  const body={message:text,language:"it-IT",assistantName:$("name").value.trim()||"Jarvis",personality:personality(),history:messages.slice(0,-1).slice(-10),vehicleMode:$("vehicleMode").value};
   const location=getLocation();if(location)body.location=location;
   const response=await fetch("/jarvis",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),cache:"no-store"});
   const data=await response.json().catch(()=>({error:"Risposta JSON non valida"}));
@@ -133,7 +135,7 @@ async function runSuite(items,label){
 }
 $("testMemory").addEventListener("click",()=>{$("clearChat").click();runSuite([{text:"Per questa prova, la mia destinazione si chiama Los Cristianos. Tienilo a mente durante la conversazione."},{text:"Qual è la destinazione che ti ho appena indicato?"}],"Continuità conversazionale");});
 $("testFollow").addEventListener("click",()=>runSuite([{text:"Sto valutando un percorso per Los Cristianos. Prima di confrontare alternative, dimmi quali informazioni ti servono per verificare il traffico."},{text:"E passando dalla TF-1?"}],"Follow-up su strada alternativa"));
-$("testTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Prima acquisisci il GPS o inserisci latitudine e longitudine.",false);return;}sendMessage("Puoi verificare le segnalazioni di traffico attuali vicino alla mia posizione? Dimmi la fonte e distingui le segnalazioni dalla velocità effettiva del traffico.");});
+$("testTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Prima acquisisci il GPS o inserisci latitudine e longitudine.",false);return;}const destination=$("trafficDestination").value.trim();if(destination.length<2){suiteResult("Inserisci una destinazione valida.",false);return;}sendMessage("Che traffico c'è per andare da qui a "+destination+"? Usa i dati TomTom aggiornati, indicami tempo di percorrenza e ritardo se disponibili e distingui i dati mancanti dall'assenza di traffico.");});
 $("testWeather").addEventListener("click",()=>{if(!getLocation()){suiteResult("Prima acquisisci il GPS o inserisci latitudine e longitudine.",false);return;}sendMessage("Com'è il meteo adesso nella mia posizione? Indica fonte e orario del dato.");});
 health();
 })();
