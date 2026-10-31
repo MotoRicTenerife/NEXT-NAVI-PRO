@@ -70,12 +70,15 @@ internal object TrafficDecisionEngine {
     fun evaluate(context: Context): Advisory? {
         if (context.activeRouteId.isBlank() || context.routeVersion.isBlank() ||
             context.nowEpochMs <= 0L || !validRoute(context.activeRoute, context.nowEpochMs) ||
-            context.activeRoute.routeId != context.activeRouteId ||
-            context.activeRoute.hasConfirmedClosure
+            context.activeRoute.routeId != context.activeRouteId
         ) return null
 
+        // A confirmed closure on the active route must never suppress its own warning.
+        // Until alternatives carry an explicit vehicle-access validation result, do not
+        // recommend a detour from this path: report the closure and let the rider decide.
         val hazard = context.hazards.asSequence()
             .filter { validHazard(it, context.nowEpochMs) }
+            .filter { !context.activeRoute.hasConfirmedClosure || it.severity == Severity.CLOSED }
             .filter { it.distanceAheadMeters <= MAX_HAZARD_DISTANCE_METERS }
             .filter { hazardWithinDecisionWindow(it, context.currentSpeedMetersPerSecond) }
             .maxWithOrNull(compareBy<Hazard> { severityRank(it.severity) }
@@ -83,7 +86,8 @@ internal object TrafficDecisionEngine {
                 .thenBy { -it.distanceAheadMeters }) ?: return null
 
         val bestAlternative = context.alternatives.asSequence()
-            .filter { it.routeId.isNotBlank() && it.routeId != context.activeRouteId }
+            .takeUnless { context.activeRoute.hasConfirmedClosure }
+            ?.filter { it.routeId.isNotBlank() && it.routeId != context.activeRouteId }
             .filter { validRoute(it, context.nowEpochMs) && !it.hasConfirmedClosure }
             .filter { it.confidence >= MIN_ROUTE_CONFIDENCE }
             .filter {
