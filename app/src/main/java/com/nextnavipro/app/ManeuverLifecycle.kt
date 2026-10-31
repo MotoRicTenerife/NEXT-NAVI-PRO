@@ -1,0 +1,118 @@
+package com.nextnavipro.app
+
+/**
+ * Deterministic lifecycle for one route maneuver.
+ *
+ * The presentation layer may use this state to schedule prompts, but it must not
+ * infer road topology or advance a maneuver from a single noisy GNSS fix.
+ * Call reset() whenever the active route identity changes.
+ */
+internal class ManeuverLifecycle(
+    private val normalPrepareSeconds: Double = 35.0,
+    private val roundaboutPrepareSeconds: Double = 48.0,
+    private val normalImminentSeconds: Double = 10.0,
+    private val roundaboutImminentSeconds: Double = 14.0,
+    private val completionConfirmations: Int = 2,
+    private val missedConfirmations: Int = 3
+) {
+    enum class State { APPROACH, PREPARE, IMMINENT, EXECUTING, COMPLETED, MISSED }
+
+    data class Observation(
+        val maneuverId: String,
+        val distanceMeters: Double,
+        val speedMetersPerSecond: Double,
+        val matchedAlongRouteMeters: Double,
+        val maneuverAlongRouteMeters: Double,
+        val matchConfidence: Double,
+        val isRoundabout: Boolean = false
+    )
+
+    data class Update(
+        val maneuverId: String,
+        val previous: State,
+        val current: State,
+        val changed: Boolean
+    )
+
+    private var activeId: String? = null
+    private var state = State.APPROACH
+    private var completionEvidence = 0
+    private var missedEvidence = 0
+
+    fun reset() {
+        activeId = null
+        state = State.APPROACH
+        completionEvidence = 0
+        missedEvidence = 0
+    }
+
+    fun currentState(): State = state
+
+    fun update(observation: Observation): Update? {
+        if (observation.maneuverId.isBlank() ||
+            !observation.distanceMeters.isFinite() || observation.distanceMeters < 0.0 ||
+            !observation.speedMetersPerSecond.isFinite() || observation.speedMetersPerSecond < 0.0 ||
+            !observation.matchedAlongRouteMeters.isFinite() ||
+            !observation.maneuverAlongRouteMeters.isFinite() ||
+            !observation.matchConfidence.isFinite() || observation.matchConfidence !in 0.0..1.0
+        ) return null
+
+        if (activeId != observation.maneuverId) {
+            activeId = observation.maneuverId
+            state = State.APPROACH
+            completionEvidence = 0
+            missedEvidence = 0
+        }
+
+        val previous = state
+        val trusted = observation.matchConfidence >= 0.55
+        val speed = observation.speedMetersPerSecond.coerceAtLeast(2.0)
+        val etaSeconds = observation.distanceMeters / speed
+        val prepareAt = if (observation.isRoundabout) roundaboutPrepareSeconds else normalPrepareSeconds
+        val imminentAt = if (observation.isRoundabout) roundaboutImminentSeconds else normalImminentSeconds
+        val executingDistance = if (observation.isRoundabout) 22.0 else 12.0
+
+        if (trusted) {
+            val passedBy = observation.matchedAlongRouteMeters -
+                observation.maneuverAlongRouteMeters
+            if (passedBy >= 28.0 && observation.distanceMeters <= 65.0) {
+                completionEvidence++
+            } else {
+                completionEvidence = 0
+            }
+            if (passedBy >= 85.0 && observation.distanceMeters > 65.0) {
+                missedEvidence++
+            } else {
+                missedEvidence = 0
+            }
+        } else {
+            completionEvidence = 0
+            missedEvidence = 0
+        }
+
+        state = when (state) {
+            State.APPROACH -> when {
+                observation.distanceMeters <= executingDistance || etaSeconds <= 3.5 -> State.EXECUTING
+                etaSeconds <= imminentAt -> State.IMMINENT
+                etaSeconds <= prepareAt -> State.PREPARE
+                else -> State.APPROACH
+            }
+            State.PREPARE -> when {
+                observation.distanceMeters <= executingDistance || etaSeconds <= 3.5 -> State.EXECUTING
+                etaSeconds <= imminentAt -> State.IMMINENT
+                else -> State.PREPARE
+            }
+            State.IMMINENT -> if (observation.distanceMeters <= executingDistance || etaSeconds <= 3.5)
+                State.EXECUTING else State.IMMINENT
+            State.EXECUTING -> when {
+                completionEvidence >= completionConfirmations -> State.COMPLETED
+                missedEvidence >= missedConfirmations -> State.MISSED
+                else -> State.EXECUTING
+            }
+            State.COMPLETED -> State.COMPLETED
+            State.MISSED -> State.MISSED
+        }
+
+        return Update(observation.maneuverId, previous, state, previous != state)
+    }
+}
