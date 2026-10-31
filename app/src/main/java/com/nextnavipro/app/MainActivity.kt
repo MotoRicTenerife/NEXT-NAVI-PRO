@@ -6019,8 +6019,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
-        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
+        // Give the rider more reaction time: first cue targets about 30 seconds,
+        // second cue about 12 seconds. Distance caps prevent excessive early prompts
+        // in fast traffic and minimums keep low-speed manoeuvres readable.
+        val earlyThreshold = (speedMps * 30f).coerceIn(180f, 900f)
+        val mediumThreshold = (speedMps * 12f).coerceIn(70f, 300f)
         val stage = when {
             distanceToTurn <= 10.0 -> 4
             distanceToTurn <= 50.0 -> 3
@@ -6035,7 +6038,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (stage > announcedStage) {
             announcedStage = stage
             val spoken = when (stage) {
-                1 -> "Tra poco, " + instruction
+                1 -> "Preparati. Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
                 2 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
                 3 -> "Tra cinquanta metri, " + instruction
                 4 -> instruction
