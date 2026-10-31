@@ -1003,6 +1003,12 @@ async function handle(req, res) {
   if (tripContext?.routeRequest) {
     if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
       try {
+        const routeAdmission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
+        if (!routeAdmission.allowed) {
+          const limited = new Error("TomTom routing request limit reached");
+          limited.statusCode = 429;
+          throw limited;
+        }
         const routeResult = await fetchTomTomTrafficRoutes(tripContext.routeRequest, {
           apiKey: process.env.TOMTOM_API_KEY
         });
@@ -1039,6 +1045,39 @@ async function handle(req, res) {
           providerStatus: Number.isInteger(error.statusCode) ? error.statusCode : null
         });
         liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS UNAVAILABLE. Do not provide a live-traffic-adjusted ETA or traffic-based alternative route. The Valhalla estimate remains a baseline only.";
+      }
+      if (tripContext.baselineRouteRequest) {
+        try {
+          const baselineAdmission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
+          if (!baselineAdmission.allowed) throw new Error("TomTom route comparison limit reached");
+          const baselineResult = await fetchTomTomTrafficRoutes(tripContext.baselineRouteRequest, {
+            apiKey: process.env.TOMTOM_API_KEY
+          });
+          const baselinePrimary = baselineResult.routes.find(route => route.routeId === "primary");
+          if (baselinePrimary) {
+            const baselineMeters = (tripContext.baselineRoute?.distanceKm || tripContext.distanceKm) * 1000;
+            liveContext += "\nTOMTOM DIRECT-ROUTE TRAFFIC COMPARISON: " + JSON.stringify({
+              source: baselineResult.source,
+              observedAtEpochMs: baselineResult.observedAtEpochMs,
+              vehicleMode: baselineResult.vehicleMode,
+              motorcycleModeBeta: baselineResult.motorcycleModeBeta,
+              primaryRoute: {
+                lengthInMeters: baselinePrimary.lengthInMeters,
+                travelTimeInSeconds: baselinePrimary.travelTimeInSeconds,
+                trafficDelayInSeconds: baselinePrimary.trafficDelayInSeconds,
+                noTrafficTravelTimeInSeconds: baselinePrimary.noTrafficTravelTimeInSeconds,
+                liveTrafficIncidentsTravelTimeInSeconds: baselinePrimary.liveTrafficIncidentsTravelTimeInSeconds,
+                trafficLengthInMeters: baselinePrimary.trafficLengthInMeters,
+                trafficSections: baselinePrimary.trafficSections.slice(0, 12)
+              },
+              distanceDiscrepancy: Math.abs(baselinePrimary.lengthInMeters - baselineMeters) / baselineMeters > 0.35
+            });
+          } else {
+            liveContext += "\nTOMTOM DID NOT VERIFY THE DIRECT BASELINE ROUTE FOR THIS VEHICLE MODE. Do not compare live ETAs.";
+          }
+        } catch (error) {
+          liveContext += "\nTOMTOM DIRECT-ROUTE TRAFFIC COMPARISON IS UNAVAILABLE. Do not infer its live ETA from the earlier conversation.";
+        }
       }
     } else {
       liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS NOT ENABLED ON THE SERVER. Do not present the Valhalla baseline as a live-traffic ETA or claim a verified traffic delay.";
