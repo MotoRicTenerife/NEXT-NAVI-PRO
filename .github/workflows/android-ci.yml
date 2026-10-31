@@ -104,7 +104,7 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.number == 2
         env:
           JARVIS_ENDPOINT: https://next-navi-pro-jarvis.onrender.com/jarvis
-          RUN_PAID_JARVIS_SMOKE_TESTS: 'false'
+          RUN_PAID_JARVIS_SMOKE_TESTS: ${{ github.event_name == 'push' && 'true' || 'false' }}
         run: |
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           # Render deploys from backend/jarvis-render, not from unrelated Android/workflow commits.
@@ -226,6 +226,31 @@ jobs:
                               failures.append("Render Jarvis weather HTTP " + str(error.code) + ": " + detail[:240])
                           else:
                               failures.append("Render Jarvis weather: " + str(error))
+                      try:
+                          status, traffic_result = post_json(endpoint, {
+                              "message":"Che traffico c'è per andare da qui a Los Cristianos? Usa soltanto il percorso e i dati TomTom verificati.",
+                              "language":"it-IT",
+                              "location":{"latitude":28.05,"longitude":-16.68},
+                              "vehicleMode":"car"
+                          }, 45)
+                          traffic_reply = traffic_result.get("reply", "")
+                          traffic_diag = traffic_result.get("diagnostics", {})
+                          if (status != 200 or not traffic_reply.strip() or
+                              traffic_diag.get("responseMode") != "gemini" or
+                              traffic_diag.get("trafficContext") != "tomtom_route_loaded" or
+                              not traffic_diag.get("model")):
+                              raise RuntimeError("End-to-end Gemini/TomTom traffic verification failed: diagnostics=" + repr(traffic_diag) + "; reply=" + repr(traffic_reply[:240]))
+                          print("Render Jarvis Gemini + TomTom destination traffic check PASSED:", {
+                              "model": traffic_diag.get("model"),
+                              "trafficContext": traffic_diag.get("trafficContext"),
+                              "reply": traffic_reply[:220]
+                          })
+                      except Exception as error:
+                          if isinstance(error, urllib.error.HTTPError):
+                              detail = error.read(400).decode("utf-8", "replace")
+                              failures.append("Jarvis Gemini/TomTom traffic HTTP " + str(error.code) + ": " + detail[:240])
+                          else:
+                              failures.append("Jarvis Gemini/TomTom traffic: " + str(error))
                   else:
                       print("Skipping paid Jarvis/Gemini POST smoke checks for pull-request validation.")
               except Exception as error:
