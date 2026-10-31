@@ -1047,6 +1047,9 @@ async function handle(req, res) {
   if (tripContext) {
     liveContext += "\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
     liveContext += "\nTRAFFIC SAFETY INTERPRETATION: the Valhalla duration is a baseline estimate, NOT a live-traffic-adjusted ETA. TomTom incident records are not a complete traffic-flow measurement. No matched incident does NOT prove free-flowing traffic. The current route matcher does NOT verify carriageway direction, so never claim an event is confirmed on the rider's lane. Do not add overlapping incident delays or invent an overall delay.";
+    if (tripContext.trafficUnavailable) {
+      liveContext += "\nTOMTOM INCIDENT DETAILS ARE UNAVAILABLE FOR THIS REQUEST. This is missing data, not evidence that the route is clear. Use any independently verified TomTom traffic-aware route result if available; otherwise say live traffic could not be confirmed.";
+    }
   } else if (input?.tripContext) {
     liveContext += "\nTRIP CONTEXT WAS STALE OR INVALID AND WAS IGNORED. Do not use it for current traffic claims.";
   }
