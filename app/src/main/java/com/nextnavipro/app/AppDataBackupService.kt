@@ -26,19 +26,26 @@ internal object AppDataBackupService {
     private const val MAX_TOTAL_BYTES = 250L * 1024L * 1024L
     private const val BUFFER_SIZE = 16 * 1024
 
-    data class BackupSummary(val gpxCount: Int, val csvCount: Int, val settingsCount: Int)
+    data class BackupSummary(
+        val gpxCount: Int,
+        val csvCount: Int,
+        val settingsCount: Int,
+        val jarvisMemoryIncluded: Boolean
+    )
 
     data class RestorePlan(
         val preferences: Map<String, Any>,
         val gpxFiles: List<File>,
-        val csvFiles: List<File>
+        val csvFiles: List<File>,
+        val jarvisMemoryDatabase: File?
     )
 
     fun export(
         output: OutputStream,
         preferences: Map<String, *>,
         gpxDirectory: File,
-        gpsDiagnosticsDirectory: File
+        gpsDiagnosticsDirectory: File,
+        jarvisMemoryDatabase: File? = null
     ): BackupSummary {
         val entries = JSONArray()
         preferences.toSortedMap().forEach { (key, value) ->
@@ -70,7 +77,8 @@ internal object AppDataBackupService {
 
         val gpxFiles = eligibleFiles(gpxDirectory, "gpx")
         val csvFiles = eligibleFiles(gpsDiagnosticsDirectory, "csv")
-        val totalFileBytes = (gpxFiles + csvFiles).sumOf { file ->
+        val memoryFile = jarvisMemoryDatabase?.takeIf { it.isFile }
+        val totalFileBytes = (gpxFiles + csvFiles + listOfNotNull(memoryFile)).sumOf { file ->
             require(file.length() <= MAX_FILE_BYTES) { "File troppo grande per il backup: ${file.name}" }
             file.length()
         }
@@ -87,9 +95,14 @@ internal object AppDataBackupService {
 
             gpxCount = addDirectory(zip, gpxDirectory, "gpx_routes", "gpx")
             csvCount = addDirectory(zip, gpsDiagnosticsDirectory, "gps_diagnostics", "csv")
+            if (memoryFile != null) {
+                zip.putNextEntry(ZipEntry("jarvis_memory.db"))
+                memoryFile.inputStream().buffered().use { it.copyTo(zip, BUFFER_SIZE) }
+                zip.closeEntry()
+            }
             zip.finish()
         }
-        return BackupSummary(gpxCount, csvCount, entries.length())
+        return BackupSummary(gpxCount, csvCount, entries.length(), memoryFile != null)
     }
 
     private fun eligibleFiles(directory: File, extension: String): List<File> =
@@ -124,6 +137,7 @@ internal object AppDataBackupService {
         val stagedCsv = File(stagingDirectory, "gps_diagnostics").apply { mkdirs() }
         var totalBytes = 0L
         var settingsBytes: ByteArray? = null
+        var stagedMemory: File? = null
         var entryCount = 0
         val seenEntries = HashSet<String>()
 
@@ -142,6 +156,11 @@ internal object AppDataBackupService {
                         val bytes = readLimited(zip, MAX_SETTINGS_BYTES.toLong())
                         totalBytes += bytes.size
                         settingsBytes = bytes
+                    }
+                    entry.name == "jarvis_memory.db" -> {
+                        val bytes = readLimited(zip, MAX_FILE_BYTES)
+                        totalBytes += bytes.size
+                        stagedMemory = File(stagingDirectory, "jarvis_memory.db").apply { writeBytes(bytes) }
                     }
                     entry.name.startsWith("gpx_routes/") -> {
                         val name = entry.name.removePrefix("gpx_routes/")
@@ -174,7 +193,8 @@ internal object AppDataBackupService {
         return RestorePlan(
             preferences = preferences,
             gpxFiles = stagedGpx.listFiles()?.filter { it.isFile }.orEmpty(),
-            csvFiles = stagedCsv.listFiles()?.filter { it.isFile }.orEmpty()
+            csvFiles = stagedCsv.listFiles()?.filter { it.isFile }.orEmpty(),
+            jarvisMemoryDatabase = stagedMemory
         )
     }
 
