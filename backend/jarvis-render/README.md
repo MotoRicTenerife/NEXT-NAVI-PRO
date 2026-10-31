@@ -54,3 +54,8 @@ reports `revision` (`RENDER_GIT_COMMIT`) to identify the deployed commit.
 
 Run the tests with `npm test`. Set `NEXT_NAVI_TRACE_CSV` to a recorded trip CSV to replay a real ride;
 otherwise a deterministic synthetic trace of the same duration is used.
+
+
+### Live route traffic
+
+TomTom route traffic is enabled automatically when `TOMTOM_API_KEY` is configured on Render. Set `TOMTOM_TRAFFIC_ROUTING_ENABLED=false` only to disable it explicitly; leaving the flag unset does not disable routing. The app sends its BCP-47 device language to Jarvis and TomTom route metadata.
