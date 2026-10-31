@@ -16,7 +16,7 @@ const validRoute = {
     departureTime: "2026-10-31T18:00:00+00:00", arrivalTime: "2026-10-31T18:22:00+00:00"
   },
   sections: [
-    { sectionType: "TRAVEL_MODE", travelMode: "motorcycle" },
+    { sectionType: "TRAVEL_MODE", travelMode: "motorcycle", startPointIndex: 0, endPointIndex: 1 },
     { sectionType: "TRAFFIC", startPointIndex: 4, endPointIndex: 9, delayInSeconds: 240, magnitudeOfDelay: 2, effectiveSpeedInKmh: 28, simpleCategory: "JAM", eventId: "event-1" }
   ],
   legs: [{ points: [{ latitude: 28.05, longitude: -16.72 }, { latitude: 28.06, longitude: -16.68 }] }]
