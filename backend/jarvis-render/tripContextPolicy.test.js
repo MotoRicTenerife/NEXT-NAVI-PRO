@@ -14,6 +14,11 @@ const valid = {
   trafficSource: "TomTom Orbis Traffic Incidents",
   trafficObservedAtEpochMs: now - 30_000,
   trafficCache: "MISS",
+  routeRequest: {
+    origin: { latitude: 28.05, longitude: -16.72 },
+    destination: { latitude: 28.06, longitude: -16.68 },
+    waypoints: [], vehicleMode: "motorcycle"
+  },
   incidents: [{
     id: "incident-1", severity: "HEAVY", distanceAheadMeters: 3200,
     delaySeconds: 240, road: "TF-1", description: "Accidente",
@@ -34,6 +39,16 @@ test("rejects stale or malformed route and traffic provenance", () => {
   assert.equal(sanitizeTripContext({ ...valid, trafficObservedAtEpochMs: now - 6 * 60_000 }, now), null);
   assert.equal(sanitizeTripContext({ ...valid, distanceKm: -1 }, now), null);
   assert.equal(sanitizeTripContext({ ...valid, vehicleMode: "truck" }, now), null);
+});
+
+test("rejects malformed or mismatched route requests without rejecting valid trip facts", () => {
+  const result = sanitizeTripContext({
+    ...valid,
+    routeRequest: { ...valid.routeRequest, vehicleMode: "car" }
+  }, now);
+  assert.equal(result.routeRequest, null);
+  const validResult = sanitizeTripContext(valid, now);
+  assert.equal(validResult.routeRequest.vehicleMode, "motorcycle");
 });
 
 test("drops stale, expired and malformed incidents", () => {
