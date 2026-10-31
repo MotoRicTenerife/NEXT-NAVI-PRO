@@ -84,7 +84,7 @@ object TrafficIncidentClient {
                     severity = incident.severity,
                     delaySeconds = incident.delaySeconds,
                     distanceAheadMeters = match.distanceAheadMeters,
-                    road = incident.roadNumbers.joinToString(" / ").ifBlank { null },
+                    road = incident.roadNumbers.joinToString(" / ").takeIf { it.isNotBlank() },
                     description = incident.description,
                     observedAtEpochMs = incident.observedAtEpochMs,
                     validUntilEpochMs = incident.validUntilEpochMs,
