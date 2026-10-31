@@ -11,6 +11,8 @@ import java.util.Locale
 sealed class JarvisCommand {
     data class Navigate(val destination: String) : JarvisCommand()
     data class PreviewRoute(val destination: String) : JarvisCommand()
+    data class TrafficPreview(val destination: String) : JarvisCommand()
+    data class TrafficVia(val roadName: String) : JarvisCommand()
     object BriefRoute : JarvisCommand()
     object AssistantName : JarvisCommand()
     object CancelNavigation : JarvisCommand()
@@ -43,6 +45,38 @@ object JarvisCommandParser {
             "chi sei", "what is your name", "what are you called", "who are you",
             "como te llamas", "cual es tu nombre", "comment tu t appelles", "wie heisst du",
             "como te chamas", "hoe heet je")) return JarvisCommand.AssistantName
+
+        val viaPatterns = listOf(
+            Regex("(?iu)^\\s*(?:e\\s+)?passando\\s+(?:dalla|dal|dallo|da|per|sulla|sul)\\s+(.+?)[?.!,]*$"),
+            Regex("(?iu)^\\s*(?:e\\s+)?se\\s+prendo\\s+(?:la|il|lo)\\s+(.+?)[?.!,]*$")
+        )
+        val viaRoad = viaPatterns.firstNotNullOfOrNull { it.find(transcript.trim())?.groupValues?.getOrNull(1)?.trim() }
+        if (!viaRoad.isNullOrBlank() && viaRoad.length in 2..60) {
+            return JarvisCommand.TrafficVia(viaRoad)
+        }
+
+        val trafficSuffixes = listOf(
+            "mi dici se c e traffico", "puoi dirmi se c e traffico",
+            "come e il traffico", "com e il traffico",
+            "ci sono code", "ci sono incidenti", "c e traffico", "traffico"
+        )
+        val trafficSuffix = trafficSuffixes.firstOrNull { normalized.endsWith(it) }
+        if (trafficSuffix != null) {
+            val cutAt = normalized.lastIndexOf(trafficSuffix).coerceAtLeast(0)
+            val original = transcript.trim().replace(Regex("\\s+"), " ")
+            val destinationText = original.take(cutAt).trim().trimEnd(',', '.', '!', '?', ' ')
+            val normalizedDestination = normalize(destinationText)
+            val prefixes = listOf(
+                "devo andare alla ", "devo andare al ", "devo andare ad ", "devo andare a ",
+                "vorrei andare alla ", "vorrei andare al ", "vorrei andare ad ", "vorrei andare a ",
+                "voglio andare alla ", "voglio andare al ", "voglio andare ad ", "voglio andare a ",
+                "devo raggiungere ", "voglio raggiungere ", "raggiungere ",
+                "andare alla ", "andare al ", "andare ad ", "andare a "
+            ).sortedByDescending { it.length }
+            val prefix = prefixes.firstOrNull { normalizedDestination.startsWith(it) }
+            val actual = if (prefix != null) destinationText.drop(prefix.length).trim() else destinationText
+            if (actual.length >= 2) return JarvisCommand.TrafficPreview(actual.trim(',', '.', '!', '?', ' '))
+        }
 
         val previewSuffixes = listOf(
             "cosa mi aspetta per la strada", "cosa mi aspetta sulla strada",

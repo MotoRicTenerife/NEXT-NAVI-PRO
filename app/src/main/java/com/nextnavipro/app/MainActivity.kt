@@ -76,6 +76,8 @@ import com.google.android.gms.location.Priority
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -194,6 +196,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastGpxPointTimeMs = 0L
     private var destination: PlaceResult? = null
     private var routeResult: RouteResult? = null
+    private var activeRouteFetchedAt = 0L
     @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
     private var routeProgressInitialized = false
     private var lastRouteProgressIndex = 0
@@ -206,10 +209,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
+    private lateinit var jarvisOrbView: JarvisOrbView
     private var jarvisListening = false
     private var jarvisAwaitingDestination = false
     private var jarvisResponseGeneration = 0
     private var pendingJarvisSpeech: String? = null
+    private var pendingJarvisTrafficQuestion: String? = null
     private var pendingJarvisPlaces: List<PlaceResult> = emptyList()
     private var pendingJarvisLocality: String? = null
     private var pendingJarvisAddressMode = false
@@ -408,9 +413,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val languageStatus = voiceGuide?.setLanguage(preferredJarvisTtsLocale()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 voiceGuide?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-                    override fun onDone(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
-                    override fun onError(utteranceId: String?) { clearCompletedSpeech(utteranceId) }
+                    override fun onStart(utteranceId: String?) {
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(true) }
+                        }
+                    }
+                    override fun onDone(utteranceId: String?) {
+                        clearCompletedSpeech(utteranceId)
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(false) }
+                        }
+                    }
+                    override fun onError(utteranceId: String?) {
+                        clearCompletedSpeech(utteranceId)
+                        if (utteranceId?.startsWith("jarvis-") == true) {
+                            runOnUiThread { setJarvisOrbActive(false) }
+                        }
+                    }
                 })
                 if (voiceGuideReady) {
                     applyJarvisVoicePreference()
@@ -561,6 +580,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             setTextColor(if (negativeTheme) cyan else Color.rgb(0, 85, 105))
         }
         jarvisRow.addView(jarvisStatusText, LinearLayout.LayoutParams(0, dp(38), 1f))
+        jarvisOrbView = JarvisOrbView(this).apply {
+            contentDescription = appText("Jarvis attivo")
+            setActive(false)
+        }
+        jarvisRow.addView(jarvisOrbView, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+            setMargins(dp(3), 0, dp(3), 0)
+        })
         root.addView(jarvisRow, params(-1, dp(40)))
 
         val content = LinearLayout(this).apply {
@@ -1624,7 +1650,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         AlertDialog.Builder(this)
             .setTitle(appText("JARVIS • Assistente"))
-            .setMessage(appText("Voce unica per conversazione, voce, personalità e memoria."))
+            // Android AlertDialog may replace setItems() with setMessage() on some devices.
+            // Keep the selectable actions as the only dialog body.
             .setItems(choices) { _, which ->
                 when (which) {
                     0 -> onJarvisButtonPressed()
@@ -2498,6 +2525,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        activeRouteFetchedAt = 0L
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -2741,17 +2769,37 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Nessun indirizzo preferito salvato.", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Preferiti e luoghi salvati")
-            .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
-                val favorite = favorites[which]
-                val isHome = favorite.first.startsWith("⌂ Casa: ")
-                val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
-                val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getString("home_description", "").orEmpty() else "Indirizzo preferito"
-                destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
-                destinationInput.setText(displayName)
-                routeText.text = "DESTINAZIONE: " + displayName + "\nPremi AVVIA NAVIGAZIONE"
-            }.setNegativeButton("Chiudi", null).show()
+        showMapBackedPlaceList(
+            title = "Preferiti e luoghi salvati",
+            entries = favorites.map { it.first },
+            confirmLabel = "SELEZIONA",
+            onPreview = { index ->
+                favorites.getOrNull(index)?.let { favorite ->
+                    val isHome = favorite.first.startsWith("⌂ Casa: ")
+                    val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
+                    val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_description", "").orEmpty() else "Indirizzo preferito"
+                    destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
+                    refreshDestinationMarker()
+                    map?.animateCamera(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(favorite.second, favorite.third), 15.0),
+                        450
+                    )
+                }
+            },
+            onConfirm = { index ->
+                favorites.getOrNull(index)?.let { favorite ->
+                    val isHome = favorite.first.startsWith("⌂ Casa: ")
+                    val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
+                    val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("home_description", "").orEmpty() else "Indirizzo preferito"
+                    destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
+                    destinationInput.setText(displayName)
+                    routeText.text = "DESTINAZIONE: " + displayName + "\nPremi AVVIA NAVIGAZIONE"
+                    refreshDestinationMarker()
+                }
+            }
+        )
     }
 
     private fun deleteFavoriteAddress() {
@@ -2839,10 +2887,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun preferredJarvisTtsLocale(): Locale {
-        // The app UI and greeting cover these locales. For other system languages, use English
-        // consistently instead of silently disabling speech when a TTS voice/data pack is absent.
-        val language = Locale.getDefault().language.lowercase(Locale.ROOT)
-        return if (language in setOf("it", "es", "fr", "de", "pt", "nl")) Locale.getDefault() else Locale.ENGLISH
+        // Never force Italian or English: Jarvis must use the device locale.
+        // If the device has no TTS voice/data for this language, report that limitation
+        // rather than silently speaking a different language.
+        return Locale.getDefault()
     }
 
     private fun applyJarvisVoicePreference() {
@@ -3299,14 +3347,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun setJarvisOrbActive(active: Boolean) {
+        if (::jarvisOrbView.isInitialized) jarvisOrbView.setActive(active)
+    }
+
     private fun speakJarvis(message: String, remember: Boolean = true) {
+        setJarvisOrbActive(true)
         if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
             pendingJarvisSpeech = message
             return
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
-        speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
+        val accepted = speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
+        if (!accepted) setJarvisOrbActive(false)
     }
 
     private fun onJarvisButtonPressed() {
@@ -3315,8 +3369,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
         stopManagedSpeech()
+        setJarvisOrbActive(false)
         if (jarvisListening) {
             speechRecognizer?.cancel()
+            setJarvisOrbActive(false)
             jarvisListening = false
             jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Ascolto annullato")
@@ -3339,18 +3395,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Ti ascolto…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Ti ascolto…")
+                        }
                     }
                     override fun onBeginningOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Sto ascoltando…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Sto ascoltando…")
+                        }
                     }
                     override fun onRmsChanged(rmsdB: Float) = Unit
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
                     override fun onEndOfSpeech() {
-                        runOnUiThread { if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Elaboro…") }
+                        runOnUiThread {
+                            setJarvisOrbActive(true)
+                            if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Elaboro…")
+                        }
                     }
                     override fun onError(error: Int) {
                         runOnUiThread {
+                            setJarvisOrbActive(false)
                             jarvisListening = false
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             if (::jarvisStatusText.isInitialized) {
@@ -3365,11 +3431,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                     override fun onResults(results: Bundle?) {
                         runOnUiThread {
+                            setJarvisOrbActive(true)
                             jarvisListening = false
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull().orEmpty().trim()
                             if (transcript.isBlank()) {
+                                setJarvisOrbActive(false)
                                 jarvisStatusText.text = appText("Non ho ricevuto parole • riprova")
                             } else {
                                 jarvisStatusText.text = appText("Hai detto: ") + transcript
@@ -3409,9 +3477,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         pendingJarvisWeather = false
         val spokenTranscript = JarvisCommandParser.stripAssistantName(transcript, jarvisAssistantName())
         if (spokenTranscript.isNotBlank()) jarvisMemory.addMessage("user", spokenTranscript)
+        if (JarvisCommandParser.parse(spokenTranscript) !is JarvisCommand.TrafficPreview) {
+            pendingJarvisTrafficQuestion = null
+        }
         // Live weather requests take priority over any pending destination clarification.
         if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
             answerJarvisWeather()
+            return
+        }
+        if (JarvisIntentClassifier.isTrafficQuestion(spokenTranscript) &&
+            routeResult != null && destination != null && activeRouteFetchedAt > 0L) {
+            answerJarvisTrafficForRoute(
+                spokenTranscript,
+                destination!!,
+                routeResult!!,
+                activeRouteFetchedAt,
+                lastRouteAlongMeters
+            )
             return
         }
         // When the rider explicitly asked to change destination, the next utterance
@@ -3517,6 +3599,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 pendingJarvisPreview = true
                 destinationInput.setText(command.destination)
                 searchDestination(voiceCommand = true)
+            }
+            is JarvisCommand.TrafficPreview -> {
+                pendingJarvisPreview = true
+                pendingJarvisTrafficQuestion = spokenTranscript
+                destinationInput.setText(command.destination)
+                speakJarvis("Controllo il percorso verso " + command.destination + " e verifico le segnalazioni di traffico.")
+                searchDestination(voiceCommand = true)
+            }
+            is JarvisCommand.TrafficVia -> {
+                answerJarvisTrafficVia(spokenTranscript, command.roadName)
             }
             JarvisCommand.BriefRoute -> {
                 val route = routeResult ?: routePreviewResult
@@ -3644,7 +3736,206 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
 
-    private fun askJarvisOnline(transcript: String) {
+
+    private fun buildJarvisTripContext(
+        place: PlaceResult,
+        route: RouteResult,
+        routeFetchedAtEpochMs: Long,
+        report: TrafficRouteReport?,
+        waypoints: List<NavPoint>,
+        baselineRoute: RouteResult?,
+        viaRoadName: String?
+    ): JSONObject {
+        val incidents = JSONArray()
+        report?.incidents?.take(10)?.forEach { incident ->
+            incidents.put(JSONObject()
+                .put("id", incident.id)
+                .put("severity", incident.severity.name)
+                .put("distanceAheadMeters", incident.distanceAheadMeters)
+                .put("delaySeconds", incident.delaySeconds ?: JSONObject.NULL)
+                .put("road", incident.road ?: JSONObject.NULL)
+                .put("description", incident.description.take(160))
+                .put("observedAtEpochMs", incident.observedAtEpochMs)
+                .put("validUntilEpochMs", incident.validUntilEpochMs)
+                .put("geometryFitScore", incident.geometryFitScore)
+                .put("directionVerified", false))
+        }
+        val context = JSONObject()
+            .put("destinationName", place.name)
+            .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
+            .put("distanceKm", route.distanceKm)
+            .put("durationSeconds", route.durationSeconds)
+            .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
+            .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
+            .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
+            .put("incidents", incidents)
+        if (report == null) {
+            context.put("trafficUnavailable", true)
+        } else {
+            context.put("trafficSource", report.source)
+                .put("trafficObservedAtEpochMs", report.observedAtEpochMs)
+                .put("trafficCache", report.cache)
+        }
+        if (!viaRoadName.isNullOrBlank()) context.put("viaRoadName", viaRoadName)
+        if (baselineRoute != null) {
+            context.put("baselineRoute", JSONObject()
+                .put("distanceKm", baselineRoute.distanceKm)
+                .put("durationSeconds", baselineRoute.durationSeconds)
+                .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto"))
+        }
+        val routeOrigin = currentLocation?.takeIf {
+            it.hasAccuracy() && it.latitude.isFinite() && it.longitude.isFinite() &&
+                it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
+                it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L &&
+                System.currentTimeMillis() - it.time <= 120_000L
+        }
+        if (routeOrigin != null) {
+            val waypointArray = JSONArray()
+            waypoints.forEach { point ->
+                waypointArray.put(JSONObject()
+                    .put("latitude", point.latitude)
+                    .put("longitude", point.longitude))
+            }
+            context.put("routeRequest", JSONObject()
+                .put("origin", JSONObject()
+                    .put("latitude", routeOrigin.latitude)
+                    .put("longitude", routeOrigin.longitude))
+                .put("destination", JSONObject()
+                    .put("latitude", place.point.latitude)
+                    .put("longitude", place.point.longitude))
+                .put("waypoints", waypointArray)
+                .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+            if (baselineRoute != null) {
+                context.put("baselineRouteRequest", JSONObject()
+                    .put("origin", JSONObject()
+                        .put("latitude", routeOrigin.latitude)
+                        .put("longitude", routeOrigin.longitude))
+                    .put("destination", JSONObject()
+                        .put("latitude", place.point.latitude)
+                        .put("longitude", place.point.longitude))
+                    .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+            }
+        }
+        return context
+    }
+
+    private fun answerJarvisTrafficForRoute(
+        question: String,
+        place: PlaceResult,
+        route: RouteResult,
+        routeFetchedAtEpochMs: Long,
+        currentRouteDistanceMeters: Double,
+        waypoints: List<NavPoint> = emptyList(),
+        baselineRoute: RouteResult? = null,
+        viaRoadName: String? = null
+    ) {
+        val now = System.currentTimeMillis()
+        if (routeFetchedAtEpochMs <= 0L || routeFetchedAtEpochMs > now || now - routeFetchedAtEpochMs > 30L * 60L * 1000L) {
+            speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Aggiorna il percorso e poi ripeto il controllo.")
+            return
+        }
+        val gpsFix = currentLocation
+        val gpsAgeMs = gpsFix?.let { System.currentTimeMillis() - it.time } ?: Long.MAX_VALUE
+        if (gpsFix == null || !gpsFix.hasAccuracy() || gpsFix.accuracy > 50f || gpsAgeMs !in 0L..120_000L) {
+            speakJarvis("Per verificare il traffico attuale lungo il percorso mi serve una posizione GPS recente e precisa. Aggiorno prima la posizione.")
+            return
+        }
+        val requestGeneration = jarvisResponseGeneration
+        jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico e alternative…"
+        thread(name = "jarvis-route-traffic") {
+            val report = try {
+                TrafficIncidentClient.fetchForRoute(route.points, currentRouteDistanceMeters)
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_TRAFFIC", "Route traffic lookup failed", error)
+                null
+            }
+            runOnUiThread {
+                if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                val context = buildJarvisTripContext(
+                    place, route, routeFetchedAtEpochMs, report, waypoints, baselineRoute, viaRoadName
+                )
+                pendingJarvisTrafficQuestion = null
+                jarvisStatusText.text = jarvisAssistantName() + " • dati di percorso pronti"
+                askJarvisOnline(question, context)
+            }
+        }
+    }
+
+    private fun answerJarvisTrafficVia(question: String, roadName: String) {
+        val place = routePreviewDestination ?: destination
+        if (place == null) {
+            speakJarvis("Prima indicami la destinazione del viaggio; poi posso confrontare il percorso passando per " + roadName + ".")
+            return
+        }
+        val location = currentLocation
+        val now = System.currentTimeMillis()
+        if (location == null || !location.hasAccuracy() || location.accuracy > 50f ||
+            now - location.time < 0L || now - location.time > 120_000L) {
+            speakJarvis("Per calcolare una variante passando per " + roadName + " mi serve una posizione GPS recente e precisa.")
+            return
+        }
+        val origin = NavPoint(location.latitude, location.longitude)
+        val requestGeneration = jarvisResponseGeneration
+        jarvisStatusText.text = jarvisAssistantName() + " • calcolo alternativa via " + roadName + "…"
+        thread(name = "jarvis-route-via") {
+            try {
+                val directRoute = NavigationServices.calculateRoute(origin, place.point, motorcycle = motorcycleProfile)
+                val roads = RenderRoadEditorService.searchRoads(roadName)
+                val queryKey = roadName.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                val matchingRoads = roads.filter { road ->
+                    val nameKey = road.name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                    val displayKey = road.displayName.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                    nameKey.contains(queryKey) || displayKey.contains(queryKey)
+                }
+                if (matchingRoads.isEmpty()) {
+                    throw IllegalStateException("La ricerca non ha restituito la strada esatta richiesta.")
+                }
+                val geometries = matchingRoads.take(3).mapNotNull { road ->
+                    runCatching { RenderRoadEditorService.fetchGeometry(road) }.getOrNull()
+                }
+                val waypoint = RoadViaResolver.selectWaypoint(geometries, origin, place.point)
+                    ?: throw IllegalStateException("Non ho trovato un tratto verificabile di " + roadName + " vicino al percorso.")
+                val alternativeRoute = NavigationServices.calculateRouteVia(
+                    origin, listOf(waypoint.point), place.point, motorcycle = motorcycleProfile
+                )
+                val waypointDistance = RoadViaResolver.distanceToRouteMeters(waypoint.point, alternativeRoute.points)
+                if (!waypointDistance.isFinite() || waypointDistance > 250.0) {
+                    throw IllegalStateException("Il motore di percorso non ha confermato il passaggio sulla strada richiesta.")
+                }
+                if (alternativeRoute.distanceKm > maxOf(directRoute.distanceKm * 2.5, directRoute.distanceKm + 20.0)) {
+                    throw IllegalStateException("La variante trovata è eccessivamente lunga rispetto al percorso diretto.")
+                }
+                val fetchedAt = System.currentTimeMillis()
+                runOnUiThread {
+                    if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                    routePreviewResult = alternativeRoute
+                    routePreviewDestination = place
+                    routePreviewFetchedAt = fetchedAt
+                    drawRoute(alternativeRoute, true)
+                    val minutes = (alternativeRoute.durationSeconds / 60.0).roundToInt()
+                    routeText.text = String.format(
+                        Locale.ITALY,
+                        "ALTERNATIVA VIA %s • %.1f km • circa %d min",
+                        waypoint.roadName, alternativeRoute.distanceKm, minutes
+                    )
+                    routeButton.text = appText("AVVIA NAVIGAZIONE")
+                    answerJarvisTrafficForRoute(
+                        question, place, alternativeRoute, fetchedAt, 0.0,
+                        listOf(waypoint.point), directRoute, waypoint.roadName
+                    )
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_TRAFFIC", "Named-road alternative route failed", error)
+                runOnUiThread {
+                    if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                    jarvisStatusText.text = jarvisAssistantName() + " • alternativa non verificata"
+                    speakJarvis("Non riesco a verificare una variante passando per " + roadName + ". Non modifico la navigazione attiva.")
+                }
+            }
+        }
+    }
+
+    private fun askJarvisOnline(transcript: String, tripContext: JSONObject? = null) {
         // The online assistant answers conversational requests only. Navigation commands
         // are handled locally; no GPS-based stationary gate blocks ordinary use.
         if (!JarvisOnlineAiClient.isConfigured()) {
@@ -3655,16 +3946,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val requestGeneration = jarvisResponseGeneration
         val liveQuestion = Regex("\\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(transcript)
-        val liveLocation = if (liveQuestion) currentLocation?.let {
+        val liveLocation = if (liveQuestion) currentLocation?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 50f &&
+                System.currentTimeMillis() - it.time in 0L..120_000L
+        }?.let {
             JarvisOnlineAiClient.LiveLocation(it.latitude, it.longitude)
         } else null
         // Read the prior turns before adding the current utterance, avoiding duplication
         // in Gemini's contents while preserving context across app restarts.
         val recentTurns = jarvisMemory.recent(11)
         // The current utterance was recorded by handleJarvisCommand; send it only once.
+        val historyLimit = if (tripContext != null) 6 else 10
         val history = if (recentTurns.lastOrNull()?.let {
                 it.role == "user" && it.content == transcript
-            } == true) recentTurns.dropLast(1).takeLast(10) else recentTurns.takeLast(10)
+            } == true) recentTurns.dropLast(1).takeLast(historyLimit) else recentTurns.takeLast(historyLimit)
         val summary = jarvisMemory.summary()
         val personalityPrefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val personality = JarvisOnlineAiClient.Personality(
@@ -3676,11 +3971,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         JarvisOnlineAiClient.ask(
             message = transcript,
+            language = Locale.getDefault().toLanguageTag(),
             assistantName = jarvisAssistantName(),
             location = liveLocation,
             history = history,
             summary = summary,
-            personality = personality
+            personality = personality,
+            tripContext = tripContext
         ) { result ->
             runOnUiThread {
                 // Never let a delayed online response restart speech after the rider
@@ -3934,7 +4231,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     searchButton.isEnabled = true
                     if (sortedResults.isEmpty()) {
                         routeText.text = "NESSUN RISULTATO • Prova con nome località o strada"
-                        if (voiceCommand) speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
+                        if (voiceCommand) {
+                            pendingJarvisTrafficQuestion = null
+                            speakJarvis("Non ho trovato risultati per $query. Prova con nome della località o della strada.")
+                        }
                         return@runOnUiThread
                     }
                     if (voiceCommand && !pendingJarvisPreview) {
@@ -4001,7 +4301,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         showCachedRoutePreview(place, cached)
                     } else {
                         routeText.text = "RICERCA NON DISPONIBILE • " + (error.message ?: "Errore di rete")
-                        if (voiceCommand) speakJarvis("La ricerca online non è disponibile e non ho una copia locale utilizzabile per questa destinazione.")
+                        if (voiceCommand) {
+                            val trafficQuestion = pendingJarvisTrafficQuestion
+                            pendingJarvisTrafficQuestion = null
+                            if (trafficQuestion != null) speakJarvis("La ricerca della destinazione non è disponibile, quindi non posso verificare il traffico.")
+                            else speakJarvis("La ricerca online non è disponibile e non ho una copia locale utilizzabile per questa destinazione.")
+                        }
                         pendingJarvisPreview = false
                     }
                 }
@@ -4130,6 +4435,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(destinationInput, InputMethodManager.SHOW_IMPLICIT)
         }
+        val saveButton = makeButton("SALVA PREFERITO") {
+            val chosen = places.getOrNull(selectedIndex) ?: return@makeButton
+            destination = chosen
+            saveFavoriteAddress()
+        }
         val goButton = makeButton(if (previewOnly) "ANTEPRIMA" else "NAVIGA QUI") {
             val chosen = places.getOrNull(selectedIndex) ?: return@makeButton
             accepted = true
@@ -4138,9 +4448,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (!previewOnly) calculateSelectedRoute()
         }
         val cancelButton = makeButton("ANNULLA") { dialog.dismiss() }
-        actions.addView(changeButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
-        actions.addView(goButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
-        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(changeButton, LinearLayout.LayoutParams(0, dp(48), 0.82f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(48), 0.95f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(goButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.62f).apply { setMargins(dp(1), 0, dp(1), 0) })
         page.addView(actions, params(-1, dp(54)))
 
         dialog.setContentView(page)
@@ -4241,12 +4552,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun previewRouteForJarvis(place: PlaceResult, announce: Boolean = true) {
         val location = currentLocation
         val anyOrigin = location?.let { NavPoint(it.latitude, it.longitude) }
-        val origin = location?.takeIf { it.hasAccuracy() && it.accuracy <= 50f }
-            ?.let { NavPoint(it.latitude, it.longitude) }
+        val origin = location?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 50f &&
+                System.currentTimeMillis() - it.time in 0L..120_000L
+        }?.let { NavPoint(it.latitude, it.longitude) }
         if (origin == null) {
             val cached = RouteInsightCache.loadForDestination(this, place.name, anyOrigin)
             if (cached != null) showCachedRoutePreview(place, cached, announce)
-            else if (announce) speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            else if (pendingJarvisTrafficQuestion != null) {
+                pendingJarvisTrafficQuestion = null
+                speakJarvis("Per controllare il traffico verso questa destinazione mi serve una posizione GPS affidabile.")
+            } else if (announce) {
+                speakJarvis("Per analizzare il percorso mi serve una posizione GPS affidabile. Non invento il punto di partenza.")
+            }
             return
         }
         if (isCalculatingRoute) return
@@ -4270,7 +4588,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         "ANTEPRIMA • %.1f km • circa %d min\n%s",
                         result.distanceKm, minutes, result.firstInstruction)
                     routeButton.text = appText("AVVIA NAVIGAZIONE")
-                    if (announce) speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                    val trafficQuestion = pendingJarvisTrafficQuestion
+                    if (trafficQuestion != null) {
+                        pendingJarvisTrafficQuestion = null
+                        answerJarvisTrafficForRoute(trafficQuestion, place, result, routePreviewFetchedAt, 0.0)
+                    } else if (announce) {
+                        speakRouteBriefing(place.name, result, routePreviewFetchedAt)
+                    }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -4280,7 +4604,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     if (cached != null) showCachedRoutePreview(place, cached, announce)
                     else {
                         routeText.text = "ANTEPRIMA NON DISPONIBILE • connessione necessaria"
-                        if (announce) speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        val trafficQuestion = pendingJarvisTrafficQuestion
+                        pendingJarvisTrafficQuestion = null
+                        if (trafficQuestion != null) {
+                            speakJarvis("Non riesco a calcolare il percorso, quindi non posso controllare il traffico sulla destinazione richiesta.")
+                        } else if (announce) {
+                            speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        }
                         scheduleRoutePreviewRefresh()
                     }
                 }
@@ -4302,7 +4632,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             cached.route.distanceKm, minutes, freshness)
         routeButton.text = appText("AVVIA NAVIGAZIONE")
         scheduleRoutePreviewRefresh()
-        if (announce) speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+        val trafficQuestion = pendingJarvisTrafficQuestion
+        if (trafficQuestion != null) {
+            pendingJarvisTrafficQuestion = null
+            if (cached.isFresh()) {
+                answerJarvisTrafficForRoute(trafficQuestion, place, cached.route, cached.fetchedAtEpochMs, 0.0)
+            } else {
+                speakJarvis("La copia del percorso è troppo vecchia per associare in modo affidabile le segnalazioni di traffico attuali. Ricalcolo prima il percorso.")
+            }
+        } else if (announce) {
+            speakRouteBriefing(place.name, cached.route, cached.fetchedAtEpochMs)
+        }
     }
 
     private fun scheduleRoutePreviewRefresh() {
@@ -4395,6 +4735,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     isCalculatingRoute = false
                     routeButton.isEnabled = true
                     routeResult = result
+                    activeRouteFetchedAt = System.currentTimeMillis()
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
                     navigationArrived = false
@@ -4466,6 +4807,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        activeRouteFetchedAt = 0L
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -4493,11 +4835,184 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Nessuna ricerca recente.", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Ricerche recenti")
-            .setItems(entries.toTypedArray()) { _, which ->
-                destinationInput.setText(entries[which])
-                searchDestination()
-            }.setNegativeButton("Chiudi", null).show()
+        showMapBackedPlaceList(
+            title = "Ricerche recenti",
+            entries = entries,
+            confirmLabel = "CERCA",
+            onPreview = { index ->
+                entries.getOrNull(index)?.let { query -> previewRecentSearchOnMap(query) }
+            },
+            onConfirm = { index ->
+                entries.getOrNull(index)?.let { query ->
+                    destinationInput.setText(query)
+                    searchDestination()
+                }
+            }
+        )
+    }
+
+    /** Resolve a recent query in the background and preview its nearest real result on the shared map. */
+    private fun previewRecentSearchOnMap(query: String) {
+        val origin = currentLocation?.let { NavPoint(it.latitude, it.longitude) }
+            ?: approximateLocation?.let { NavPoint(it.latitude, it.longitude) }
+        thread(name = "recent-place-preview") {
+            runCatching { NavigationServices.searchPlaces(query, origin) }
+                .onSuccess { results ->
+                    val sorted = if (origin != null) results.sortedBy { place ->
+                        val distance = FloatArray(1)
+                        Location.distanceBetween(
+                            origin.latitude, origin.longitude,
+                            place.point.latitude, place.point.longitude, distance
+                        )
+                        distance[0]
+                    } else results
+                    runOnUiThread {
+                        if (!destinationPickerOpen || sorted.isEmpty()) return@runOnUiThread
+                        val place = sorted.first()
+                        destination = place
+                        refreshDestinationMarker()
+                        map?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(place.point.latitude, place.point.longitude), 15.0
+                            ), 400
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Shared place browser: list and the existing live map remain visible together.
+     * Landscape uses list-left/map-right; portrait uses list-top/map-bottom.
+     * The existing MapView is reparented and restored, never recreated.
+     */
+    private fun showMapBackedPlaceList(
+        title: String,
+        entries: List<String>,
+        confirmLabel: String,
+        onPreview: (Int) -> Unit,
+        onConfirm: (Int) -> Unit
+    ) {
+        if (entries.isEmpty()) return
+        val activityMapView = mapView
+        if (activityMapView == null) {
+            AlertDialog.Builder(this).setTitle(title)
+                .setItems(entries.toTypedArray()) { _, which -> onConfirm(which) }
+                .setNegativeButton("Chiudi", null).show()
+            return
+        }
+
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val oldDestination = destination
+        val oldParent = activityMapView.parent as? android.view.ViewGroup
+        val oldIndex = oldParent?.indexOfChild(activityMapView) ?: -1
+        val oldParams = activityMapView.layoutParams
+        var accepted = false
+        var selectedIndex = 0
+
+        val dialog = Dialog(this)
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            setBackgroundColor(if (negativeTheme) Color.rgb(15, 18, 21) else Color.rgb(235, 239, 241))
+        }
+        val heading = TextView(this).apply {
+            text = title.uppercase(Locale.ROOT) + " • ${entries.size}"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(if (negativeTheme) Color.WHITE else Color.BLACK)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        page.addView(heading, params(-1, dp(44)))
+
+        val contentPane = LinearLayout(this).apply {
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
+        val resultList = ListView(this).apply {
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            adapter = android.widget.ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_list_item_activated_1,
+                entries
+            )
+            setBackgroundColor(if (negativeTheme) Color.rgb(28, 32, 36) else Color.WHITE)
+            setOnItemClickListener { _, _, which, _ ->
+                selectedIndex = which
+                setItemChecked(which, true)
+                onPreview(which)
+            }
+        }
+
+        oldParent?.removeView(activityMapView)
+        contentPane.addView(
+            resultList,
+            if (landscape) LinearLayout.LayoutParams(0, -1, 0.43f)
+            else LinearLayout.LayoutParams(-1, 0, 0.40f)
+        )
+        contentPane.addView(
+            activityMapView,
+            if (landscape) LinearLayout.LayoutParams(0, -1, 0.57f).apply { setMargins(dp(5), 0, 0, 0) }
+            else LinearLayout.LayoutParams(-1, 0, 0.60f).apply { setMargins(0, dp(5), 0, 0) }
+        )
+        page.addView(contentPane, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val confirmButton = makeButton(confirmLabel) {
+            val chosen = selectedIndex
+            accepted = true
+            dialog.dismiss()
+            onConfirm(chosen)
+        }
+        val cancelButton = makeButton("ANNULLA") { dialog.dismiss() }
+        actions.addView(confirmButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        page.addView(actions, params(-1, dp(54)))
+
+        dialog.setContentView(page)
+        dialog.setOnDismissListener {
+            destinationPickerOpen = false
+            (activityMapView.parent as? android.view.ViewGroup)?.removeView(activityMapView)
+            if (oldParent != null && activityMapView.parent == null) {
+                val restoreIndex = if (oldIndex < 0) oldParent.childCount else oldIndex.coerceAtMost(oldParent.childCount)
+                oldParent.addView(activityMapView, restoreIndex, oldParams)
+            }
+            if (!accepted) destination = oldDestination
+            refreshDestinationMarker()
+            followGps = true
+            lastCameraLocation = null
+            mapFollowHandler.removeCallbacks(mapFollowRunnable)
+            activityMapView.post {
+                if (dashboardStarted && !destinationPickerOpen && !fullScreenMap) {
+                    currentLocation?.let { updateMapForLocation(it, forceCenter = true) } ?: requestGps()
+                    mapFollowHandler.removeCallbacks(mapFollowRunnable)
+                    mapFollowHandler.postDelayed(mapFollowRunnable, 10_000L)
+                }
+            }
+        }
+        destinationPickerOpen = true
+        followGps = false
+        mapFollowHandler.removeCallbacks(mapFollowRunnable)
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        dialog.show()
+        dialog.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        resultList.setItemChecked(0, true)
+        onPreview(0)
     }
 
     private fun rememberSearch(query: String) {
@@ -5942,6 +6457,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    activeRouteFetchedAt = System.currentTimeMillis()
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -6704,6 +7220,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Stop user-started speech recognition when the app loses foreground focus.
         if (jarvisListening) {
             try { speechRecognizer?.cancel() } catch (_: Exception) { }
+            setJarvisOrbActive(false)
             jarvisListening = false
             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
             if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Premi il microfono e parla")
@@ -6789,4 +7306,94 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun params(width: Int, height: Int) = LinearLayout.LayoutParams(width, height)
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+
+
+/** Small animated Jarvis status orb. Slow rotation means ready; faster rotation means active. */
+private class JarvisOrbView(context: android.content.Context) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+    }
+    private var rotationDegrees = 0f
+    private var active = false
+    private var animator: ValueAnimator? = null
+
+    fun setActive(value: Boolean) {
+        if (active == value) return
+        active = value
+        startRotation()
+        invalidate()
+    }
+
+    private fun startRotation() {
+        animator?.cancel()
+        animator = ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = if (active) 1900L else 7200L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                rotationDegrees = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        startRotation()
+    }
+
+    override fun onDetachedFromWindow() {
+        animator?.cancel()
+        animator = null
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val cx = width / 2f
+        val cy = height / 2f
+        val radius = (minOf(width, height) / 2f) - 2.5f * density
+        if (radius <= 0f) return
+
+        val outer = android.graphics.Path().apply {
+            addCircle(cx, cy, radius, android.graphics.Path.Direction.CW)
+        }
+        val save = canvas.save()
+        canvas.clipPath(outer)
+        fillPaint.shader = android.graphics.RadialGradient(
+            cx - radius * 0.28f, cy - radius * 0.32f, radius * 1.45f,
+            intArrayOf(Color.rgb(255, 105, 105), Color.rgb(175, 0, 28), Color.rgb(35, 0, 12)),
+            null, android.graphics.Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, radius, fillPaint)
+
+        canvas.save()
+        canvas.rotate(rotationDegrees, cx, cy)
+        fillPaint.shader = android.graphics.SweepGradient(
+            cx, cy,
+            intArrayOf(
+                Color.rgb(255, 25, 35), Color.rgb(105, 0, 18),
+                Color.rgb(255, 70, 70), Color.rgb(190, 0, 45),
+                Color.rgb(255, 15, 25), Color.rgb(75, 0, 15),
+                Color.rgb(255, 25, 35)
+            ), null
+        )
+        canvas.drawCircle(cx, cy, radius, fillPaint)
+        canvas.restore()
+        canvas.restoreToCount(save)
+
+        glowPaint.color = if (active) Color.argb(235, 255, 65, 75) else Color.argb(175, 220, 35, 55)
+        glowPaint.strokeWidth = (if (active) 2.1f else 1.4f) * density
+        canvas.drawCircle(cx, cy, radius, glowPaint)
+        letterPaint.textSize = radius * 1.22f
+        val baseline = cy - (letterPaint.ascent() + letterPaint.descent()) / 2f
+        canvas.drawText("J", cx, baseline, letterPaint)
+    }
 }
