@@ -8,7 +8,8 @@ import { sanitizeTripContext } from "./tripContextPolicy.js";
 import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
 import { normalizeLanguageTag } from "./languagePolicy.js";
 import { isTrafficQuery } from "./trafficIntent.js";
-import { isTomTomTrafficFlowEnabled, isTomTomTrafficIncidentsEnabled, isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
+import { isTomTomTrafficFlowEnabled, isTomTomTrafficIncidentsEnabled, isTomTomTrafficSegmentEnabled, isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
+import { fetchTomTomTrafficSegment } from "./trafficSegmentService.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -33,6 +34,11 @@ const trafficIncidentLimiter = createFixedWindowLimiter({ max: 24, windowMs: WIN
 const trafficIncidentCache = new Map();
 const TRAFFIC_INCIDENT_CACHE_MS = 30000;
 const TRAFFIC_INCIDENT_CACHE_MAX = 300;
+// Jarvis local-traffic questions use one nearest-road segment lookup, cached by GPS cell.
+const trafficSegmentLimiter = createFixedWindowLimiter({ max: 12, windowMs: WINDOW_MS });
+const trafficSegmentCache = new Map();
+const TRAFFIC_SEGMENT_CACHE_MS = 60000;
+const TRAFFIC_SEGMENT_CACHE_MAX = 300;
 const trafficRoutingLimiter = createFixedWindowLimiter({ max: 8, windowMs: WINDOW_MS });
 const trafficRoutingCache = new Map();
 const TRAFFIC_ROUTING_CACHE_MS = 30_000;
@@ -536,6 +542,107 @@ async function fetchTomTomTrafficRoutesCached(input, clientIp, language = "en-GB
   return { ...result, cache: "MISS" };
 }
 
+async function fetchTomTomTrafficSegmentCached(location, clientIp) {
+  if (!isTomTomTrafficSegmentEnabled(process.env.TRAFFIC_SEGMENT_ENABLED, process.env.TOMTOM_API_KEY)) {
+    const error = new Error("TomTom traffic segment service is not enabled");
+    error.statusCode = 503;
+    throw error;
+  }
+  const cacheKey = Number(location.latitude).toFixed(4) + "," + Number(location.longitude).toFixed(4);
+  const cached = trafficSegmentCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_SEGMENT_CACHE_MS) {
+    return { ...cached.value, cache: "HIT" };
+  }
+  if (cached) trafficSegmentCache.delete(cacheKey);
+  const admission = trafficSegmentLimiter.check(clientIp, Date.now());
+  if (!admission.allowed) {
+    const error = new Error("TomTom traffic segment request rate limit reached");
+    error.statusCode = 429;
+    throw error;
+  }
+  const value = await fetchTomTomTrafficSegment(location, {
+    apiKey: process.env.TOMTOM_API_KEY,
+    now: Date.now(),
+    zoom: 15
+  });
+  trafficSegmentCache.set(cacheKey, { value, cachedAt: Date.now() });
+  while (trafficSegmentCache.size > TRAFFIC_SEGMENT_CACHE_MAX) {
+    const oldest = trafficSegmentCache.keys().next().value;
+    if (oldest === undefined) break;
+    trafficSegmentCache.delete(oldest);
+  }
+  return { ...value, cache: "MISS" };
+}
+
+async function fetchTomTomTrafficIncidentsForJarvis(location, clientIp, language = "en-GB") {
+  if (!isTomTomTrafficIncidentsEnabled(process.env.TRAFFIC_INCIDENTS_ENABLED, process.env.TOMTOM_API_KEY)) {
+    const error = new Error("TomTom traffic incident service is not enabled");
+    error.statusCode = 503;
+    throw error;
+  }
+  const latitudeDelta = 4.5 / 111.32;
+  const longitudeDelta = 4.5 / (111.32 * Math.max(0.2, Math.cos(location.latitude * Math.PI / 180)));
+  const bbox = parseIncidentBbox([
+    location.longitude - longitudeDelta,
+    location.latitude - latitudeDelta,
+    location.longitude + longitudeDelta,
+    location.latitude + latitudeDelta
+  ].join(","));
+  if (!bbox) {
+    const error = new Error("Nearby traffic incident area is invalid");
+    error.statusCode = 400;
+    throw error;
+  }
+  const cacheKey = bbox.value;
+  const cached = trafficIncidentCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_INCIDENT_CACHE_MS) {
+    return { source: "TomTom Orbis Traffic Incidents", observedAtEpochMs: cached.observedAtEpochMs, incidents: cached.incidents, cache: "HIT" };
+  }
+  if (cached) trafficIncidentCache.delete(cacheKey);
+  const admission = trafficIncidentLimiter.check(clientIp, Date.now());
+  if (!admission.allowed) {
+    const error = new Error("TomTom traffic incident request rate limit reached");
+    error.statusCode = 429;
+    throw error;
+  }
+  const safeLanguage = normalizeLanguageTag(language);
+  const upstream = await fetch(buildTomTomIncidentDetailsUrl(bbox), {
+    method: "GET",
+    headers: {
+      "TomTom-Api-Key": process.env.TOMTOM_API_KEY,
+      "TomTom-Api-Version": "2",
+      "Accept": "application/json",
+      "Accept-Language": safeLanguage,
+      "Attributes": TOMTOM_INCIDENT_ATTRIBUTES
+    },
+    signal: AbortSignal.timeout(9000)
+  });
+  if (upstream.status === 204) {
+    const observedAtEpochMs = Date.now();
+    trafficIncidentCache.set(cacheKey, { incidents: [], observedAtEpochMs, cachedAt: observedAtEpochMs });
+    return { source: "TomTom Orbis Traffic Incidents", observedAtEpochMs, incidents: [], cache: "MISS" };
+  }
+  if (!upstream.ok) {
+    const error = new Error("TomTom incident HTTP " + upstream.status);
+    error.statusCode = upstream.status === 429 ? 429 : upstream.status === 403 ? 403 : 502;
+    throw error;
+  }
+  const payload = await upstream.json();
+  if (!Array.isArray(payload?.incidents)) {
+    const error = new Error("TomTom incident response schema is invalid");
+    error.statusCode = 502;
+    throw error;
+  }
+  const observedAtEpochMs = Date.now();
+  trafficIncidentCache.set(cacheKey, { incidents: payload.incidents, observedAtEpochMs, cachedAt: observedAtEpochMs });
+  while (trafficIncidentCache.size > TRAFFIC_INCIDENT_CACHE_MAX) {
+    const oldest = trafficIncidentCache.keys().next().value;
+    if (oldest === undefined) break;
+    trafficIncidentCache.delete(oldest);
+  }
+  return { source: "TomTom Orbis Traffic Incidents", observedAtEpochMs, incidents: payload.incidents, cache: "MISS" };
+}
+
 async function handleTomTomTrafficRoute(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
   if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
@@ -622,6 +729,7 @@ async function handle(req, res) {
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
       trafficFlowEnabled: isTomTomTrafficFlowEnabled(process.env.TRAFFIC_FLOW_ENABLED, process.env.TOMTOM_API_KEY),
       incidentDetailsEnabled: isTomTomTrafficIncidentsEnabled(process.env.TRAFFIC_INCIDENTS_ENABLED, process.env.TOMTOM_API_KEY),
+      trafficSegmentEnabled: isTomTomTrafficSegmentEnabled(process.env.TRAFFIC_SEGMENT_ENABLED, process.env.TOMTOM_API_KEY),
       trafficAwareRoutingEnabled: isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)
     });
   }
@@ -1192,8 +1300,45 @@ async function handle(req, res) {
       trafficFailureCode = "missing_location";
       liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask the user to enable location or provide a starting point. Do not refer the user to an external traffic website.";
     } else if (!trafficDestination) {
-      trafficFailureCode = "missing_destination";
-      liveContext += "\nNO EXPLICIT DESTINATION WAS FOUND: ask the user where they want to go. Do not guess a destination and do not substitute a generic nearby-incident lookup.";
+      const clientIp = getClientIp(req);
+      const [segmentLookup, incidentLookup] = await Promise.allSettled([
+        fetchTomTomTrafficSegmentCached(location, clientIp),
+        fetchTomTomTrafficIncidentsForJarvis(location, clientIp, language)
+      ]);
+      const nearbyTraffic = { location, observedAtEpochMs: Date.now() };
+      if (segmentLookup.status === "fulfilled") {
+        nearbyTraffic.nearestRoadSegment = segmentLookup.value;
+      } else {
+        nearbyTraffic.segmentUnavailable = segmentLookup.reason?.statusCode === 403
+          ? "TomTom traffic segment access is not enabled for this API key"
+          : "TomTom nearest-road flow data could not be retrieved";
+        trafficFailureCode = segmentLookup.reason?.statusCode === 429 ? "rate_limited" : "segment_unavailable";
+      }
+      if (incidentLookup.status === "fulfilled") {
+        nearbyTraffic.nearbyIncidents = incidentLookup.value.incidents.slice(0, 12).map(incident => {
+          const properties = incident?.properties || {};
+          return {
+            category: properties.iconCategory || null,
+            magnitudeOfDelay: properties.magnitudeOfDelay || null,
+            delayInSeconds: Number.isFinite(properties.delayInSeconds) ? properties.delayInSeconds : null,
+            from: typeof properties.from === "string" ? properties.from.slice(0, 120) : null,
+            to: typeof properties.to === "string" ? properties.to.slice(0, 120) : null,
+            roadNumbers: Array.isArray(properties.roadNumbers) ? properties.roadNumbers.slice(0, 5) : [],
+            lengthInMeters: Number.isFinite(properties.lengthInMeters) ? properties.lengthInMeters : null,
+            description: Array.isArray(properties.events) ? properties.events.slice(0, 3).map(event => String(event?.description || "").slice(0, 120)) : []
+          };
+        });
+        nearbyTraffic.incidentsObservedAtEpochMs = incidentLookup.value.observedAtEpochMs;
+      } else {
+        nearbyTraffic.incidentsUnavailable = true;
+        if (!trafficFailureCode) trafficFailureCode = incidentLookup.reason?.statusCode === 429 ? "rate_limited" : "incidents_unavailable";
+      }
+      if (segmentLookup.status === "rejected" && incidentLookup.status === "rejected") {
+        liveContext += "\nNEARBY LIVE TRAFFIC LOOKUP FAILED: no current traffic conditions were verified. Say so clearly and ask whether the user wants a destination-specific route check.";
+      } else {
+        liveContext += "\nVERIFIED TOMTOM NEARBY TRAFFIC (GPS AREA, NOT A DESTINATION ROUTE): " + JSON.stringify(nearbyTraffic);
+        liveContext += "\nTRAFFIC INTERPRETATION RULES: nearestRoadSegment describes only the single road segment closest to the supplied GPS point, not every road in the area. Compare currentSpeedKmh with freeFlowSpeedKmh and use confidence to qualify certainty. A roadClosure=true is a closure on that matched segment. nearbyIncidents are separate incident records in the bounded nearby area. An empty nearbyIncidents array means no incident records were returned; it does NOT prove roads are congestion-free. Never invent a road name, queue, incident, delay, or area-wide traffic condition. Offer a destination-specific live route check when useful.";
+      }
     } else if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
       trafficFailureCode = "tomtom_routing_disabled";
       liveContext += "\nTOMTOM LIVE TRAFFIC ROUTING IS NOT ENABLED OR CONFIGURED ON THE SERVER. State that TomTom traffic cannot currently be verified. Do not use another provider as a fallback and do not invent traffic conditions.";
