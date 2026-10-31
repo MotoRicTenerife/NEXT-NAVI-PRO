@@ -3607,6 +3607,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 speakJarvis("Controllo il percorso verso " + command.destination + " e verifico le segnalazioni di traffico.")
                 searchDestination(voiceCommand = true)
             }
+            is JarvisCommand.TrafficVia -> {
+                answerJarvisTrafficVia(spokenTranscript, command.roadName)
+            }
             JarvisCommand.BriefRoute -> {
                 val route = routeResult ?: routePreviewResult
                 if (route == null) {
