@@ -70,8 +70,10 @@ object TrafficIncidentParser {
         val timeValidity = properties.optString("timeValidity")
         if (timeValidity != "present") return null
 
-        val startTime = parseEpochMs(properties.optString("startTime"))
-        val endTime = parseEpochMs(properties.optString("endTime"))
+        val startRaw = properties.optString("startTime")
+        val endRaw = properties.optString("endTime")
+        val startTime = parseOptionalEpochMs(startRaw) ?: if (startRaw.isBlank()) null else return null
+        val endTime = parseOptionalEpochMs(endRaw) ?: if (endRaw.isBlank()) null else return null
         if (startTime != null && startTime > observedAtEpochMs) return null
         if (endTime != null && endTime <= observedAtEpochMs) return null
 
@@ -119,11 +121,15 @@ object TrafficIncidentParser {
 
     private fun severityFor(category: String, magnitude: String): TrafficIncidentSeverity? {
         if (category == "roadClosed") return TrafficIncidentSeverity.CLOSED
-        val major = magnitude == "major"
+        val severity = when (magnitude) {
+            "major" -> TrafficIncidentSeverity.HEAVY
+            "moderate", "minor" -> TrafficIncidentSeverity.MODERATE
+            // "unknown" and "undefined" do not provide a defensible delay severity.
+            else -> return null
+        }
         return when (category) {
             "jam", "laneClosed", "accident", "fog", "dangerousConditions", "rain",
-            "ice", "roadWorks", "wind", "flooding", "brokenDownVehicle" ->
-                if (major) TrafficIncidentSeverity.HEAVY else TrafficIncidentSeverity.MODERATE
+            "ice", "roadWorks", "wind", "flooding", "brokenDownVehicle" -> severity
             else -> null
         }
     }
@@ -156,7 +162,7 @@ object TrafficIncidentParser {
         return points
     }
 
-    private fun parseEpochMs(value: String): Long? {
+    private fun parseOptionalEpochMs(value: String): Long? {
         if (value.isBlank()) return null
         return runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
     }

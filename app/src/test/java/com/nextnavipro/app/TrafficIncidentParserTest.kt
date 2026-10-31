@@ -10,17 +10,19 @@ class TrafficIncidentParserTest {
 
     private fun response(
         category: String = "roadClosed",
+        magnitude: String = "major",
         timeValidity: String = "present",
+        startTime: String = "2026-10-01T10:00:00Z",
         endTime: String = "2027-01-20T00:00:00Z",
         geometry: String = """{"type":"LineString","coordinates":[[-16.75,28.12],[-16.74,28.13]]}"""
     ) = """{
       "incidents":[{
         "type":"Feature",
         "properties":{
-          "id":"incident-1","iconCategory":"$category","magnitudeOfDelay":"major",
+          "id":"incident-1","iconCategory":"$category","magnitudeOfDelay":"$magnitude",
           "delayInSeconds":420,"lengthInMeters":238.5,"roadNumbers":["TF-1","TF-1"],
           "timeValidity":"$timeValidity","probabilityOfOccurrence":"certain",
-          "startTime":"2026-10-01T10:00:00Z","endTime":"$endTime",
+          "startTime":"$startTime","endTime":"$endTime",
           "from":"Adeje","to":"Guaza",
           "events":[{"description":"Road closed"},{"description":"Police activity"}]
         },
@@ -70,6 +72,31 @@ class TrafficIncidentParserTest {
     @Test fun malformedCoordinatesAreRejected() {
         val malformed = response(geometry = """{"type":"Point","coordinates":[999,28.12]}""")
         assertTrue(TrafficIncidentParser.parse(malformed, now).isEmpty())
+    }
+
+    @Test fun unknownOrUndefinedMagnitudeDoesNotBecomeModerate() {
+        assertTrue(TrafficIncidentParser.parse(
+            response(category = "jam", magnitude = "unknown"), now
+        ).isEmpty())
+        assertTrue(TrafficIncidentParser.parse(
+            response(category = "roadWorks", magnitude = "undefined"), now
+        ).isEmpty())
+    }
+
+    @Test fun invalidProviderTimestampsRejectTheIncident() {
+        assertTrue(TrafficIncidentParser.parse(
+            response(startTime = "not-an-iso-date"), now
+        ).isEmpty())
+        assertTrue(TrafficIncidentParser.parse(
+            response(endTime = "not-an-iso-date"), now
+        ).isEmpty())
+    }
+
+    @Test fun minorMagnitudeIsNotReportedAsHeavy() {
+        val item = TrafficIncidentParser.parse(
+            response(category = "jam", magnitude = "minor"), now
+        ).single()
+        assertEquals(TrafficIncidentSeverity.MODERATE, item.severity)
     }
 
     @Test fun missingTimeValidityIsNotAssumedToBePresent() {
