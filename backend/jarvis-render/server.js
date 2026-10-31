@@ -553,13 +553,13 @@ async function handleTomTomTrafficRoute(req, res) {
   }
   const normalized = validateTomTomRouteRequest(input);
   if (!normalized) return send(res, 400, { error: "Origin, destination, vehicleMode and up to three valid waypoints are required" });
-  const cacheKey = JSON.stringify(normalized);
+  const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
+  const cacheKey = JSON.stringify({ ...normalized, language });
   const cached = trafficRoutingCache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
     return send(res, 200, { ...cached.value, cache: "HIT" });
   }
   try {
-    const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
     const result = await fetchTomTomTrafficRoutes(normalized, { apiKey, language });
     if (!result.routes.length) {
       return send(res, 409, { ...result, error: "TomTom did not verify the requested vehicle mode for a complete route" });
@@ -1204,7 +1204,7 @@ async function handle(req, res) {
           origin: location,
           destination: destination.point,
           vehicleMode
-        }, getClientIp(req));
+        }, getClientIp(req), language);
         const primary = result.routes.find(route => route.routeId === "primary");
         if (!primary) {
           trafficFailureCode = "vehicle_mode_unverified";
