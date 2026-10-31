@@ -2949,7 +2949,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 edit.putFloat("jarvis_voice_pitch", ((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
                 edit.apply()
                 applyJarvisVoicePreference()
-                voiceGuide?.setSpeechRate((prefs.getInt("jarvis_voice_rate", 96) / 100f).coerceIn(0.7f, 1.2f))
                 Toast.makeText(this, "Personalità di Jarvis salvata", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
@@ -2964,9 +2963,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     selected == "discreet" -> "Sono qui. Dimmi."
                     else -> "Ciao! Sono qui, pronto ad aiutarti."
                 }
-                voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
+                val previewRate = ((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f
                 voiceGuide?.setPitch(((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
-                if (voiceGuideReady) speakManaged(line, NavigationSpeechPriority.JARVIS, "jarvis-personality-preview")
+                if (voiceGuideReady) speakManaged(line, NavigationSpeechPriority.JARVIS, "jarvis-personality-preview", previewRate)
             }
         }
         dialog.show()
@@ -3211,7 +3210,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
-        voiceGuide?.setSpeechRate(voiceRate)
         speakManaged(message, NavigationSpeechPriority.JARVIS, "jarvis-" + System.currentTimeMillis(), voiceRate)
     }
 
@@ -3650,8 +3648,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, appText("Voce non pronta o lingua TTS non disponibile."), Toast.LENGTH_LONG).show()
             return
         }
-        voiceGuide?.setSpeechRate(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f)
-        speakManaged(localizedVoiceTestPhrase(), NavigationSpeechPriority.VOICE_TEST, "voice-test")
+        val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
+        speakManaged(localizedVoiceTestPhrase(), NavigationSpeechPriority.VOICE_TEST, "voice-test", voiceRate)
     }
 
     private fun applyTheme() {
