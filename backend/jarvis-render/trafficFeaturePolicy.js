@@ -19,6 +19,10 @@ export function isTomTomTrafficIncidentsEnabled(flag, apiKey) {
   return isEnabled(flag, apiKey);
 }
 
+export function isTomTomTrafficSegmentEnabled(flag, apiKey) {
+  return isEnabled(flag, apiKey);
+}
+
 export function isTomTomTrafficRoutingEnabled(flag, apiKey) {
   return isEnabled(flag, apiKey);
 }
