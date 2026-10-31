@@ -30,6 +30,26 @@ The Render free web service can sleep after inactivity, causing a cold start del
 
 GitHub Actions defaults `NEXT_NAVI_AI_ENDPOINT` to the Render URL above. If the repository variable is set, it must also point to this Render service. Keep the existing APK signing secrets and signing configuration unchanged.
 
+## Live traffic overlay and incidents
+
+TomTom Orbis traffic flow tiles and incident details are enabled automatically when
+`TOMTOM_API_KEY` is present. The optional `TRAFFIC_FLOW_ENABLED=false` and
+`TRAFFIC_INCIDENTS_ENABLED=false` environment values act as emergency kill-switches;
+they are not required for normal activation. The app requests flow vector tiles through
+Render at `/traffic/flow/{z}/{x}/{y}`, so the TomTom credential remains server-side.
+The map's MapLibre style already contains the TomTom vector source and congestion line
+layer. Incident details are available from `/traffic/incidents?bbox=minLon,minLat,maxLon,maxLat`.
+
+The proxy applies per-IP request limits and short shared caches before making upstream
+calls (flow: 240 requests / 10 minutes with a 60-second cache; incidents: 24 requests /
+10 minutes with a 30-second cache). These are abuse controls, not a guarantee of a
+monthly spend ceiling: check the active TomTom plan and usage dashboard before a wider
+public release. TomTom currently lists a free monthly allowance of 200,000 vector tile
+requests and 2,500 incident-details requests; plan terms and entitlements can change.
+Official references: https://docs.tomtom.com/traffic-api/documentation/tomtom-orbis-maps/v2/traffic-flow/traffic-flow-service
+and https://docs.tomtom.com/traffic-api/documentation/tomtom-orbis-maps/v2/traffic-incidents/incident-details
+and https://docs.tomtom.com/pricing.
+
 ## TomTom quota and rate limiting
 
 `POST /speed-limit` calls TomTom Snap to Roads, which counts against TomTom's free allowance of

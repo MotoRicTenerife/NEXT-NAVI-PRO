@@ -1,14 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
+import {
+  isTomTomTrafficFlowEnabled,
+  isTomTomTrafficIncidentsEnabled,
+  isTomTomTrafficRoutingEnabled
+} from "./trafficFeaturePolicy.js";
 
-test("enables TomTom route traffic by default when a server key exists", () => {
-  assert.equal(isTomTomTrafficRoutingEnabled(undefined, "configured-key"), true);
-  assert.equal(isTomTomTrafficRoutingEnabled("true", "configured-key"), true);
-});
+const features = [
+  ["flow tiles", isTomTomTrafficFlowEnabled],
+  ["incident details", isTomTomTrafficIncidentsEnabled],
+  ["traffic-aware routing", isTomTomTrafficRoutingEnabled]
+];
 
-test("allows an explicit disable and refuses to run without a key", () => {
-  assert.equal(isTomTomTrafficRoutingEnabled("false", "configured-key"), false);
-  assert.equal(isTomTomTrafficRoutingEnabled(undefined, ""), false);
-  assert.equal(isTomTomTrafficRoutingEnabled("true", null), false);
-});
+for (const [name, enabled] of features) {
+  test(`enables TomTom ${name} by default when a server key exists`, () => {
+    assert.equal(enabled(undefined, "configured-key"), true);
+    assert.equal(enabled("true", "configured-key"), true);
+  });
+
+  test(`allows an explicit disable and refuses ${name} without a key`, () => {
+    assert.equal(enabled("false", "configured-key"), false);
+    assert.equal(enabled(undefined, ""), false);
+    assert.equal(enabled("true", null), false);
+  });
+}

@@ -346,3 +346,9 @@ jobs:
           else:
               print("All configured live integration diagnostics passed.")
           PY
+
+      - name: Verify live TomTom traffic tiles and incidents after Render deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/jarvis-render-backend'
+        env:
+          RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+        run: python roadtools/tomtom_traffic_live_smoke.py
