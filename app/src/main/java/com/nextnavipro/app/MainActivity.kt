@@ -3734,110 +3734,188 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
 
 
+    private fun buildJarvisTripContext(
+        place: PlaceResult,
+        route: RouteResult,
+        routeFetchedAtEpochMs: Long,
+        report: TrafficRouteReport?,
+        waypoints: List<NavPoint>,
+        baselineRoute: RouteResult?,
+        viaRoadName: String?
+    ): JSONObject {
+        val incidents = JSONArray()
+        report?.incidents?.take(10)?.forEach { incident ->
+            incidents.put(JSONObject()
+                .put("id", incident.id)
+                .put("severity", incident.severity.name)
+                .put("distanceAheadMeters", incident.distanceAheadMeters)
+                .put("delaySeconds", incident.delaySeconds ?: JSONObject.NULL)
+                .put("road", incident.road ?: JSONObject.NULL)
+                .put("description", incident.description.take(160))
+                .put("observedAtEpochMs", incident.observedAtEpochMs)
+                .put("validUntilEpochMs", incident.validUntilEpochMs)
+                .put("geometryFitScore", incident.geometryFitScore)
+                .put("directionVerified", false))
+        }
+        val context = JSONObject()
+            .put("destinationName", place.name)
+            .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
+            .put("distanceKm", route.distanceKm)
+            .put("durationSeconds", route.durationSeconds)
+            .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
+            .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
+            .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
+            .put("incidents", incidents)
+        if (report == null) {
+            context.put("trafficUnavailable", true)
+        } else {
+            context.put("trafficSource", report.source)
+                .put("trafficObservedAtEpochMs", report.observedAtEpochMs)
+                .put("trafficCache", report.cache)
+        }
+        if (!viaRoadName.isNullOrBlank()) context.put("viaRoadName", viaRoadName)
+        if (baselineRoute != null) {
+            context.put("baselineRoute", JSONObject()
+                .put("distanceKm", baselineRoute.distanceKm)
+                .put("durationSeconds", baselineRoute.durationSeconds)
+                .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto"))
+        }
+        val routeOrigin = currentLocation?.takeIf {
+            it.latitude.isFinite() && it.longitude.isFinite() &&
+                it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
+                it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L &&
+                System.currentTimeMillis() - it.time <= 120_000L
+        }
+        if (routeOrigin != null) {
+            val waypointArray = JSONArray()
+            waypoints.forEach { point ->
+                waypointArray.put(JSONObject()
+                    .put("latitude", point.latitude)
+                    .put("longitude", point.longitude))
+            }
+            context.put("routeRequest", JSONObject()
+                .put("origin", JSONObject()
+                    .put("latitude", routeOrigin.latitude)
+                    .put("longitude", routeOrigin.longitude))
+                .put("destination", JSONObject()
+                    .put("latitude", place.point.latitude)
+                    .put("longitude", place.point.longitude))
+                .put("waypoints", waypointArray)
+                .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+            if (baselineRoute != null) {
+                context.put("baselineRouteRequest", JSONObject()
+                    .put("origin", JSONObject()
+                        .put("latitude", routeOrigin.latitude)
+                        .put("longitude", routeOrigin.longitude))
+                    .put("destination", JSONObject()
+                        .put("latitude", place.point.latitude)
+                        .put("longitude", place.point.longitude))
+                    .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
+            }
+        }
+        return context
+    }
+
     private fun answerJarvisTrafficForRoute(
         question: String,
         place: PlaceResult,
         route: RouteResult,
         routeFetchedAtEpochMs: Long,
-        currentRouteDistanceMeters: Double
+        currentRouteDistanceMeters: Double,
+        waypoints: List<NavPoint> = emptyList(),
+        baselineRoute: RouteResult? = null,
+        viaRoadName: String? = null
     ) {
         val now = System.currentTimeMillis()
         if (routeFetchedAtEpochMs <= 0L || routeFetchedAtEpochMs > now || now - routeFetchedAtEpochMs > 30L * 60L * 1000L) {
-            pendingJarvisTrafficQuestion = null
             speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Aggiorna il percorso e poi ripeto il controllo.")
             return
         }
         val requestGeneration = jarvisResponseGeneration
-        jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico TomTom sul percorso…"
+        jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico e alternative…"
         thread(name = "jarvis-route-traffic") {
-            var failureDetail = ""
             val report = try {
                 TrafficIncidentClient.fetchForRoute(route.points, currentRouteDistanceMeters)
             } catch (error: Exception) {
-                failureDetail = error.message.orEmpty()
                 android.util.Log.w("NEXT_NAVI_TRAFFIC", "Route traffic lookup failed", error)
                 null
             }
             runOnUiThread {
                 if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
-                if (report == null) {
-                    val context = JSONObject()
-                        .put("destinationName", place.name)
-                        .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
-                        .put("distanceKm", route.distanceKm)
-                        .put("durationSeconds", route.durationSeconds)
-                        .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
-                        .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
-                        .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
-                        .put("trafficUnavailable", true)
-                        .put("incidents", JSONArray())
-                    val routeOrigin = currentLocation?.takeIf {
-                        it.latitude.isFinite() && it.longitude.isFinite() &&
-                            it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
-                            it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L &&
-                            System.currentTimeMillis() - it.time <= 120_000L
-                    }
-                    if (routeOrigin != null) {
-                        context.put("routeRequest", JSONObject()
-                            .put("origin", JSONObject()
-                                .put("latitude", routeOrigin.latitude)
-                                .put("longitude", routeOrigin.longitude))
-                            .put("destination", JSONObject()
-                                .put("latitude", place.point.latitude)
-                                .put("longitude", place.point.longitude))
-                            .put("waypoints", JSONArray())
-                            .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
-                    }
-                    pendingJarvisTrafficQuestion = null
-                    jarvisStatusText.text = jarvisAssistantName() + " • verifico i dati di percorso disponibili"
-                    askJarvisOnline(question, context)
-                    return@runOnUiThread
-                }
-                val incidentArray = JSONArray()
-                report.incidents.take(10).forEach { incident ->
-                    incidentArray.put(JSONObject()
-                        .put("id", incident.id)
-                        .put("severity", incident.severity.name)
-                        .put("distanceAheadMeters", incident.distanceAheadMeters)
-                        .put("delaySeconds", incident.delaySeconds ?: JSONObject.NULL)
-                        .put("road", incident.road ?: JSONObject.NULL)
-                        .put("description", incident.description.take(160))
-                        .put("observedAtEpochMs", incident.observedAtEpochMs)
-                        .put("validUntilEpochMs", incident.validUntilEpochMs)
-                        .put("geometryFitScore", incident.geometryFitScore)
-                        .put("directionVerified", false))
-                }
-                val context = JSONObject()
-                    .put("destinationName", place.name)
-                    .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car")
-                    .put("distanceKm", route.distanceKm)
-                    .put("durationSeconds", route.durationSeconds)
-                    .put("fetchedAtEpochMs", routeFetchedAtEpochMs)
-                    .put("routeSource", if (motorcycleProfile) "Valhalla motorcycle" else "Valhalla auto")
-                    .put("routeEstimateType", "baseline_route_engine_estimate_not_traffic_adjusted")
-                    .put("trafficSource", report.source)
-                    .put("trafficObservedAtEpochMs", report.observedAtEpochMs)
-                    .put("trafficCache", report.cache)
-                    .put("incidents", incidentArray)
-                val routeOrigin = currentLocation?.takeIf {
-                    it.latitude.isFinite() && it.longitude.isFinite() &&
-                        it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
-                        it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L && System.currentTimeMillis() - it.time <= 120_000L
-                }
-                if (routeOrigin != null) {
-                    context.put("routeRequest", JSONObject()
-                        .put("origin", JSONObject()
-                            .put("latitude", routeOrigin.latitude)
-                            .put("longitude", routeOrigin.longitude))
-                        .put("destination", JSONObject()
-                            .put("latitude", place.point.latitude)
-                            .put("longitude", place.point.longitude))
-                        .put("waypoints", JSONArray())
-                        .put("vehicleMode", if (motorcycleProfile) "motorcycle" else "car"))
-                }
+                val context = buildJarvisTripContext(
+                    place, route, routeFetchedAtEpochMs, report, waypoints, baselineRoute, viaRoadName
+                )
                 pendingJarvisTrafficQuestion = null
-                jarvisStatusText.text = jarvisAssistantName() + " • dati traffico ricevuti"
+                jarvisStatusText.text = jarvisAssistantName() + " • dati di percorso pronti"
                 askJarvisOnline(question, context)
+            }
+        }
+    }
+
+    private fun answerJarvisTrafficVia(question: String, roadName: String) {
+        val place = routePreviewDestination ?: destination
+        if (place == null) {
+            speakJarvis("Prima indicami la destinazione del viaggio; poi posso confrontare il percorso passando per " + roadName + ".")
+            return
+        }
+        val location = currentLocation
+        val now = System.currentTimeMillis()
+        if (location == null || !location.hasAccuracy() || location.accuracy > 50f ||
+            now - location.time < 0L || now - location.time > 120_000L) {
+            speakJarvis("Per calcolare una variante passando per " + roadName + " mi serve una posizione GPS recente e precisa.")
+            return
+        }
+        val origin = NavPoint(location.latitude, location.longitude)
+        val requestGeneration = jarvisResponseGeneration
+        jarvisStatusText.text = jarvisAssistantName() + " • calcolo alternativa via " + roadName + "…"
+        thread(name = "jarvis-route-via") {
+            try {
+                val directRoute = NavigationServices.calculateRoute(origin, place.point, motorcycle = motorcycleProfile)
+                val roads = RenderRoadEditorService.searchRoads(roadName)
+                val queryKey = roadName.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                val matchingRoads = roads.filter { road ->
+                    val nameKey = road.name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                    val displayKey = road.displayName.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+                    nameKey.contains(queryKey) || displayKey.contains(queryKey)
+                }.ifEmpty { roads }
+                val geometries = matchingRoads.take(6).mapNotNull { road ->
+                    runCatching { RenderRoadEditorService.fetchGeometry(road) }.getOrNull()
+                }
+                val waypoint = RoadViaResolver.selectWaypoint(geometries, origin, place.point)
+                    ?: throw IllegalStateException("Non ho trovato un tratto verificabile di " + roadName + " vicino al percorso.")
+                val alternativeRoute = NavigationServices.calculateRouteVia(
+                    origin, listOf(waypoint.point), place.point, motorcycle = motorcycleProfile
+                )
+                val waypointDistance = RoadViaResolver.distanceToRouteMeters(waypoint.point, alternativeRoute.points)
+                if (!waypointDistance.isFinite() || waypointDistance > 250.0) {
+                    throw IllegalStateException("Il motore di percorso non ha confermato il passaggio sulla strada richiesta.")
+                }
+                val fetchedAt = System.currentTimeMillis()
+                runOnUiThread {
+                    if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                    routePreviewResult = alternativeRoute
+                    routePreviewDestination = place
+                    routePreviewFetchedAt = fetchedAt
+                    drawRoute(alternativeRoute, true)
+                    val minutes = (alternativeRoute.durationSeconds / 60.0).roundToInt()
+                    routeText.text = String.format(
+                        Locale.ITALY,
+                        "ALTERNATIVA VIA %s • %.1f km • circa %d min",
+                        waypoint.roadName, alternativeRoute.distanceKm, minutes
+                    )
+                    routeButton.text = appText("AVVIA NAVIGAZIONE")
+                    answerJarvisTrafficForRoute(
+                        question, place, alternativeRoute, fetchedAt, 0.0,
+                        listOf(waypoint.point), directRoute, waypoint.roadName
+                    )
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_TRAFFIC", "Named-road alternative route failed", error)
+                runOnUiThread {
+                    if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
+                    jarvisStatusText.text = jarvisAssistantName() + " • alternativa non verificata"
+                    speakJarvis("Non riesco a verificare una variante passando per " + roadName + ". Non modifico la navigazione attiva.")
+                }
             }
         }
     }
