@@ -9,6 +9,15 @@ test("extracts an explicit destination from natural Italian traffic questions", 
   assert.equal(extractTrafficDestination("Traffico vicino a me?"), "");
 });
 
+test("extracts explicit traffic destinations in common device languages", () => {
+  assert.equal(extractTrafficDestination("What's traffic like from here to Los Cristianos?"), "Los Cristianos");
+  assert.equal(extractTrafficDestination("¿Qué tráfico hay desde aquí hasta Los Cristianos?"), "Los Cristianos");
+  assert.equal(extractTrafficDestination("Quel trafic y a-t-il d'ici à Los Cristianos?"), "Los Cristianos");
+  assert.equal(extractTrafficDestination("Wie ist der Verkehr von hier nach Los Cristianos?"), "Los Cristianos");
+  assert.equal(extractTrafficDestination("Como está o trânsito daqui até Los Cristianos?"), "Los Cristianos");
+  assert.equal(extractTrafficDestination("Hoe is het verkeer van hier naar Los Cristianos?"), "Los Cristianos");
+});
+
 test("rejects blank, overlong and non-explicit destinations", () => {
   assert.equal(extractTrafficDestination("traffico"), "");
   assert.equal(extractTrafficDestination("da qui a ?"), "");
