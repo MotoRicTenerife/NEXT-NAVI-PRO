@@ -2598,7 +2598,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .getString("home_description", "").orEmpty() else "Indirizzo preferito"
                 destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
                 destinationInput.setText(displayName)
-                routeText.text = "DESTINAZIONE: " + displayName + "\\nPremi AVVIA NAVIGAZIONE"
+                routeText.text = "DESTINAZIONE: " + displayName + "\nPremi AVVIA NAVIGAZIONE"
             }.setNegativeButton("Chiudi", null).show()
     }
 
