@@ -3946,7 +3946,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val requestGeneration = jarvisResponseGeneration
         val liveQuestion = Regex("\\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|trafico|traffico|traffic|atasco|incidente|retencion|congestion)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(transcript)
-        val liveLocation = if (liveQuestion) currentLocation?.let {
+        val liveLocation = if (liveQuestion) currentLocation?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 50f &&
+                System.currentTimeMillis() - it.time in 0L..120_000L
+        }?.let {
             JarvisOnlineAiClient.LiveLocation(it.latitude, it.longitude)
         } else null
         // Read the prior turns before adding the current utterance, avoiding duplication
