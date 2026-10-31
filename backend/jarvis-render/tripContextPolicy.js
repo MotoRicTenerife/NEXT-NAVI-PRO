@@ -1,6 +1,15 @@
 const MAX_ROUTE_AGE_MS = 30 * 60 * 1000;
 const MAX_INCIDENT_AGE_MS = 5 * 60 * 1000;
 
+function cleanPoint(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const latitude = Number(value.latitude);
+  const longitude = Number(value.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+
 function cleanText(value, max = 180) {
   return typeof value === "string" ? value.replace(/[<>\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
@@ -18,6 +27,17 @@ export function sanitizeTripContext(raw, now = Date.now()) {
   const routeEstimateType = cleanText(raw.routeEstimateType, 100);
   const trafficSource = cleanText(raw.trafficSource, 100);
   const trafficCache = raw.trafficCache === "HIT" || raw.trafficCache === "MISS" ? raw.trafficCache : "UNKNOWN";
+  let routeRequest = null;
+  if (raw.routeRequest && typeof raw.routeRequest === "object" && !Array.isArray(raw.routeRequest)) {
+    const origin = cleanPoint(raw.routeRequest.origin);
+    const destination = cleanPoint(raw.routeRequest.destination);
+    const waypoints = Array.isArray(raw.routeRequest.waypoints) ? raw.routeRequest.waypoints : [];
+    const requestMode = raw.routeRequest.vehicleMode;
+    if (origin && destination && requestMode === vehicleMode && waypoints.length <= 3) {
+      const cleanWaypoints = waypoints.map(cleanPoint);
+      if (cleanWaypoints.every(Boolean)) routeRequest = { origin, destination, waypoints: cleanWaypoints, vehicleMode };
+    }
+  }
   if (!destinationName || !vehicleMode ||
       !Number.isFinite(distanceKm) || distanceKm <= 0 || distanceKm > 2000 ||
       !Number.isInteger(durationSeconds) || durationSeconds <= 0 || durationSeconds > 86400 ||
@@ -69,6 +89,7 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     trafficSource,
     trafficObservedAtEpochMs,
     trafficCache,
+    routeRequest,
     routeFresh: true,
     trafficFresh: true,
     incidents,
