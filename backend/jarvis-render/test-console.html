@@ -24,7 +24,7 @@ button,input,select,textarea{font:inherit}button{border:1px solid #3b5668;backgr
  <div class="panelHead"><h2>Conversazione con Jarvis</h2><div class="toolbar"><button id="voiceToggle" class="small">Voce: OFF</button><button id="clearChat" class="small">Pulisci</button></div></div>
  <div id="chat" class="chat" aria-live="polite"><div class="msg system">Questa console interroga il backend reale. Nessuna risposta simulata. Inizia con una domanda oppure avvia un test guidato.</div></div>
  <div class="composer"><button id="mic" title="Dettatura vocale">🎙</button><textarea id="message" placeholder="Scrivi a Jarvis… (Invio per inviare, Shift+Invio per andare a capo)"></textarea><button id="send" class="primary">Invia</button></div>
- <div class="body hint">La cronologia recente viene inviata al backend per mantenere il contesto. La pagina conserva la conversazione solo su questo dispositivo; usa “Pulisci” per cancellarla.</div>
+ <div class="body hint">La cronologia recente viene inviata al backend per mantenere il contesto. La cronologia resta nella sessione corrente del browser e viene inviata al backend per il contesto; usa “Pulisci” per azzerarla.</div>
 </section>
 <aside class="panel">
  <div class="panelHead"><h2>Strumenti di prova</h2><button id="runHealth" class="small">Verifica servizi</button></div>
@@ -94,7 +94,9 @@ async function sendMessage(text){
   bubble=addMessage("assistant",data.reply,meta);messages.push({role:"assistant",content:data.reply});
   $("dGemini").textContent=diag.responseMode==="gemini"?"Gemini · risposta generata": "Risposta ricevuta";
   $("dGemini").className=diag.responseMode==="gemini"?"good":"warning";
-  if(diag.tripContextAccepted!==undefined)$("dTraffic").textContent=diag.tripContextAccepted?"Contesto viaggio accettato":"Nessun contesto viaggio";
+  if(diag.trafficContext)$("dTraffic").textContent="Contesto traffico: "+diag.trafficContext;
+  if(diag.weatherStatus&&diag.weatherStatus!=="not_requested")$("dTraffic").textContent="Meteo: "+diag.weatherStatus;
+  if(diag.tripContextAccepted!==undefined)$("dTraffic").textContent=diag.tripContextAccepted?"Contesto viaggio accettato · "+(diag.trafficContext||""):"Nessun contesto viaggio · "+(diag.trafficContext||"");
   if(data.weatherDiagnostics)$("dTraffic").textContent="Meteo: "+data.weatherDiagnostics.status;
   say(data.reply);
   return {ok:true,reply:data.reply,elapsed,diagnostics:diag};
