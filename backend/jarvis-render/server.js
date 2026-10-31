@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
+import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -11,6 +12,12 @@ const roadSearchIpWindows = new Map();
 // The manual-segment archive (Firestore) and the TomTom proxy have independent budgets:
 // syncing riders' manual segments must never consume TomTom admission, and vice versa.
 const archiveLimiter = createFixedWindowLimiter({ max: 20, windowMs: WINDOW_MS });
+// Traffic vector tiles are shared across riders through a short server cache. Keep
+// a per-client guard as well: a public APK must never expose or burn the provider key.
+const trafficTileLimiter = createFixedWindowLimiter({ max: 900, windowMs: WINDOW_MS });
+const trafficTileCache = new Map();
+const TRAFFIC_TILE_CACHE_MS = 25000;
+const TRAFFIC_TILE_CACHE_MAX = 600;
 const speedLimitGuard = createSpeedLimitGuard({
   burst: clampInt(process.env.TOMTOM_RATE_BURST, 30, 1, 500),
   refillMs: clampInt(process.env.TOMTOM_RATE_REFILL_MS, 5000, 500, 600000),
@@ -32,6 +39,17 @@ function send(res, status, body, extraHeaders = {}) {
     ...extraHeaders
   });
   res.end(payload);
+}
+
+function sendBinary(res, status, body, extraHeaders = {}) {
+  res.writeHead(status, {
+    "content-type": "application/vnd.mapbox-vector-tile",
+    "cache-control": "public, max-age=25",
+    "x-content-type-options": "nosniff",
+    "content-length": body.length,
+    ...extraHeaders
+  });
+  res.end(body);
 }
 
 function getClientIp(req) {
@@ -375,6 +393,68 @@ async function handleCloudSpeedSegments(req, res, url) {
   }
 }
 
+async function handleTrafficFlowTile(req, res, url) {
+  if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+  const tile = parseTrafficTilePath(url.pathname);
+  if (!tile) return send(res, 400, { error: "Invalid traffic tile coordinates" });
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) return send(res, 503, { error: "TomTom traffic provider not configured" });
+
+  const ip = getClientIp(req);
+  const admission = trafficTileLimiter.check(ip, Date.now());
+  if (!admission.allowed) {
+    const retryAfterSeconds = Math.max(1, Math.ceil(admission.retryAfterMs / 1000));
+    return send(res, 429, { error: "Traffic tile request limit reached", retryAfterSeconds },
+      { "retry-after": String(retryAfterSeconds) });
+  }
+
+  const cacheKey = `${tile.z}/${tile.x}/${tile.y}`;
+  const cached = trafficTileCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_TILE_CACHE_MS) {
+    return sendBinary(res, 200, cached.body, { "x-traffic-cache": "HIT" });
+  }
+  if (cached) trafficTileCache.delete(cacheKey);
+
+  try {
+    const upstream = await fetch(buildTomTomTrafficTileUrl(tile), {
+      method: "GET",
+      headers: {
+        "TomTom-Api-Key": apiKey,
+        "TomTom-Api-Version": "2",
+        "Accept": "application/vnd.mapbox-vector-tile"
+      },
+      signal: AbortSignal.timeout(9000)
+    });
+    if (!upstream.ok) {
+      const retryAfter = upstream.headers.get("retry-after");
+      const status = upstream.status === 429 ? 429 : upstream.status === 403 ? 503 : 502;
+      console.warn("TomTom traffic tile request failed", { status: upstream.status, tile: cacheKey });
+      return send(res, status, {
+        error: status === 429 ? "TomTom traffic quota or rate limit reached" : "TomTom traffic tile unavailable",
+        providerStatus: upstream.status
+      }, retryAfter ? { "retry-after": retryAfter } : {});
+    }
+    const body = Buffer.from(await upstream.arrayBuffer());
+    if (body.length > 2 * 1024 * 1024) return send(res, 502, { error: "TomTom traffic tile exceeded size limit" });
+    trafficTileCache.set(cacheKey, { body, cachedAt: Date.now() });
+    while (trafficTileCache.size > TRAFFIC_TILE_CACHE_MAX) {
+      const oldest = trafficTileCache.keys().next().value;
+      if (oldest === undefined) break;
+      trafficTileCache.delete(oldest);
+    }
+    return sendBinary(res, 200, body, {
+      "x-traffic-cache": "MISS",
+      ...(upstream.headers.get("etag") ? { etag: upstream.headers.get("etag") } : {})
+    });
+  } catch (error) {
+    console.warn("TomTom traffic tile proxy failed", {
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      tile: cacheKey
+    });
+    return send(res, 502, { error: "TomTom traffic service temporarily unavailable" });
+  }
+}
+
 async function handle(req, res) {
   let url;
   try {
@@ -384,6 +464,7 @@ async function handle(req, res) {
   }
 
   if (url.pathname === "/speed-limit-segments" || url.pathname === "/speed-limit-segments/upsert") { return handleCloudSpeedSegments(req, res, url); }
+  if (url.pathname.startsWith("/traffic/flow/")) return handleTrafficFlowTile(req, res, url);
 
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
