@@ -103,6 +103,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val REQUEST_IMPORT_GPX = 2001
         private const val REQUEST_EXPORT_GPX = 2002
         private const val REQUEST_EXPORT_GPS_TRACE = 2003
+        private const val REQUEST_EXPORT_APP_BACKUP = 2004
+        private const val REQUEST_IMPORT_APP_BACKUP = 2005
         private const val SOURCE_USER = "next-user-position"
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
@@ -2111,7 +2113,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             "Salva percorso attivo",
             "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
             "Esporta GPX attivo…",
-            "DEBUG: CSV GPS e memoria"
+            "DEBUG: CSV GPS e memoria",
+            "BACKUP COMPLETO: impostazioni + GPX + CSV…",
+            "RIPRISTINA BACKUP COMPLETO…"
         )
         AlertDialog.Builder(this).setTitle("Percorsi e registrazioni").setItems(choices) { _, which ->
             when (which) {
@@ -2121,8 +2125,43 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 3 -> showSavedGpxRoutes()
                 4 -> exportActiveGpx()
                 5 -> showGpsDiagnosticsMenu()
+                6 -> launchAppBackupExport()
+                7 -> launchAppBackupImport()
             }
         }.setNegativeButton("Chiudi", null).show()
+    }
+
+    private fun launchAppBackupExport() {
+        if (recordingGpx || gpsDiagnosticRecording) {
+            Toast.makeText(this, "Ferma e salva prima la registrazione GPX + CSV.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, "next-navi-pro-backup-${System.currentTimeMillis()}.zip")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_APP_BACKUP)
+    }
+
+    private fun launchAppBackupImport() {
+        if (recordingGpx || gpsDiagnosticRecording) {
+            Toast.makeText(this, "Ferma e salva prima la registrazione GPX + CSV.", Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Ripristinare il backup?")
+            .setMessage("Le impostazioni attuali saranno sostituite. I GPX e i CSV con lo stesso nome saranno sovrascritti; gli altri viaggi resteranno. Esporta prima un backup dello stato attuale se vuoi poterlo recuperare.")
+            .setPositiveButton("Scegli backup") { _, _ ->
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/zip"
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivityForResult(intent, REQUEST_IMPORT_APP_BACKUP)
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
     }
 
     private fun askToRecordGpx() {
@@ -2582,6 +2621,54 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     runOnUiThread { Toast.makeText(this, "GPX esportato. Ora puoi condividerlo dal file manager.", Toast.LENGTH_LONG).show() }
                 } catch (error: Exception) {
                     runOnUiThread { Toast.makeText(this, "Esportazione GPX fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+            REQUEST_EXPORT_APP_BACKUP -> thread(name = "export-app-backup") {
+                try {
+                    val preferences = getSharedPreferences(PREFS, MODE_PRIVATE).all
+                    val summary = contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                        AppDataBackupService.export(output, preferences, gpxDirectory(), gpsDiagnosticsDirectory())
+                    } ?: throw IllegalStateException("Impossibile creare il file di backup.")
+                    runOnUiThread {
+                        Toast.makeText(this,
+                            "Backup completo creato: ${summary.gpxCount} GPX, ${summary.csvCount} CSV e ${summary.settingsCount} impostazioni.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Backup non riuscito: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+            REQUEST_IMPORT_APP_BACKUP -> thread(name = "import-app-backup") {
+                val staging = File(cacheDir, "next_navi_restore_${System.currentTimeMillis()}")
+                try {
+                    val plan = contentResolver.openInputStream(uri)?.use { input ->
+                        AppDataBackupService.import(input, staging)
+                    } ?: throw IllegalStateException("Impossibile leggere il backup selezionato.")
+                    val gpxDir = gpxDirectory()
+                    val csvDir = gpsDiagnosticsDirectory()
+                    plan.gpxFiles.forEach { source -> source.copyTo(File(gpxDir, source.name), overwrite = true) }
+                    plan.csvFiles.forEach { source -> source.copyTo(File(csvDir, source.name), overwrite = true) }
+                    val editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit().clear()
+                    plan.preferences.forEach { (key, value) ->
+                        when (value) {
+                            is String -> editor.putString(key, value)
+                            is Boolean -> editor.putBoolean(key, value)
+                            is Int -> editor.putInt(key, value)
+                            is Long -> editor.putLong(key, value)
+                            is Float -> editor.putFloat(key, value)
+                            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                        }
+                    }
+                    if (!editor.commit()) throw IllegalStateException("Impossibile salvare le impostazioni ripristinate.")
+                    runOnUiThread {
+                        Toast.makeText(this,
+                            "Backup ripristinato: ${plan.gpxFiles.size} GPX e ${plan.csvFiles.size} CSV. Riavvia l'app per ricaricare tutte le impostazioni.",
+                            Toast.LENGTH_LONG).show()
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Ripristino non riuscito: ${error.message ?: "backup non valido"}", Toast.LENGTH_LONG).show() }
+                } finally {
+                    staging.deleteRecursively()
                 }
             }
             REQUEST_EXPORT_GPS_TRACE -> thread(name = "export-gps-trace") {
