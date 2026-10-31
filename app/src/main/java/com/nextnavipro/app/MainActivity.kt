@@ -2618,7 +2618,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .remove("home_lat")
                         .remove("home_lon")
                         .remove("poi_home_marker")
-                        .remove("favorite_Casa")
                 } else {
                     editor.remove("favorite_" + selectedName)
                 }
