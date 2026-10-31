@@ -22,11 +22,16 @@ export function sanitizeTripContext(raw, now = Date.now()) {
   const distanceKm = Number(raw.distanceKm);
   const durationSeconds = Number(raw.durationSeconds);
   const fetchedAtEpochMs = Number(raw.fetchedAtEpochMs);
+  const trafficUnavailable = raw.trafficUnavailable === true;
   const trafficObservedAtEpochMs = Number(raw.trafficObservedAtEpochMs);
   const routeSource = cleanText(raw.routeSource, 80);
   const routeEstimateType = cleanText(raw.routeEstimateType, 100);
   const trafficSource = cleanText(raw.trafficSource, 100);
   const trafficCache = raw.trafficCache === "HIT" || raw.trafficCache === "MISS" ? raw.trafficCache : "UNKNOWN";
+  const trafficEvidenceValid = !trafficUnavailable &&
+    trafficSource.includes("TomTom Orbis Traffic Incidents") &&
+    Number.isSafeInteger(trafficObservedAtEpochMs) && trafficObservedAtEpochMs > 0 &&
+    trafficObservedAtEpochMs <= now + 30_000 && now - trafficObservedAtEpochMs <= MAX_INCIDENT_AGE_MS;
   let routeRequest = null;
   if (raw.routeRequest && typeof raw.routeRequest === "object" && !Array.isArray(raw.routeRequest)) {
     const origin = cleanPoint(raw.routeRequest.origin);
@@ -45,12 +50,10 @@ export function sanitizeTripContext(raw, now = Date.now()) {
       fetchedAtEpochMs > now + 30_000 || now - fetchedAtEpochMs > MAX_ROUTE_AGE_MS ||
       !["Valhalla motorcycle", "Valhalla auto"].includes(routeSource) ||
       routeEstimateType !== "baseline_route_engine_estimate_not_traffic_adjusted" ||
-      !trafficSource.includes("TomTom Orbis Traffic Incidents") ||
-      !Number.isSafeInteger(trafficObservedAtEpochMs) || trafficObservedAtEpochMs <= 0 ||
-      trafficObservedAtEpochMs > now + 30_000 || now - trafficObservedAtEpochMs > MAX_INCIDENT_AGE_MS) return null;
+      (!trafficUnavailable && !trafficEvidenceValid)) return null;
 
   const incidents = [];
-  if (Array.isArray(raw.incidents)) {
+  if (!trafficUnavailable && Array.isArray(raw.incidents)) {
     for (const item of raw.incidents.slice(0, 20)) {
       if (!item || typeof item !== "object" || Array.isArray(item)) continue;
       const id = cleanText(item.id, 100);
@@ -91,8 +94,9 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     trafficCache,
     routeRequest,
     routeFresh: true,
-    trafficFresh: true,
+    trafficFresh: trafficEvidenceValid,
+    trafficUnavailable,
     incidents,
-    incidentEvidence: incidents.length ? "fresh_route_corridor_matches_direction_unverified" : "no_fresh_route_corridor_matches"
+    incidentEvidence: trafficUnavailable ? "incident_service_unavailable" : incidents.length ? "fresh_route_corridor_matches_direction_unverified" : "no_fresh_route_corridor_matches"
   };
 }
