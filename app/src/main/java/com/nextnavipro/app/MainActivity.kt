@@ -3884,7 +3884,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (matchingRoads.isEmpty()) {
                     throw IllegalStateException("La ricerca non ha restituito la strada esatta richiesta.")
                 }
-                val geometries = matchingRoads.take(6).mapNotNull { road ->
+                val geometries = matchingRoads.take(3).mapNotNull { road ->
                     runCatching { RenderRoadEditorService.fetchGeometry(road) }.getOrNull()
                 }
                 val waypoint = RoadViaResolver.selectWaypoint(geometries, origin, place.point)
