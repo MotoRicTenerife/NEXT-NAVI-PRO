@@ -72,11 +72,15 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
     @Synchronized
     fun exportDatabaseSnapshot(destination: java.io.File) {
         val db = writableDatabase
-        db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { cursor ->
-            while (cursor.moveToNext()) { /* consume checkpoint status */ }
+        val checkpointComplete = db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { cursor ->
+            cursor.moveToFirst() && cursor.getInt(0) == 0
         }
+        require(checkpointComplete) { "Impossibile consolidare in sicurezza il database memoria Jarvis." }
         val source = java.io.File(db.path)
-        require(source.isFile && source.length() > 0L) { "Archivio memoria Jarvis non disponibile." }
+        val wal = java.io.File(source.path + "-wal")
+        require(source.isFile && source.length() > 0L && (!wal.exists() || wal.length() == 0L)) {
+            "Archivio memoria Jarvis non disponibile o non completamente consolidato."
+        }
         source.copyTo(destination, overwrite = true)
     }
 
