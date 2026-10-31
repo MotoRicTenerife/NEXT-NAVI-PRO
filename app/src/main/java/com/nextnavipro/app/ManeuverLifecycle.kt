@@ -84,21 +84,22 @@ internal class ManeuverLifecycle(
         val imminentAt = if (observation.isRoundabout) roundaboutImminentSeconds else normalImminentSeconds
         val executingDistance = if (observation.isRoundabout) 22.0 else 12.0
 
-        if (trusted) {
-            val passedBy = observation.matchedAlongRouteMeters -
-                observation.maneuverAlongRouteMeters
-            if (passedBy >= 28.0 && observation.distanceMeters <= 65.0) {
-                completionEvidence++
-            } else {
-                completionEvidence = 0
-            }
-            if (passedBy >= 85.0 && observation.distanceMeters > 65.0) {
-                missedEvidence++
-            } else {
-                missedEvidence = 0
-            }
+        val passedBy = observation.matchedAlongRouteMeters -
+            observation.maneuverAlongRouteMeters
+        val wasExecuting = state == State.EXECUTING
+        // A maneuver is completed only after the rider entered its execution phase.
+        // Passing its route position without ever reaching that phase is a missed turn,
+        // even when the UI's forward distance has clamped to zero.
+        if (passedBy >= 28.0 && observation.distanceMeters <= 65.0 &&
+            wasExecuting && missedEvidence == 0
+        ) {
+            completionEvidence++
         } else {
             completionEvidence = 0
+        }
+        if (passedBy >= 85.0 && !wasExecuting && state != State.COMPLETED) {
+            missedEvidence++
+        } else if (passedBy < 85.0) {
             missedEvidence = 0
         }
 
