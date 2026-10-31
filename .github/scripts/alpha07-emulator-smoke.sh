@@ -48,7 +48,7 @@ if ! adb shell pidof "$PACKAGE" >/dev/null 2>&1; then
   exit 1
 fi
 
-adb shell screencap -p /sdcard/alpha07-smoke.png
-adb pull /sdcard/alpha07-smoke.png alpha07-emulator-smoke.png
+# Stream the screenshot directly to the runner; Android 15/35 may deny shell writes to /sdcard.
+adb exec-out screencap -p > alpha07-emulator-smoke.png
 test -s alpha07-emulator-smoke.png
 echo "PASS: Alpha07 installed, its Activity entered the Android task stack, survived rotation and produced a non-empty screenshot."
