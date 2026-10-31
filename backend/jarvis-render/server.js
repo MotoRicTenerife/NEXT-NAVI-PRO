@@ -500,6 +500,37 @@ async function handleTrafficIncidents(req, res, url) {
 }
 
 
+async function fetchTomTomTrafficRoutesCached(input, clientIp) {
+  const normalized = validateTomTomRouteRequest(input);
+  if (!normalized) {
+    const error = new Error("Invalid route request");
+    error.statusCode = 400;
+    throw error;
+  }
+  const cacheKey = JSON.stringify(normalized);
+  const cached = trafficRoutingCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
+    return { ...cached.value, cache: "HIT" };
+  }
+  const admission = trafficRoutingLimiter.check(clientIp, Date.now());
+  if (!admission.allowed) {
+    const error = new Error("TomTom route request rate limit reached");
+    error.code = "rate_limited";
+    error.statusCode = 429;
+    throw error;
+  }
+  const result = await fetchTomTomTrafficRoutes(normalized, { apiKey: process.env.TOMTOM_API_KEY });
+  if (result.routes.length) {
+    trafficRoutingCache.set(cacheKey, { cachedAt: Date.now(), value: result });
+    while (trafficRoutingCache.size > TRAFFIC_ROUTING_CACHE_MAX) {
+      const oldest = trafficRoutingCache.keys().next().value;
+      if (oldest === undefined) break;
+      trafficRoutingCache.delete(oldest);
+    }
+  }
+  return { ...result, cache: "MISS" };
+}
+
 async function handleTomTomTrafficRoute(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
   if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true") {
@@ -1031,15 +1062,11 @@ async function handle(req, res) {
         }] : [])
       ];
       const routeResults = await Promise.all(routeJobs.map(async job => {
-        const admission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
-        if (!admission.allowed) return { job, error: "rate_limited" };
         try {
-          const result = await fetchTomTomTrafficRoutes(job.request, {
-            apiKey: process.env.TOMTOM_API_KEY
-          });
+          const result = await fetchTomTomTrafficRoutesCached(job.request, getClientIp(req));
           return { job, result };
         } catch (error) {
-          return { job, error: Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable" };
+          return { job, error: error?.code || (Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable") };
         }
       }));
       for (const item of routeResults) {
@@ -1172,16 +1199,11 @@ async function handle(req, res) {
           trafficFailureCode = "destination_not_found";
           throw new Error("Destination could not be resolved near the current GPS fix");
         }
-        const admission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
-        if (!admission.allowed) {
-          trafficFailureCode = "rate_limited";
-          throw new Error("TomTom route lookup rate limit reached");
-        }
-        const result = await fetchTomTomTrafficRoutes({
+        const result = await fetchTomTomTrafficRoutesCached({
           origin: location,
           destination: destination.point,
           vehicleMode
-        }, { apiKey: process.env.TOMTOM_API_KEY });
+        }, getClientIp(req));
         const primary = result.routes.find(route => route.routeId === "primary");
         if (!primary) {
           trafficFailureCode = "vehicle_mode_unverified";
@@ -1216,7 +1238,7 @@ async function handle(req, res) {
           liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom motorcycle routing is beta. Use the verified response as a traffic cross-check, not as proof of every legal motorcycle restriction.";
         }
       } catch (error) {
-        if (!trafficFailureCode) trafficFailureCode = error instanceof Error && error.message.includes("geocoder") ? "geocoder_unavailable" : "provider_unavailable";
+        if (!trafficFailureCode) trafficFailureCode = error?.code || (Number.isInteger(error?.statusCode) && error.statusCode === 429 ? "rate_limited" : error instanceof Error && error.message.includes("geocoder") ? "geocoder_unavailable" : "provider_unavailable");
         console.warn("Jarvis TomTom destination traffic lookup failed", {
           failureCode: trafficFailureCode,
           errorType: error instanceof Error ? error.name : "UnknownError"
