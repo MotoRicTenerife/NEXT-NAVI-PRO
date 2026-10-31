@@ -130,6 +130,9 @@ export function normalizeTomTomTrafficRoutes(payload, vehicleMode, observedAtEpo
     });
     if (routes.length >= MAX_ROUTES) break;
   }
+  if (!routes.some(route => route.routeId === "primary")) {
+    return { routes: [], rejectedRoutes: Math.max(1, rejectedRoutes) };
+  }
   return { routes, rejectedRoutes };
 }
 
