@@ -1,0 +1,120 @@
+name: Navigation QA Team
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "backend/**"
+      - "roadtools/**"
+      - "tools/**"
+      - ".github/agents/**"
+      - ".github/workflows/navigation-qa.yml"
+      - "AGENTS.md"
+      - "docs/qa/**"
+      - "docs/architecture/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: navigation-qa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  team-contract:
+    name: QA lead — specialist roster and engineering contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate all ten specialist profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          roles=(navigation-architect gnss-geodesy map-matching routing-maneuvers speed-intelligence voice-interaction android-runtime data-telemetry predictive-ai qa-safety)
+          for role in "${roles[@]}"; do
+            file=".github/agents/${role}.agent.md"
+            test -s "$file" || { echo "::error::Missing specialist profile: $file"; exit 1; }
+            grep -q '^name:' "$file" || { echo "::error::Missing name metadata: $file"; exit 1; }
+            grep -q '^description:' "$file" || { echo "::error::Missing description metadata: $file"; exit 1; }
+            grep -q '^---$' "$file" || { echo "::error::Missing front matter: $file"; exit 1; }
+          done
+          test -s AGENTS.md
+          test -s docs/architecture/NAVIGATION_INTELLIGENCE_TEAM.md
+          test -s docs/qa/TEAM_OPERATING_MODEL.md
+          test -s docs/qa/NAVIGATION_TEST_MATRIX.md
+          echo "All ten specialist instruction profiles and team contracts are present."
+          echo "Note: profiles are instructions for agent-capable tooling; this check does not claim autonomous agents executed."
+
+  gnss-and-telemetry:
+    name: GNSS / geodesy / telemetry — deterministic trace tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Run GPS trace and telemetry regression suite
+        run: python -m unittest discover -s roadtools -p 'test_*.py' -v
+
+  backend-contracts:
+    name: Backend / speed intelligence — offline contract tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/jarvis-render
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Check backend syntax
+        run: npm run check
+      - name: Test rate limits and TomTom parsing with mocked upstream
+        run: npm test
+
+  android-runtime:
+    name: Android runtime — compile and unit regression tests
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.7"
+      - name: Install Android SDK components
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Compile debug variant
+        run: gradle --no-daemon assembleDebug
+      - name: Run Android unit tests
+        run: gradle --no-daemon testDebugUnitTest
+
+  independent-gate:
+    name: QA safety — require all specialist gates
+    if: always()
+    needs:
+      - team-contract
+      - gnss-and-telemetry
+      - backend-contracts
+      - android-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject failed, cancelled, or skipped specialist checks
+        env:
+          TEAM: ${{ needs.team-contract.result }}
+          GNSS: ${{ needs.gnss-and-telemetry.result }}
+          BACKEND: ${{ needs.backend-contracts.result }}
+          ANDROID: ${{ needs.android-runtime.result }}
+        run: |
+          printf 'Team contract: %s\nGNSS/telemetry: %s\nBackend: %s\nAndroid: %s\n' "$TEAM" "$GNSS" "$BACKEND" "$ANDROID"
+          test "$TEAM" = success
+          test "$GNSS" = success
+          test "$BACKEND" = success
+          test "$ANDROID" = success

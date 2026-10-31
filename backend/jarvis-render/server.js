@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePolicy.js";
+import { buildTomTomIncidentDetailsUrl, parseIncidentBbox } from "./trafficIncidentPolicy.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -14,10 +15,15 @@ const roadSearchIpWindows = new Map();
 const archiveLimiter = createFixedWindowLimiter({ max: 20, windowMs: WINDOW_MS });
 // Traffic vector tiles are shared across riders through a short server cache. Keep
 // a per-client guard as well: a public APK must never expose or burn the provider key.
-const trafficTileLimiter = createFixedWindowLimiter({ max: 900, windowMs: WINDOW_MS });
+const trafficTileLimiter = createFixedWindowLimiter({ max: 240, windowMs: WINDOW_MS });
 const trafficTileCache = new Map();
-const TRAFFIC_TILE_CACHE_MS = 25000;
+const TRAFFIC_TILE_CACHE_MS = 60000;
 const TRAFFIC_TILE_CACHE_MAX = 600;
+// Incident corridor lookups are far less frequent than visible map tiles.
+const trafficIncidentLimiter = createFixedWindowLimiter({ max: 24, windowMs: WINDOW_MS });
+const trafficIncidentCache = new Map();
+const TRAFFIC_INCIDENT_CACHE_MS = 30000;
+const TRAFFIC_INCIDENT_CACHE_MAX = 300;
 const speedLimitGuard = createSpeedLimitGuard({
   burst: clampInt(process.env.TOMTOM_RATE_BURST, 30, 1, 500),
   refillMs: clampInt(process.env.TOMTOM_RATE_REFILL_MS, 5000, 500, 600000),
@@ -395,6 +401,10 @@ async function handleCloudSpeedSegments(req, res, url) {
 
 async function handleTrafficFlowTile(req, res, url) {
   if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+  // Do not consume shared provider quota until Render entitlement and client abuse controls are approved.
+  if (process.env.TRAFFIC_FLOW_ENABLED !== "true") {
+    return send(res, 503, { error: "Traffic flow overlay is not enabled" });
+  }
   const tile = parseTrafficTilePath(url.pathname);
   if (!tile) return send(res, 400, { error: "Invalid traffic tile coordinates" });
   const apiKey = process.env.TOMTOM_API_KEY;
@@ -455,6 +465,89 @@ async function handleTrafficFlowTile(req, res, url) {
   }
 }
 
+async function handleTrafficIncidents(req, res, url) {
+  if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+  // Keep the new provider endpoint dark until account entitlement, quota, and
+  // public-client abuse controls are explicitly configured on Render.
+  if (process.env.TRAFFIC_INCIDENTS_ENABLED !== "true") {
+    return send(res, 503, { error: "Traffic incident service is not enabled" });
+  }
+  const bbox = parseIncidentBbox(url.searchParams.get("bbox"));
+  if (!bbox) return send(res, 400, { error: "A valid bbox under 10,000 km² is required" });
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) return send(res, 503, { error: "TomTom traffic provider not configured" });
+
+  const ip = getClientIp(req);
+  const admission = trafficIncidentLimiter.check(ip, Date.now());
+  if (!admission.allowed) {
+    const retryAfterSeconds = Math.max(1, Math.ceil(admission.retryAfterMs / 1000));
+    return send(res, 429, { error: "Traffic incident request limit reached", retryAfterSeconds },
+      { "retry-after": String(retryAfterSeconds) });
+  }
+
+  const cacheKey = bbox.value;
+  const cached = trafficIncidentCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_INCIDENT_CACHE_MS) {
+    return send(res, 200, {
+      ok: true, source: "TomTom Orbis Traffic Incidents", cache: "HIT",
+      observedAtEpochMs: cached.observedAtEpochMs, incidents: cached.incidents
+    }, { "cache-control": "public, max-age=30" });
+  }
+  if (cached) trafficIncidentCache.delete(cacheKey);
+
+  try {
+    const languageHeader = req.headers["accept-language"] || "en-GB";
+    const language = String(languageHeader).split(",")[0].trim();
+    const safeLanguage = /^[a-z]{2}(-[A-Z]{2})?$/.test(language) ? language : "en-GB";
+    const upstream = await fetch(buildTomTomIncidentDetailsUrl(bbox), {
+      method: "GET",
+      headers: {
+        "TomTom-Api-Key": apiKey,
+        "TomTom-Api-Version": "2",
+        "Accept": "application/json",
+        "Accept-Language": safeLanguage
+      },
+      signal: AbortSignal.timeout(9000)
+    });
+    if (upstream.status === 204) {
+      const empty = { ok: true, source: "TomTom Orbis Traffic Incidents", incidents: [] };
+      const observedAtEpochMs = Date.now();
+      trafficIncidentCache.set(cacheKey, { incidents: [], observedAtEpochMs, cachedAt: observedAtEpochMs });
+      return send(res, 200, { ...empty, cache: "MISS", observedAtEpochMs },
+        { "cache-control": "public, max-age=30" });
+    }
+    if (!upstream.ok) {
+      const retryAfter = upstream.headers.get("retry-after");
+      const status = upstream.status === 429 ? 429 : upstream.status === 403 ? 503 : 502;
+      console.warn("TomTom incident request failed", { status: upstream.status, bbox: cacheKey });
+      return send(res, status, {
+        error: status === 429 ? "TomTom traffic quota or rate limit reached" : "TomTom incident service unavailable",
+        providerStatus: upstream.status
+      }, retryAfter ? { "retry-after": retryAfter } : {});
+    }
+    const payload = await upstream.json();
+    const incidents = Array.isArray(payload?.incidents) ? payload.incidents : null;
+    if (!incidents) return send(res, 502, { error: "TomTom incident response schema is invalid" });
+    const observedAtEpochMs = Date.now();
+    trafficIncidentCache.set(cacheKey, { incidents, observedAtEpochMs, cachedAt: observedAtEpochMs });
+    while (trafficIncidentCache.size > TRAFFIC_INCIDENT_CACHE_MAX) {
+      const oldest = trafficIncidentCache.keys().next().value;
+      if (oldest === undefined) break;
+      trafficIncidentCache.delete(oldest);
+    }
+    return send(res, 200, {
+      ok: true, source: "TomTom Orbis Traffic Incidents", cache: "MISS",
+      observedAtEpochMs, incidents
+    }, { "cache-control": "public, max-age=30" });
+  } catch (error) {
+    console.warn("TomTom incident proxy failed", {
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      bbox: cacheKey
+    });
+    return send(res, 502, { error: "TomTom incident service temporarily unavailable" });
+  }
+}
+
 async function handle(req, res) {
   let url;
   try {
@@ -465,6 +558,7 @@ async function handle(req, res) {
 
   if (url.pathname === "/speed-limit-segments" || url.pathname === "/speed-limit-segments/upsert") { return handleCloudSpeedSegments(req, res, url); }
   if (url.pathname.startsWith("/traffic/flow/")) return handleTrafficFlowTile(req, res, url);
+  if (url.pathname === "/traffic/incidents") return handleTrafficIncidents(req, res, url);
 
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
