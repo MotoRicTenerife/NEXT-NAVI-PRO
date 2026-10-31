@@ -192,7 +192,7 @@ object JarvisCommandParser {
             "vorrei andare a ", "vorrei raggiungere ", "raggiungimi a ",
             "naviga verso ", "naviga a ", "guidami a ", "guidami verso ",
             "vai a ", "vai al ", "vai alla ", "vai allo ", "vai verso ",
-            "andiamo a ", "imposta destinazione ", "cerca ", "destinazione "
+            "andiamo a ", "imposta destinazione "
         )
         // Match the longest grammatical prefix first (e.g. "portami allo " before "portami a ").
         val orderedPrefixes = prefixes.sortedByDescending { it.length }
