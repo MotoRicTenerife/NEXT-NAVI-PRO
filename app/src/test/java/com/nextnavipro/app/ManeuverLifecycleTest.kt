@@ -16,7 +16,7 @@ class ManeuverLifecycleTest {
         sampleTime: Long = 1L,
         roundabout: Boolean = false,
         id: String = "m-1"
-    ) = ManeuverLifecycle.Observation(id, distance, speed, matched, target, confidence, roundabout)
+    ) = ManeuverLifecycle.Observation(id, distance, speed, matched, target, confidence, sampleTime, roundabout)
 
     @Test fun advancesThroughApproachPrepareImminentAndExecuting() {
         val lifecycle = ManeuverLifecycle()
