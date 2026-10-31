@@ -48,33 +48,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -skin 1080x2400
           disable-animations: true
           script: |
-            set -euo pipefail
-            adb logcat -c
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb shell monkey -p com.nextnavipro.app.debug 1
-            for attempt in $(seq 1 30); do
-              if adb shell pidof com.nextnavipro.app.debug >/dev/null 2>&1; then break; fi
-              sleep 1
-            done
-            if ! adb shell pidof com.nextnavipro.app.debug >/dev/null 2>&1; then
-              adb logcat -d -t 1200
-              echo "Alpha07 did not stay running after launch."
-              exit 1
-            fi
-            sleep 5
-            if adb logcat -d -t 1500 | grep -E "FATAL EXCEPTION|Process: com.nextnavipro.app.debug" | grep -q "FATAL EXCEPTION"; then
-              adb logcat -d -t 1500
-              echo "Fatal Android exception detected during Alpha07 startup."
-              exit 1
-            fi
-            adb shell settings put system accelerometer_rotation 0
-            adb shell settings put system user_rotation 1
-            sleep 2
-            adb shell settings put system user_rotation 0
-            sleep 2
-            adb shell screencap -p /sdcard/alpha07-smoke.png
-            adb pull /sdcard/alpha07-smoke.png alpha07-emulator-smoke.png
-            echo "Alpha07 installed, launched and survived portrait/landscape rotation."
+            bash .github/scripts/alpha07-emulator-smoke.sh
       - name: Upload emulator screenshot
         uses: actions/upload-artifact@v5
         with:
