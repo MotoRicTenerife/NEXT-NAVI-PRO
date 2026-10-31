@@ -16,11 +16,21 @@ export function sanitizeTripContext(raw, now = Date.now()) {
   const distanceKm = Number(raw.distanceKm);
   const durationSeconds = Number(raw.durationSeconds);
   const fetchedAtEpochMs = Number(raw.fetchedAtEpochMs);
+  const trafficObservedAtEpochMs = Number(raw.trafficObservedAtEpochMs);
+  const routeSource = cleanText(raw.routeSource, 80);
+  const routeEstimateType = cleanText(raw.routeEstimateType, 100);
+  const trafficSource = cleanText(raw.trafficSource, 100);
+  const trafficCache = raw.trafficCache === "HIT" || raw.trafficCache === "MISS" ? raw.trafficCache : "UNKNOWN";
   if (!destinationName || !vehicleMode ||
       !Number.isFinite(distanceKm) || distanceKm <= 0 || distanceKm > 2000 ||
       !Number.isInteger(durationSeconds) || durationSeconds <= 0 || durationSeconds > 86400 ||
       !Number.isSafeInteger(fetchedAtEpochMs) || fetchedAtEpochMs <= 0 ||
-      fetchedAtEpochMs > now + 30_000 || now - fetchedAtEpochMs > MAX_ROUTE_AGE_MS) return null;
+      fetchedAtEpochMs > now + 30_000 || now - fetchedAtEpochMs > MAX_ROUTE_AGE_MS ||
+      !["Valhalla motorcycle", "Valhalla auto"].includes(routeSource) ||
+      routeEstimateType !== "baseline_route_engine_estimate_not_traffic_adjusted" ||
+      !trafficSource.includes("TomTom Orbis Traffic Incidents") ||
+      !Number.isSafeInteger(trafficObservedAtEpochMs) || trafficObservedAtEpochMs <= 0 ||
+      trafficObservedAtEpochMs > now + 30_000 || now - trafficObservedAtEpochMs > MAX_INCIDENT_AGE_MS) return null;
 
   const incidents = [];
   if (Array.isArray(raw.incidents)) {
@@ -58,7 +68,13 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     distanceKm: Math.round(distanceKm * 10) / 10,
     durationSeconds,
     fetchedAtEpochMs,
+    routeSource,
+    routeEstimateType,
+    trafficSource,
+    trafficObservedAtEpochMs,
+    trafficCache,
     routeFresh: true,
+    trafficFresh: true,
     incidents,
     incidentEvidence: incidents.length ? "fresh_route_corridor_matches_direction_unverified" : "no_fresh_route_corridor_matches"
   };
