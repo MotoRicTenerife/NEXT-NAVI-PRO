@@ -97,7 +97,7 @@ internal class ManeuverLifecycle(
         } else {
             completionEvidence = 0
         }
-        if (passedBy >= 85.0 && !wasExecuting && state != State.COMPLETED) {
+        if (passedBy >= 85.0 && (!wasExecuting || missedEvidence > 0) && state != State.COMPLETED) {
             missedEvidence++
         } else if (passedBy < 85.0) {
             missedEvidence = 0
