@@ -24,6 +24,7 @@ internal class ManeuverLifecycle(
         val matchedAlongRouteMeters: Double,
         val maneuverAlongRouteMeters: Double,
         val matchConfidence: Double,
+        val fixElapsedRealtimeMs: Long,
         val isRoundabout: Boolean = false
     )
 
@@ -38,12 +39,14 @@ internal class ManeuverLifecycle(
     private var state = State.APPROACH
     private var completionEvidence = 0
     private var missedEvidence = 0
+    private var lastEvidenceTimestampMs = Long.MIN_VALUE
 
     fun reset() {
         activeId = null
         state = State.APPROACH
         completionEvidence = 0
         missedEvidence = 0
+        lastEvidenceTimestampMs = Long.MIN_VALUE
     }
 
     fun currentState(): State = state
@@ -54,7 +57,8 @@ internal class ManeuverLifecycle(
             !observation.speedMetersPerSecond.isFinite() || observation.speedMetersPerSecond < 0.0 ||
             !observation.matchedAlongRouteMeters.isFinite() ||
             !observation.maneuverAlongRouteMeters.isFinite() ||
-            !observation.matchConfidence.isFinite() || observation.matchConfidence !in 0.0..1.0
+            !observation.matchConfidence.isFinite() || observation.matchConfidence !in 0.0..1.0 ||
+            observation.fixElapsedRealtimeMs < 0L
         ) return null
 
         if (activeId != observation.maneuverId) {
@@ -62,10 +66,18 @@ internal class ManeuverLifecycle(
             state = State.APPROACH
             completionEvidence = 0
             missedEvidence = 0
+            lastEvidenceTimestampMs = Long.MIN_VALUE
         }
 
         val previous = state
         val trusted = observation.matchConfidence >= 0.55
+        // Do not count the same Android Location twice if guidance and ETA both
+        // evaluate it during one UI cycle. Also require accepted map-match confidence
+        // before advancing any spoken maneuver stage.
+        if (!trusted || observation.fixElapsedRealtimeMs <= lastEvidenceTimestampMs) {
+            return Update(observation.maneuverId, previous, state, false)
+        }
+        lastEvidenceTimestampMs = observation.fixElapsedRealtimeMs
         val speed = observation.speedMetersPerSecond.coerceAtLeast(2.0)
         val etaSeconds = observation.distanceMeters / speed
         val prepareAt = if (observation.isRoundabout) roundaboutPrepareSeconds else normalPrepareSeconds
