@@ -1,0 +1,58 @@
+name: Android Emulator Smoke
+
+on:
+  push:
+    branches: [feat/rollback-safe-app-backup]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emulator-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.7'
+
+      - name: Install Android platform and build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Build Alpha07 and run Android unit tests
+        run: |
+          gradle --no-daemon assembleDebug testDebugUnitTest
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Install and launch on Android emulator (portrait + landscape)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -skin 1080x2400
+          disable-animations: true
+          script: |
+            bash .github/scripts/alpha07-emulator-smoke.sh
+      - name: Upload emulator screenshot
+        uses: actions/upload-artifact@v5
+        with:
+          name: alpha07-emulator-smoke
+          path: alpha07-emulator-smoke.png
+          if-no-files-found: error
+          retention-days: 7
