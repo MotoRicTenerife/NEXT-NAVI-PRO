@@ -3801,7 +3801,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val routeOrigin = currentLocation?.takeIf {
                     it.latitude.isFinite() && it.longitude.isFinite() &&
                         it.latitude in -90.0..90.0 && it.longitude in -180.0..180.0 &&
-                        it.accuracy <= 50f && System.currentTimeMillis() - it.time in 0..120_000L
+                        it.accuracy <= 50f && System.currentTimeMillis() - it.time >= 0L && System.currentTimeMillis() - it.time <= 120_000L
                 }
                 if (routeOrigin != null) {
                     context.put("routeRequest", JSONObject()
