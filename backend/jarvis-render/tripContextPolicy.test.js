@@ -14,6 +14,8 @@ const valid = {
   trafficSource: "TomTom Orbis Traffic Incidents",
   trafficObservedAtEpochMs: now - 30_000,
   trafficCache: "MISS",
+  viaRoadName: "TF-1",
+  baselineRoute: { distanceKm: 17.8, durationSeconds: 1260, routeSource: "Valhalla motorcycle" },
   routeRequest: {
     origin: { latitude: 28.05, longitude: -16.72 },
     destination: { latitude: 28.06, longitude: -16.68 },
@@ -49,6 +51,17 @@ test("rejects malformed or mismatched route requests without rejecting valid tri
   assert.equal(result.routeRequest, null);
   const validResult = sanitizeTripContext(valid, now);
   assert.equal(validResult.routeRequest.vehicleMode, "motorcycle");
+});
+
+test("validates a calculated baseline route for a named-road comparison", () => {
+  const result = sanitizeTripContext(valid, now);
+  assert.equal(result.viaRoadName, "TF-1");
+  assert.equal(result.baselineRoute.distanceKm, 17.8);
+  const invalid = sanitizeTripContext({
+    ...valid,
+    baselineRoute: { ...valid.baselineRoute, routeSource: "Unknown" }
+  }, now);
+  assert.equal(invalid.baselineRoute, null);
 });
 
 test("accepts a fresh route-only context when the incident provider is unavailable", () => {
