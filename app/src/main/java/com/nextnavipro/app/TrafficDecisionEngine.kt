@@ -28,7 +28,10 @@ internal object TrafficDecisionEngine {
         val distanceMeters: Double,
         val confidence: Double,
         val observedAtEpochMs: Long,
-        val hasConfirmedClosure: Boolean
+        val hasConfirmedClosure: Boolean,
+        // Set only after the route provider has returned a route using the requested
+        // vehicle profile and the caller has completed its access/geometry checks.
+        val vehicleAccessVerified: Boolean = false
     )
 
     data class Context(
@@ -90,7 +93,7 @@ internal object TrafficDecisionEngine {
         } else {
             context.alternatives.asSequence()
                 .filter { it.routeId.isNotBlank() && it.routeId != context.activeRouteId }
-                .filter { validRoute(it, context.nowEpochMs) && !it.hasConfirmedClosure }
+                .filter { validRoute(it, context.nowEpochMs) && !it.hasConfirmedClosure && it.vehicleAccessVerified }
                 .filter { it.confidence >= MIN_ROUTE_CONFIDENCE }
                 .filter {
                     val savings = context.activeRoute.etaSeconds - it.etaSeconds
