@@ -109,7 +109,7 @@ export async function fetchTomTomTraffic(location, apiKey, fetchImpl = fetch) {
   flowUrl.search = new URLSearchParams({
     key: apiKey,
     point: location.latitude + "," + location.longitude,
-    unit: "KMPH",
+    unit: "kmph",
     thickness: "10"
   }).toString();
 
@@ -133,10 +133,14 @@ export async function fetchTomTomTraffic(location, apiKey, fetchImpl = fetch) {
     requestJson(flowUrl, fetchImpl, "tomtom_flow"),
     requestJson(incidentUrl, fetchImpl, "tomtom_incidents")
   ]);
-  const flow = flowOutcome.status === "fulfilled" ? parseFlow(flowOutcome.value) : null;
-  const incidents = incidentsOutcome.status === "fulfilled"
-    ? parseIncidents(incidentsOutcome.value, location)
-    : null;
+  let flow = null;
+  let incidents = null;
+  if (flowOutcome.status === "fulfilled") {
+    try { flow = parseFlow(flowOutcome.value); } catch { flow = null; }
+  }
+  if (incidentsOutcome.status === "fulfilled") {
+    try { incidents = parseIncidents(incidentsOutcome.value, location); } catch { incidents = null; }
+  }
   if (!flow && !incidents) {
     const reasons = [flowOutcome, incidentsOutcome]
       .filter(result => result.status === "rejected")
