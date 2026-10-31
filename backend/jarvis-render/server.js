@@ -4,6 +4,7 @@ import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePo
 import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
 import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { sanitizeTripContext } from "./tripContextPolicy.js";
+import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
 const MAX_BODY_BYTES = 48 * 1024;
@@ -26,6 +27,10 @@ const trafficIncidentLimiter = createFixedWindowLimiter({ max: 24, windowMs: WIN
 const trafficIncidentCache = new Map();
 const TRAFFIC_INCIDENT_CACHE_MS = 30000;
 const TRAFFIC_INCIDENT_CACHE_MAX = 300;
+const trafficRoutingLimiter = createFixedWindowLimiter({ max: 8, windowMs: WINDOW_MS });
+const trafficRoutingCache = new Map();
+const TRAFFIC_ROUTING_CACHE_MS = 30_000;
+const TRAFFIC_ROUTING_CACHE_MAX = 150;
 const speedLimitGuard = createSpeedLimitGuard({
   burst: clampInt(process.env.TOMTOM_RATE_BURST, 30, 1, 500),
   refillMs: clampInt(process.env.TOMTOM_RATE_REFILL_MS, 5000, 500, 600000),
@@ -551,6 +556,56 @@ async function handleTrafficIncidents(req, res, url) {
   }
 }
 
+
+async function handleTomTomTrafficRoute(req, res) {
+  if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+  if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true") {
+    return send(res, 503, { error: "TomTom traffic-aware routing is not enabled" });
+  }
+  const apiKey = process.env.TOMTOM_API_KEY;
+  if (!apiKey) return send(res, 503, { error: "TomTom routing provider not configured" });
+  const ip = getClientIp(req);
+  const admission = trafficRoutingLimiter.take(ip, Date.now());
+  if (!admission.allowed) {
+    return send(res, 429, { error: "TomTom route request limit reached", retryAfterMs: admission.retryAfterMs });
+  }
+  let input;
+  try {
+    input = await readJson(req);
+  } catch (error) {
+    return send(res, error.statusCode || 400, { error: "Invalid route request body" });
+  }
+  const normalized = validateTomTomRouteRequest(input);
+  if (!normalized) return send(res, 400, { error: "Origin, destination, vehicleMode and up to three valid waypoints are required" });
+  const cacheKey = JSON.stringify(normalized);
+  const cached = trafficRoutingCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
+    return send(res, 200, { ...cached.value, cache: "HIT" });
+  }
+  try {
+    const result = await fetchTomTomTrafficRoutes(normalized, { apiKey });
+    if (!result.routes.length) {
+      return send(res, 409, { ...result, error: "TomTom did not verify the requested vehicle mode for a complete route" });
+    }
+    trafficRoutingCache.set(cacheKey, { cachedAt: Date.now(), value: result });
+    if (trafficRoutingCache.size > TRAFFIC_ROUTING_CACHE_MAX) {
+      for (const [key, value] of trafficRoutingCache) {
+        if (Date.now() - value.cachedAt >= TRAFFIC_ROUTING_CACHE_MS) trafficRoutingCache.delete(key);
+        if (trafficRoutingCache.size <= TRAFFIC_ROUTING_CACHE_MAX) break;
+      }
+    }
+    return send(res, 200, { ...result, cache: "MISS" });
+  } catch (error) {
+    const providerStatus = Number.isInteger(error.statusCode) ? error.statusCode : null;
+    console.warn("TomTom traffic-aware route lookup failed", { providerStatus });
+    if (providerStatus === 400) return send(res, 400, { error: "TomTom rejected the route request" });
+    if (providerStatus === 429) return send(res, 429, { error: "TomTom routing quota temporarily unavailable" });
+    if (providerStatus === 403) return send(res, 503, { error: "TomTom routing access is not enabled for this key" });
+    return send(res, 502, { error: "TomTom routing provider unavailable" });
+  }
+}
+
+
 async function handle(req, res) {
   let url;
   try {
@@ -562,7 +617,16 @@ async function handle(req, res) {
   if (url.pathname === "/speed-limit-segments" || url.pathname === "/speed-limit-segments/upsert") { return handleCloudSpeedSegments(req, res, url); }
   if (url.pathname.startsWith("/traffic/flow/")) return handleTrafficFlowTile(req, res, url);
   if (url.pathname === "/traffic/incidents") return handleTrafficIncidents(req, res, url);
+  if (url.pathname === "/traffic/route") return handleTomTomTrafficRoute(req, res);
 
+  if (req.method === "GET" && url.pathname === "/traffic/status") {
+    return send(res, 200, {
+      ok: true,
+      tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
+      incidentDetailsEnabled: process.env.TRAFFIC_INCIDENTS_ENABLED === "true",
+      trafficAwareRoutingEnabled: process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true"
+    });
+  }
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
   }
