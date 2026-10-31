@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import {
   isTomTomTrafficFlowEnabled,
   isTomTomTrafficIncidentsEnabled,
+  isTomTomTrafficSegmentEnabled,
   isTomTomTrafficRoutingEnabled
 } from "./trafficFeaturePolicy.js";
 
 const features = [
   ["flow tiles", isTomTomTrafficFlowEnabled],
   ["incident details", isTomTomTrafficIncidentsEnabled],
+  ["nearby flow segment queries", isTomTomTrafficSegmentEnabled],
   ["traffic-aware routing", isTomTomTrafficRoutingEnabled]
 ];
 

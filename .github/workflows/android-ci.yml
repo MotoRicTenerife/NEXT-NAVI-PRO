@@ -169,7 +169,9 @@ jobs:
                           raise RuntimeError("Render traffic diagnostics endpoint returned an invalid payload")
                       print("Render traffic feature status:", {
                           "tomtomConfigured": traffic_status.get("tomtomConfigured"),
+                          "trafficFlowEnabled": traffic_status.get("trafficFlowEnabled"),
                           "incidentDetailsEnabled": traffic_status.get("incidentDetailsEnabled"),
+                          "trafficSegmentEnabled": traffic_status.get("trafficSegmentEnabled"),
                           "trafficAwareRoutingEnabled": traffic_status.get("trafficAwareRoutingEnabled")
                       })
                   except Exception as error:
@@ -255,6 +257,28 @@ jobs:
                               "model": traffic_diag.get("model"),
                               "trafficContext": traffic_diag.get("trafficContext"),
                               "reply": traffic_reply[:220]
+                          })
+                          nearby_status, nearby_result = post_json(endpoint, {
+                              "message":"How is traffic around my current location right now? Check the nearest road segment and reported incidents. Use only verified TomTom data.",
+                              "language":"en-GB",
+                              "location":{"latitude":28.05,"longitude":-16.68},
+                              "vehicleMode":"car"
+                          }, 45)
+                          nearby_reply = nearby_result.get("reply", "")
+                          nearby_diag = nearby_result.get("diagnostics", {})
+                          nearby_data = nearby_diag.get("nearbyTraffic") or {}
+                          if (nearby_status != 200 or not nearby_reply.strip() or
+                              nearby_diag.get("responseMode") != "gemini" or
+                              nearby_diag.get("trafficContext") != "tomtom_nearby_loaded" or
+                              nearby_diag.get("language") != "en-GB" or
+                              nearby_data.get("segmentAvailable") is not True or
+                              nearby_data.get("incidentsAvailable") is not True):
+                              raise RuntimeError("End-to-end Gemini/TomTom nearby traffic verification failed: diagnostics=" + repr(nearby_diag) + "; reply=" + repr(nearby_reply[:240]))
+                          print("Render Jarvis Gemini + TomTom nearby traffic check PASSED:", {
+                              "trafficContext": nearby_diag.get("trafficContext"),
+                              "nearestSegment": nearby_data.get("segmentAvailable"),
+                              "nearbyIncidents": nearby_data.get("incidentsAvailable"),
+                              "reply": nearby_reply[:220]
                           })
                       except Exception as error:
                           if isinstance(error, urllib.error.HTTPError):
