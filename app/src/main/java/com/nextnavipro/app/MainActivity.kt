@@ -2560,15 +2560,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }.setNegativeButton(appText("Annulla"), null).show()
     }
 
-    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> =
-        getSharedPreferences(PREFS, MODE_PRIVATE).all.filterKeys { it.startsWith("favorite_") }
+    private fun readFavoriteAddresses(): List<Triple<String, Double, Double>> {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val entries = prefs.all.filterKeys { it.startsWith("favorite_") }
             .mapNotNull { (key, value) ->
                 val coords = (value as? String)?.split(",") ?: return@mapNotNull null
                 val lat = coords.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
                 val lon = coords.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
                 if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return@mapNotNull null
                 Triple(key.removePrefix("favorite_"), lat, lon)
-            }.sortedBy { it.first.lowercase(Locale.ROOT) }
+            }.toMutableList()
+
+        // Home is stored separately for navigation compatibility, but is managed in Preferiti too.
+        val homeName = prefs.getString("home_name", null)?.trim().orEmpty()
+        val homeLat = prefs.getString("home_lat", null)?.toDoubleOrNull()
+        val homeLon = prefs.getString("home_lon", null)?.toDoubleOrNull()
+        if (homeName.isNotBlank() && homeLat != null && homeLon != null &&
+            homeLat in -90.0..90.0 && homeLon in -180.0..180.0
+        ) {
+            entries.add(Triple("⌂ Casa: $homeName", homeLat, homeLon))
+        }
+        return entries.sortedBy { it.first.lowercase(Locale.ROOT) }
+    }
 
     private fun showFavoriteAddresses() {
         val favorites = readFavoriteAddresses()
@@ -2576,12 +2589,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             Toast.makeText(this, "Nessun indirizzo preferito salvato.", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this).setTitle("Indirizzi preferiti")
+        AlertDialog.Builder(this).setTitle("Preferiti e luoghi salvati")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
                 val favorite = favorites[which]
-                destination = PlaceResult(favorite.first, NavPoint(favorite.second, favorite.third), "Indirizzo preferito")
-                destinationInput.setText(favorite.first)
-                routeText.text = "DESTINAZIONE: " + favorite.first + "\nPremi AVVIA NAVIGAZIONE"
+                val isHome = favorite.first.startsWith("⌂ Casa: ")
+                val displayName = if (isHome) favorite.first.removePrefix("⌂ Casa: ") else favorite.first
+                val description = if (isHome) getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("home_description", "").orEmpty() else "Indirizzo preferito"
+                destination = PlaceResult(displayName, NavPoint(favorite.second, favorite.third), description)
+                destinationInput.setText(displayName)
+                routeText.text = "DESTINAZIONE: " + displayName + "\\nPremi AVVIA NAVIGAZIONE"
             }.setNegativeButton("Chiudi", null).show()
     }
 
@@ -2593,8 +2610,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         AlertDialog.Builder(this).setTitle("Elimina preferito")
             .setItems(favorites.map { it.first }.toTypedArray()) { _, which ->
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("favorite_" + favorites[which].first).apply()
-                Toast.makeText(this, "Preferito eliminato.", Toast.LENGTH_SHORT).show()
+                val selectedName = favorites[which].first
+                val editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                if (selectedName.startsWith("⌂ Casa: ")) {
+                    editor.remove("home_name")
+                        .remove("home_description")
+                        .remove("home_lat")
+                        .remove("home_lon")
+                        .remove("poi_home_marker")
+                        .remove("favorite_Casa")
+                } else {
+                    editor.remove("favorite_" + selectedName)
+                }
+                val removed = editor.commit()
+                refreshSavedPoiMarkers()
+                Toast.makeText(
+                    this,
+                    if (removed) "Preferito eliminato." else "Impossibile eliminare il preferito.",
+                    Toast.LENGTH_SHORT
+                ).show()
             }.setNegativeButton(appText("Annulla"), null).show()
     }
 
