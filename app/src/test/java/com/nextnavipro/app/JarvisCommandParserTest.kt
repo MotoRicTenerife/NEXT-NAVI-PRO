@@ -144,6 +144,8 @@ class JarvisCommandParserTest {
         assertEquals(JarvisCommand.Navigate("Guaza"), JarvisCommandParser.parse("Voglio andare a Guaza"))
         assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Portami a Los Cristianos"))
         assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Vorrei andare ad Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Portami ad Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Voglio andare ad Adeje"))
     }
 
     @Test fun unknownRequestsDoNotBecomeInventedDestinations() {
