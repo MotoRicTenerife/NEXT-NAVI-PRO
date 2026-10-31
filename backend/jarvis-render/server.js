@@ -5,6 +5,10 @@ import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePo
 import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
 import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { sanitizeTripContext } from "./tripContextPolicy.js";
+import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
+import { normalizeLanguageTag } from "./languagePolicy.js";
+import { isTrafficQuery } from "./trafficIntent.js";
+import { isTomTomTrafficRoutingEnabled } from "./trafficFeaturePolicy.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -191,66 +195,6 @@ async function fetchMetNoWeather(location) {
   const codeMap = { clearsky_day: 0, clearsky_night: 0, fair_day: 1, fair_night: 1, partlycloudy_day: 2, partlycloudy_night: 2, cloudy: 3, fog: 45, lightrain: 61, rain: 63, heavyrain: 65, lightsleet: 71, sleet: 73, heavysleet: 75, lightrainshowers_day: 80, rainshowers_day: 81, heavyrainshowers_day: 82, thunderstorm: 95 };
   return { source: "MET Norway", fetchedAt: new Date().toISOString(), validTime: first.time, temperatureC: details.air_temperature, feelsLikeC: details.air_temperature, humidityPercent: details.relative_humidity, precipitationMm: first.data.next_1_hours?.details?.precipitation_amount ?? first.data.next_6_hours?.details?.precipitation_amount ?? 0, weatherCode: codeMap[symbol] ?? null, weatherSymbol: symbol, windKmh: Math.round(details.wind_speed * 36) / 10, windDirectionDegrees: details.wind_from_direction, gustKmh: Number.isFinite(details.wind_speed_of_gust) ? Math.round(details.wind_speed_of_gust * 36) / 10 : null };
 }
-function xmlText(block, names) {
-  for (const name of names) {
-    const pattern = "<(?:[\\w.-]+:)?" + name + "\\b[^>]*>([\\s\\S]*?)</(?:[\\w.-]+:)?" + name + ">";
-    const match = block.match(new RegExp(pattern, "i"));
-    if (match) return match[1].replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim().slice(0, 220);
-  }
-  return "";
-}
-
-async function fetchDgtTraffic(location) {
-  const resourceId = "1d36ea74-593d-4e45-acfa-fb8db5a460bc";
-  const metadataResponse = await fetch("https://nap.dgt.es/api/3/action/resource_show?id=" + resourceId, {
-    signal: AbortSignal.timeout(7000),
-    headers: { "accept": "application/json" }
-  });
-  if (!metadataResponse.ok) throw new Error("DGT resource metadata HTTP " + metadataResponse.status);
-  const metadata = await metadataResponse.json();
-  const resourceUrl = metadata?.result?.url;
-  if (!metadata?.success || typeof resourceUrl !== "string" || !resourceUrl.startsWith("https://")) {
-    throw new Error("DGT resource URL unavailable");
-  }
-  const response = await fetch(resourceUrl, { signal: AbortSignal.timeout(9000), headers: { "accept": "application/xml,text/xml,*/*" } });
-  if (!response.ok) throw new Error("DGT feed HTTP " + response.status);
-  const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > 5 * 1024 * 1024) throw new Error("DGT feed too large");
-  const xml = await response.text();
-  if (xml.length > 5 * 1024 * 1024) throw new Error("DGT feed too large");
-  const records = [];
-  const recordPattern = /<(?:[\w.-]+:)?situationRecord\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?situationRecord>/gi;
-  let match;
-  while ((match = recordPattern.exec(xml)) !== null) {
-    const block = match[1];
-    const latText = xmlText(block, ["latitude"]);
-    const lonText = xmlText(block, ["longitude"]);
-    if (!latText || !lonText) continue;
-    const lat = Number(latText);
-    const lon = Number(lonText);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) continue;
-    const distanceKm = haversineKm(location, { latitude: lat, longitude: lon });
-    if (distanceKm > 30) continue;
-    records.push({
-      distanceKm: Math.round(distanceKm * 10) / 10,
-      road: xmlText(block, ["roadNumber", "roadName", "descriptor"]),
-      description: xmlText(block, ["description", "value", "cause"]),
-      status: xmlText(block, ["validityStatus", "impactOnTraffic", "probabilityOfOccurrence"]),
-      startTime: xmlText(block, ["overallStartTime", "situationRecordCreationTime"])
-    });
-    if (records.length >= 12) break;
-  }
-  return {
-    source: "DGT / Punto de Acceso Nacional de Tráfico, incidencias DATEX2 v3.7",
-    fetchedAt: new Date().toISOString(),
-    coverageRadiusKm: 30,
-    incidents: records,
-    note: records.length
-      ? "Only geolocated incidents explicitly present in the feed; this is not a complete measure of traffic speed."
-      : "No geolocated DGT incidents found in the feed within 30 km. This does NOT prove traffic is flowing freely."
-  };
-}
-
 async function readJson(req) {
   const chunks = [];
   let size = 0;
@@ -559,9 +503,41 @@ async function handleTrafficIncidents(req, res, url) {
 }
 
 
+async function fetchTomTomTrafficRoutesCached(input, clientIp, language = "en-GB") {
+  const normalized = validateTomTomRouteRequest(input);
+  if (!normalized) {
+    const error = new Error("Invalid route request");
+    error.statusCode = 400;
+    throw error;
+  }
+  const safeLanguage = normalizeLanguageTag(language);
+  const cacheKey = JSON.stringify({ ...normalized, language: safeLanguage });
+  const cached = trafficRoutingCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
+    return { ...cached.value, cache: "HIT" };
+  }
+  const admission = trafficRoutingLimiter.check(clientIp, Date.now());
+  if (!admission.allowed) {
+    const error = new Error("TomTom route request rate limit reached");
+    error.code = "rate_limited";
+    error.statusCode = 429;
+    throw error;
+  }
+  const result = await fetchTomTomTrafficRoutes(normalized, { apiKey: process.env.TOMTOM_API_KEY, language: safeLanguage });
+  if (result.routes.length) {
+    trafficRoutingCache.set(cacheKey, { cachedAt: Date.now(), value: result });
+    while (trafficRoutingCache.size > TRAFFIC_ROUTING_CACHE_MAX) {
+      const oldest = trafficRoutingCache.keys().next().value;
+      if (oldest === undefined) break;
+      trafficRoutingCache.delete(oldest);
+    }
+  }
+  return { ...result, cache: "MISS" };
+}
+
 async function handleTomTomTrafficRoute(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
-  if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true") {
+  if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
     return send(res, 503, { error: "TomTom traffic-aware routing is not enabled" });
   }
   const apiKey = process.env.TOMTOM_API_KEY;
@@ -579,13 +555,14 @@ async function handleTomTomTrafficRoute(req, res) {
   }
   const normalized = validateTomTomRouteRequest(input);
   if (!normalized) return send(res, 400, { error: "Origin, destination, vehicleMode and up to three valid waypoints are required" });
-  const cacheKey = JSON.stringify(normalized);
+  const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
+  const cacheKey = JSON.stringify({ ...normalized, language });
   const cached = trafficRoutingCache.get(cacheKey);
   if (cached && Date.now() - cached.cachedAt < TRAFFIC_ROUTING_CACHE_MS) {
     return send(res, 200, { ...cached.value, cache: "HIT" });
   }
   try {
-    const result = await fetchTomTomTrafficRoutes(normalized, { apiKey });
+    const result = await fetchTomTomTrafficRoutes(normalized, { apiKey, language });
     if (!result.routes.length) {
       return send(res, 409, { ...result, error: "TomTom did not verify the requested vehicle mode for a complete route" });
     }
@@ -643,7 +620,7 @@ async function handle(req, res) {
       ok: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
       incidentDetailsEnabled: process.env.TRAFFIC_INCIDENTS_ENABLED === "true",
-      trafficAwareRoutingEnabled: process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true"
+      trafficAwareRoutingEnabled: isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)
     });
   }
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
@@ -1046,9 +1023,7 @@ async function handle(req, res) {
   const message = typeof input?.message === "string"
     ? input.message.trim().slice(0, MAX_REQUEST_CHARS)
     : "";
-  const language = typeof input?.language === "string"
-    ? input.language.trim().slice(0, 20) || "it-IT"
-    : "it-IT";
+  const language = normalizeLanguageTag(input?.language, req.headers["accept-language"] || "en-GB");
   const assistantName = typeof input?.assistantName === "string"
     ? input.assistantName.trim().replace(/[<>\r\n]/g, "").slice(0, 30) || "Jarvis"
     : "Jarvis";
@@ -1068,9 +1043,13 @@ async function handle(req, res) {
       })
     : [];
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
+  let liveContext = "";
+  let trafficRouteResult = null;
+  let trafficDestination = "";
+  let trafficFailureCode = null;
   const tripContext = sanitizeTripContext(input?.tripContext);
   if (tripContext?.routeRequest) {
-    if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
+    if (isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
       const routeJobs = [
         {
           label: tripContext.viaRoadName ? "TOMTOM WAYPOINT ROUTE VIA " + tripContext.viaRoadName : "TOMTOM REQUESTED ROUTE",
@@ -1086,23 +1065,24 @@ async function handle(req, res) {
         }] : [])
       ];
       const routeResults = await Promise.all(routeJobs.map(async job => {
-        const admission = trafficRoutingLimiter.check(getClientIp(req), Date.now());
-        if (!admission.allowed) return { job, error: "rate_limited" };
         try {
-          const result = await fetchTomTomTrafficRoutes(job.request, {
-            apiKey: process.env.TOMTOM_API_KEY
-          });
+          const result = await fetchTomTomTrafficRoutesCached(job.request, getClientIp(req), language);
           return { job, result };
         } catch (error) {
-          return { job, error: Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable" };
+          return { job, error: error?.code || (Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable") };
         }
       }));
       for (const item of routeResults) {
         if (!item.result) {
+          if (item.job.includeAlternatives) trafficFailureCode = item.error || "provider_unavailable";
           liveContext += "\n" + item.job.label + " UNAVAILABLE (" + item.error + "). Do not invent its live ETA or traffic delay.";
           continue;
         }
         const result = item.result;
+        if (item.job.includeAlternatives) {
+          trafficRouteResult = result;
+          trafficDestination = tripContext.destinationName;
+        }
         const routes = item.job.includeAlternatives ? result.routes : result.routes.filter(route => route.routeId === "primary");
         const compactRoutes = routes.map(({ points, trafficSections, ...route }) => ({
           ...route,
@@ -1124,6 +1104,7 @@ async function handle(req, res) {
           distanceDiscrepancy
         });
         if (!primary) {
+          if (item.job.includeAlternatives) trafficFailureCode = "vehicle_mode_unverified";
           liveContext += "\nNO PRIMARY TOMTOM ROUTE WAS VERIFIED FOR " + item.job.label + ". Do not present a live ETA for it.";
         }
         if (distanceDiscrepancy) {
@@ -1134,6 +1115,7 @@ async function handle(req, res) {
         liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom travelMode=motorcycle is beta and restriction data is not complete in every area. Use it only as a traffic-aware cross-check when every returned travel-mode section is verified. Keep the Valhalla motorcycle route as the navigation baseline; never silently replace it or claim full legal-access certainty.";
       }
     } else {
+      trafficFailureCode = "tomtom_routing_disabled";
       liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS NOT ENABLED ON THE SERVER. Do not present the Valhalla baseline as a live-traffic ETA or claim a verified traffic delay.";
     }
   }
@@ -1174,13 +1156,11 @@ async function handle(req, res) {
     return send(res, 400, { error: "Message is required" });
   }
 
-  let liveContext = "";
   let weatherResult = null;
   let weatherFailureCode = null;
-  let trafficResult = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
-  const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code)\b/.test(normalizedMessage);
+  const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual|wetter|regen|pluie|temps actuel|chuva|previsao do tempo|tempo agora|weer|rain|wind)\b/.test(normalizedMessage);
+  const asksTraffic = isTrafficQuery(message);
 
   if (asksWeather && location) {
     try {
@@ -1203,15 +1183,72 @@ async function handle(req, res) {
     liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask for a location or say local weather cannot be verified.";
   }
 
-  if (asksTraffic && location && !tripContext) {
-    try {
-      trafficResult = await fetchDgtTraffic(location);
-      liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(trafficResult);
-    } catch {
-      liveContext += "\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
+  if (asksTraffic && !tripContext) {
+    trafficDestination = extractTrafficDestination(message);
+    const vehicleMode = input?.vehicleMode === "car" ? "car" : "motorcycle";
+    if (!location) {
+      trafficFailureCode = "missing_location";
+      liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask the user to enable location or provide a starting point. Do not refer the user to an external traffic website.";
+    } else if (!trafficDestination) {
+      trafficFailureCode = "missing_destination";
+      liveContext += "\nNO EXPLICIT DESTINATION WAS FOUND: ask the user where they want to go. Do not guess a destination and do not substitute a generic nearby-incident lookup.";
+    } else if (!isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)) {
+      trafficFailureCode = "tomtom_routing_disabled";
+      liveContext += "\nTOMTOM LIVE TRAFFIC ROUTING IS NOT ENABLED OR CONFIGURED ON THE SERVER. State that TomTom traffic cannot currently be verified. Do not use another provider as a fallback and do not invent traffic conditions.";
+    } else {
+      try {
+        const destination = await geocodeTrafficDestination(trafficDestination, location);
+        if (!destination) {
+          trafficFailureCode = "destination_not_found";
+          throw new Error("Destination could not be resolved near the current GPS fix");
+        }
+        const result = await fetchTomTomTrafficRoutesCached({
+          origin: location,
+          destination: destination.point,
+          vehicleMode
+        }, getClientIp(req), language);
+        const primary = result.routes.find(route => route.routeId === "primary");
+        if (!primary) {
+          trafficFailureCode = "vehicle_mode_unverified";
+          throw new Error("TomTom did not verify a complete route for the requested vehicle mode");
+        }
+        trafficRouteResult = result;
+        liveContext += "\nVERIFIED TOMTOM LIVE-TRAFFIC ROUTE: " + JSON.stringify({
+          source: result.source,
+          destination: destination.displayName,
+          destinationDistanceFromOriginKm: destination.distanceKm,
+          observedAtEpochMs: result.observedAtEpochMs,
+          vehicleMode: result.vehicleMode,
+          motorcycleModeBeta: result.motorcycleModeBeta,
+          primaryRoute: {
+            lengthInMeters: primary.lengthInMeters,
+            travelTimeInSeconds: primary.travelTimeInSeconds,
+            trafficDelayInSeconds: primary.trafficDelayInSeconds,
+            noTrafficTravelTimeInSeconds: primary.noTrafficTravelTimeInSeconds,
+            historicTrafficTravelTimeInSeconds: primary.historicTrafficTravelTimeInSeconds,
+            liveTrafficIncidentsTravelTimeInSeconds: primary.liveTrafficIncidentsTravelTimeInSeconds,
+            trafficLengthInMeters: primary.trafficLengthInMeters,
+            trafficSections: primary.trafficSections.slice(0, 12)
+          },
+          alternatives: result.routes.filter(route => route.routeId !== "primary").map(route => ({
+            routeId: route.routeId,
+            lengthInMeters: route.lengthInMeters,
+            travelTimeInSeconds: route.travelTimeInSeconds,
+            trafficDelayInSeconds: route.trafficDelayInSeconds
+          }))
+        });
+        if (result.motorcycleModeBeta) {
+          liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom motorcycle routing is beta. Use the verified response as a traffic cross-check, not as proof of every legal motorcycle restriction.";
+        }
+      } catch (error) {
+        if (!trafficFailureCode) trafficFailureCode = error?.code || (Number.isInteger(error?.statusCode) && error.statusCode === 429 ? "rate_limited" : error instanceof Error && error.message.includes("geocoder") ? "geocoder_unavailable" : "provider_unavailable");
+        console.warn("Jarvis TomTom destination traffic lookup failed", {
+          failureCode: trafficFailureCode,
+          errorType: error instanceof Error ? error.name : "UnknownError"
+        });
+        liveContext += "\nTOMTOM DESTINATION TRAFFIC LOOKUP FAILED (" + trafficFailureCode + "): say traffic could not be verified. Do not refer to an external map and do not guess.";
+      }
     }
-  } else if (asksTraffic && !tripContext) {
-    liveContext += "\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
   }
 
   const instructions = "You are " + assistantName + ", the user-renamed spoken conversational assistant for NEXT NAVI PRO. Your name is exactly " +
@@ -1245,20 +1282,31 @@ async function handle(req, res) {
       }
     }
     if (asksTraffic) {
-      if (trafficResult) {
-        if (trafficResult.incidents.length) {
-          const summaries = trafficResult.incidents.slice(0, 3)
-            .map(item => [item.road, item.description].filter(Boolean).join(": "))
-            .filter(Boolean);
-          fallbackReplies.push("La DGT segnala " + trafficResult.incidents.length +
-            " incidenza/e geolocalizzata/e entro 30 km. " +
-            (summaries.length ? summaries.join(". ") + ". " : "") +
-            "Sono segnalazioni di incidenti, non una misura completa della velocità del traffico.");
-        } else {
-          fallbackReplies.push("Nel feed DGT non ho trovato incidenti geolocalizzati entro 30 km. Questo non significa che il traffico sia scorrevole.");
-        }
+      const primary = trafficRouteResult?.routes?.find(route => route.routeId === "primary");
+      if (primary) {
+        const etaMinutes = Math.max(1, Math.round(primary.travelTimeInSeconds / 60));
+        const delaySeconds = primary.trafficDelayInSeconds;
+        const sections = Array.isArray(primary.trafficSections) ? primary.trafficSections : [];
+        const sectionLabels = [...new Set(sections.map(section => section.simpleCategory).filter(Boolean))].slice(0, 3);
+        const delayText = Number.isFinite(delaySeconds)
+          ? delaySeconds > 0 ? "ritardo stimato di circa " + Math.round(delaySeconds / 60) + " minuti rispetto al traffico libero"
+            : "nessun ritardo aggiuntivo significativo riportato dal calcolo"
+          : "ritardo complessivo non disponibile";
+        fallbackReplies.push("Verifica traffico TomTom per " + (trafficDestination || "la destinazione richiesta") +
+          ": circa " + etaMinutes + " minuti per " + (primary.lengthInMeters / 1000).toFixed(1) +
+          " km; " + delayText + "." +
+          (sectionLabels.length ? " Sezioni trafficate: " + sectionLabels.join(", ") + "." : "") +
+          " Dato aggiornato al momento della richiesta; l'assenza di sezioni segnalate non garantisce strada libera.");
       } else {
-        fallbackReplies.push("Non riesco a verificare il traffico in tempo reale. Puoi consultare la mappa ufficiale DGT su infocar.dgt.es/etraffic.");
+        const messages = {
+          missing_location: "Per controllare il traffico TomTom mi serve una posizione GPS attuale.",
+          missing_destination: "Dimmi la destinazione e controllo il traffico TomTom lungo il percorso.",
+          tomtom_routing_disabled: "Il servizio di traffico TomTom non è ancora abilitato sul server, quindi non posso verificare il percorso.",
+          destination_not_found: "Non riesco a identificare con sufficiente certezza la destinazione indicata.",
+          vehicle_mode_unverified: "TomTom non ha restituito un percorso verificato per il tipo di veicolo richiesto.",
+          rate_limited: "La richiesta TomTom è temporaneamente limitata. Riprova tra poco."
+        };
+        fallbackReplies.push(messages[trafficFailureCode] || "Non riesco a verificare il traffico tramite TomTom in questo momento.");
       }
     }
     if (fallbackReplies.length) {
@@ -1338,11 +1386,12 @@ async function handle(req, res) {
     diagnostics: {
       responseMode,
       model,
+      language,
       historyMessages: history.length,
       tripContextAccepted: Boolean(tripContext),
       trafficContext: tripContext
-        ? tripContext.trafficUnavailable ? "unavailable" : tripContext.incidents.length ? "fresh_incidents" : "fresh_no_route_match"
-        : asksTraffic ? trafficResult ? "dgt_feed_loaded" : "not_verified" : "not_requested",
+        ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || (tripContext.trafficUnavailable ? "incident_details_unavailable" : tripContext.incidents.length ? "fresh_incidents" : "fresh_no_route_match")
+        : asksTraffic ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || "not_verified" : "not_requested",
       weatherStatus: asksWeather ? weatherResult ? "verified" : weatherFailureCode || "not_verified" : "not_requested"
     }
   });

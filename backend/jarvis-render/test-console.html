@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#101a24"><title>NEXT NAVI PRO · Jarvis Lab</title>
@@ -45,19 +45,21 @@ button,input,select,textarea{font:inherit}button{border:1px solid #3b5668;backgr
    <div class="field"><label for="concision">Sintesi <b id="concisionV">75</b></label><input id="concision" type="range" min="0" max="100" value="75"></div>
   </div>
   <div class="divider"></div>
-  <div class="field"><label>Posizione GPS (facoltativa, necessaria per meteo/traffico locale)</label><div class="grid2"><input id="lat" inputmode="decimal" placeholder="Latitudine"><input id="lon" inputmode="decimal" placeholder="Longitudine"></div></div>
+  <div class="field"><label for="trafficDestination">Destinazione per la verifica traffico</label><input id="trafficDestination" value="Los Cristianos" maxlength="120" placeholder="Es. Los Cristianos"></div>
+  <div class="field"><label for="vehicleMode">Tipo di veicolo per TomTom</label><select id="vehicleMode"><option value="motorcycle" selected>Modalità moto</option><option value="car">Modalità auto</option></select></div>
+  <div class="field"><label>Posizione GPS attuale (necessaria per il percorso)</label><div class="grid2"><input id="lat" inputmode="decimal" placeholder="Latitudine"><input id="lon" inputmode="decimal" placeholder="Longitudine"></div></div>
   <div class="toolbar"><button id="getGps" class="small">Usa GPS del dispositivo</button><button id="clearGps" class="small">Rimuovi GPS</button></div>
   <div class="divider"></div>
   <h2 style="font-size:14px;margin:0 0 10px">Test guidati · conversazione reale</h2>
   <div class="quick">
    <button id="testMemory">① Continuità: ricorda una destinazione</button>
    <button id="testFollow">② Follow-up: “E passando dalla TF-1?”</button>
-   <button id="testTraffic">③ Traffico locale verificato</button>
+   <button id="testTraffic">③ Traffico TomTom sul percorso</button>
    <button id="testWeather">④ Meteo locale verificato</button>
   </div>
   <div id="suiteResult" class="result" hidden></div>
  </div>
- <div class="footer">I test ③ e ④ richiedono una posizione GPS autorizzata. Il test ② verifica anche che Jarvis non inventi tempi o percorsi se manca un itinerario calcolato. Non usare il telefono durante la guida.</div>
+ <div class="footer">Il test ③ richiede GPS e destinazione: calcola un percorso senza avviare la navigazione e interroga TomTom. Il test ④ richiede GPS. La modalità moto usa il profilo TomTom motorcycle beta, se abilitato sul server. Non usare il telefono durante la guida.</div>
 </aside>
 </main>
 <script>
@@ -65,7 +67,23 @@ button,input,select,textarea{font:inherit}button{border:1px solid #3b5668;backgr
 "use strict";
 const $=id=>document.getElementById(id);
 const chat=$("chat"), input=$("message"), send=$("send");
+const deviceLanguage=(navigator.languages&&navigator.languages[0])||navigator.language||"en-GB";
+const languageBase=deviceLanguage.split("-")[0].toLowerCase();
+document.documentElement.lang=deviceLanguage;
+$("healthText").title="Device language: "+deviceLanguage;
 let messages=[], busy=false, voiceOn=false, recognition=null;
+function localizedPrompt(key,destination){
+ const prompts={
+  it:{traffic:"Che traffico c'è per andare da qui a "+destination+"? Usa i dati aggiornati, indica tempo di percorrenza e ritardo se disponibili e distingui i dati mancanti dall'assenza di traffico.",weather:"Com'è il meteo adesso nella mia posizione? Indica fonte e orario del dato.",memory:"Per questa prova, la mia destinazione si chiama Los Cristianos. Tienilo a mente durante la conversazione.",follow:"E passando dalla TF-1?"},
+  es:{traffic:"¿Qué tráfico hay desde aquí hasta "+destination+"? Usa datos actualizados, indica el tiempo de viaje y los retrasos si están disponibles, y distingue los datos que faltan de la ausencia de tráfico.",weather:"¿Qué tiempo hace ahora en mi ubicación? Indica la fuente y la hora del dato.",memory:"Para esta prueba, mi destino es Los Cristianos. Recuérdalo durante la conversación.",follow:"¿Y pasando por la TF-1?"},
+  en:{traffic:"What's the traffic like from here to "+destination+"? Use current verified data, give travel time and delay if available, and distinguish missing data from no traffic.",weather:"What's the weather like at my current location? Give the source and observation time.",memory:"For this test, my destination is Los Cristianos. Remember it during this conversation.",follow:"What about going via the TF-1?"},
+  fr:{traffic:"Quelle est la circulation d'ici à "+destination+" ? Utilise des données à jour, indique le temps de trajet et les retards si disponibles, et distingue les données manquantes de l'absence de trafic.",weather:"Quel temps fait-il actuellement à ma position ? Indique la source et l'heure de l'observation.",memory:"Pour ce test, ma destination est Los Cristianos. Garde-la en mémoire pendant la conversation.",follow:"Et en passant par la TF-1 ?"},
+  de:{traffic:"Wie ist die Verkehrslage von hier nach "+destination+"? Verwende aktuelle geprüfte Daten, nenne Fahrzeit und Verzögerung, sofern verfügbar, und unterscheide fehlende Daten von freier Fahrt.",weather:"Wie ist das aktuelle Wetter an meinem Standort? Nenne Quelle und Beobachtungszeit.",memory:"Für diesen Test ist mein Ziel Los Cristianos. Merke es dir für dieses Gespräch.",follow:"Wie sieht es über die TF-1 aus?"},
+  pt:{traffic:"Como está o trânsito daqui até "+destination+"? Usa dados atuais verificados, indica o tempo de viagem e atrasos se disponíveis e distingue dados em falta de ausência de trânsito.",weather:"Como está o tempo agora na minha localização? Indica a fonte e a hora da observação.",memory:"Neste teste, o meu destino é Los Cristianos. Lembra-te disso durante a conversa.",follow:"E passando pela TF-1?"},
+  nl:{traffic:"Hoe is het verkeer vanaf hier naar "+destination+"? Gebruik actuele gecontroleerde gegevens, vermeld reistijd en vertraging indien beschikbaar, en maak onderscheid tussen ontbrekende gegevens en geen verkeer.",weather:"Hoe is het weer op mijn huidige locatie? Vermeld de bron en waarnemingstijd.",memory:"Voor deze test is mijn bestemming Los Cristianos. Onthoud dat tijdens dit gesprek.",follow:"En via de TF-1?"}
+ };
+ return (prompts[languageBase]||prompts.en)[key];
+}
 function addMessage(role,content,meta){
  const el=document.createElement("div");el.className="msg "+role;
  if(meta){const m=document.createElement("div");m.className="meta";m.textContent=meta;el.appendChild(m);}
@@ -76,13 +94,13 @@ function getLocation(){const lat=Number($("lat").value),lon=Number($("lon").valu
 function personality(){return{preset:$("preset").value,irony:Number($("irony").value),warmth:Number($("warmth").value),energy:Number($("energy").value),concision:Number($("concision").value)};}
 function updateRange(id){$(id+"V").textContent=$(id).value;}
 ["irony","warmth","energy","concision"].forEach(id=>$(id).addEventListener("input",()=>updateRange(id)));
-function say(text){if(!voiceOn||!("speechSynthesis"in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang="it-IT";u.rate=.94;window.speechSynthesis.speak(u);}
+function say(text){if(!voiceOn||!("speechSynthesis"in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=deviceLanguage;u.rate=.94;window.speechSynthesis.speak(u);}
 async function sendMessage(text){
  text=(text||"").trim();if(!text||busy)return;
  addMessage("user",text);messages.push({role:"user",content:text});input.value="";setBusy(true);
  const started=performance.now();let bubble=null;
  try{
-  const body={message:text,language:"it-IT",assistantName:$("name").value.trim()||"Jarvis",personality:personality(),history:messages.slice(0,-1).slice(-10)};
+  const body={message:text,language:deviceLanguage,assistantName:$("name").value.trim()||"Jarvis",personality:personality(),history:messages.slice(0,-1).slice(-10),vehicleMode:$("vehicleMode").value};
   const location=getLocation();if(location)body.location=location;
   const response=await fetch("/jarvis",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),cache:"no-store"});
   const data=await response.json().catch(()=>({error:"Risposta JSON non valida"}));
@@ -110,7 +128,7 @@ $("voiceToggle").addEventListener("click",()=>{voiceOn=!voiceOn;$("voiceToggle")
 $("getGps").addEventListener("click",()=>{if(!navigator.geolocation){addMessage("system","Geolocalizzazione non supportata dal browser.");return;}navigator.geolocation.getCurrentPosition(p=>{$("lat").value=p.coords.latitude.toFixed(6);$("lon").value=p.coords.longitude.toFixed(6);addMessage("system","GPS acquisito · precisione circa "+Math.round(p.coords.accuracy)+" m.");},e=>addMessage("system","GPS non disponibile: "+e.message),{enableHighAccuracy:true,timeout:12000,maximumAge:30000});});
 $("clearGps").addEventListener("click",()=>{$("lat").value="";$("lon").value="";});
 const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-if(SpeechRecognition){recognition=new SpeechRecognition();recognition.lang="it-IT";recognition.interimResults=false;recognition.maxAlternatives=1;recognition.onresult=e=>{input.value=e.results[0][0].transcript;input.focus();};recognition.onerror=e=>addMessage("system","Dettatura: "+e.error);recognition.onend=()=>$("mic").textContent="🎙";}
+if(SpeechRecognition){recognition=new SpeechRecognition();recognition.lang=deviceLanguage;recognition.interimResults=false;recognition.maxAlternatives=1;recognition.onresult=e=>{input.value=e.results[0][0].transcript;input.focus();};recognition.onerror=e=>addMessage("system","Dettatura: "+e.error);recognition.onend=()=>$("mic").textContent="🎙";}
 $("mic").addEventListener("click",()=>{if(!recognition){addMessage("system","Dettatura vocale non supportata da questo browser. Puoi usare la tastiera.");return;}try{$("mic").textContent="⏺";recognition.start();}catch(e){$("mic").textContent="🎙";}});
 async function checkEndpoint(path){const r=await fetch(path,{cache:"no-store"});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"HTTP "+r.status);return d;}
 async function health(){
@@ -118,7 +136,7 @@ async function health(){
  try{
   const h=await checkEndpoint("/health");$("dHealth").textContent="OK · "+String(h.revision||"revisione non esposta").slice(0,12);$("dHealth").className="good";
   $("healthText").textContent="Backend online";$("healthDot").className="dot ok";
-  try{const t=await checkEndpoint("/traffic/status");$("dTraffic").textContent="TomTom: "+(t.tomtomConfigured?"configurato":"non configurato")+" · incidenti "+(t.incidentDetailsEnabled?"ON":"OFF")+" · routing "+(t.trafficAwareRoutingEnabled?"ON":"OFF");$("dTraffic").className=t.tomtomConfigured?"good":"warning";}catch(e){$("dTraffic").textContent="Endpoint non disponibile";$("dTraffic").className="warning";}
+  try{const t=await checkEndpoint("/traffic/status");$("dTraffic").textContent="TomTom: "+(t.tomtomConfigured?"chiave OK":"chiave assente")+" · incidenti "+(t.incidentDetailsEnabled?"ON":"OFF")+" · routing "+(t.trafficAwareRoutingEnabled?"ON":"OFF");$("dTraffic").className=t.tomtomConfigured&&t.trafficAwareRoutingEnabled?"good":"warning";}catch(e){$("dTraffic").textContent="Endpoint non disponibile";$("dTraffic").className="warning";}
   try{const s=await checkEndpoint("/speed-limit/status");$("dSpeed").textContent=s.tomtomConfigured?"TomTom configurato":"TomTom non configurato";$("dSpeed").className=s.tomtomConfigured?"good":"warning";}catch(e){$("dSpeed").textContent="Non verificabile";}
   return true;
  }catch(e){$("healthText").textContent="Backend non raggiungibile";$("healthDot").className="dot bad";$("dHealth").textContent=e.message;$("dHealth").className="badtext";return false;}
@@ -131,10 +149,10 @@ async function runSuite(items,label){
  const good=results.length===items.length&&results.every(r=>r.ok);
  suiteResult(label+": "+results.length+"/"+items.length+" richieste completate. Controlla le risposte nel pannello: il completamento HTTP non certifica da solo la qualità semantica.",good);
 }
-$("testMemory").addEventListener("click",()=>{$("clearChat").click();runSuite([{text:"Per questa prova, la mia destinazione si chiama Los Cristianos. Tienilo a mente durante la conversazione."},{text:"Qual è la destinazione che ti ho appena indicato?"}],"Continuità conversazionale");});
-$("testFollow").addEventListener("click",()=>runSuite([{text:"Sto valutando un percorso per Los Cristianos. Prima di confrontare alternative, dimmi quali informazioni ti servono per verificare il traffico."},{text:"E passando dalla TF-1?"}],"Follow-up su strada alternativa"));
-$("testTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Prima acquisisci il GPS o inserisci latitudine e longitudine.",false);return;}sendMessage("Puoi verificare le segnalazioni di traffico attuali vicino alla mia posizione? Dimmi la fonte e distingui le segnalazioni dalla velocità effettiva del traffico.");});
-$("testWeather").addEventListener("click",()=>{if(!getLocation()){suiteResult("Prima acquisisci il GPS o inserisci latitudine e longitudine.",false);return;}sendMessage("Com'è il meteo adesso nella mia posizione? Indica fonte e orario del dato.");});
+$("testMemory").addEventListener("click",()=>{$("clearChat").click();runSuite([{text:localizedPrompt("memory")},{text:languageBase==="es"?"¿Cuál es el destino que acabo de indicar?":languageBase==="fr"?"Quelle destination viens-je d'indiquer ?":languageBase==="de"?"Welches Ziel habe ich gerade genannt?":languageBase==="pt"?"Qual é o destino que acabei de indicar?":languageBase==="nl"?"Welke bestemming heb ik net genoemd?":languageBase==="it"?"Qual è la destinazione che ti ho appena indicato?":"What destination did I just give you?"}],"Conversation continuity");});
+$("testFollow").addEventListener("click",()=>runSuite([{text:languageBase==="es"?"Estoy pensando en ir a Los Cristianos. ¿Qué necesitas para verificar el tráfico?":languageBase==="fr"?"J'envisage d'aller à Los Cristianos. De quelles informations as-tu besoin pour vérifier la circulation ?":languageBase==="de"?"Ich möchte nach Los Cristianos fahren. Welche Informationen brauchst du, um den Verkehr zu prüfen?":languageBase==="pt"?"Estou a pensar ir para Los Cristianos. De que informações precisas para verificar o trânsito?":languageBase==="nl"?"Ik wil naar Los Cristianos rijden. Welke informatie heb je nodig om het verkeer te controleren?":languageBase==="it"?"Sto valutando un percorso per Los Cristianos. Quali informazioni ti servono per verificare il traffico?":"I'm considering a trip to Los Cristianos. What information do you need to verify traffic?"},{text:localizedPrompt("follow")}],"Alternative-road follow-up"));
+$("testTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Acquire GPS or enter latitude and longitude first.",false);return;}const destination=$("trafficDestination").value.trim();if(destination.length<2){suiteResult("Enter a valid destination.",false);return;}sendMessage(localizedPrompt("traffic",destination));});
+$("testWeather").addEventListener("click",()=>{if(!getLocation()){suiteResult("Acquire GPS or enter latitude and longitude first.",false);return;}sendMessage(localizedPrompt("weather"));});
 health();
 })();
 </script></body></html>
