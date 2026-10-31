@@ -71,6 +71,30 @@ class NavigationServicesTest {
     }
 
     @Test
+    fun routeRequestUsesThroughWaypointWithoutChangingMotorcycleCosting() {
+        val request = NavigationServices.buildRouteRequest(
+            NavPoint(28.0, -16.0),
+            NavPoint(28.1, -16.1),
+            motorcycle = true,
+            viaPoints = listOf(NavPoint(28.05, -16.05))
+        )
+        val locations = request.getJSONArray("locations")
+        assertEquals(3, locations.length())
+        assertEquals("through", locations.getJSONObject(1).getString("type"))
+        assertEquals("motorcycle", request.getString("costing"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun routeRequestRejectsInvalidThroughWaypoint() {
+        NavigationServices.buildRouteRequest(
+            NavPoint(28.0, -16.0),
+            NavPoint(28.1, -16.1),
+            motorcycle = true,
+            viaPoints = listOf(NavPoint(Double.NaN, -16.05))
+        )
+    }
+
+    @Test
     fun routeResponseParsesPrimaryAndAlternateTrips() {
         val trip = """{"legs":[{"shape":"_izlhA~rlgdF_{geC~ywl@","summary":{"length":12.5,"time":600},"maneuvers":[{"begin_shape_index":0,"instruction":"Prosegui","type":1,"street_names":["TF-1"]}]}],"summary":{"length":12.5,"time":600}}"""
         val alternate = """{"legs":[{"shape":"_izlhA~rlgdF_{geC~ywl@","summary":{"length":13.0,"time":720},"maneuvers":[{"begin_shape_index":0,"instruction":"Svolta a destra","type":10,"street_names":["TF-82"]}]}],"summary":{"length":13.0,"time":720}}"""
