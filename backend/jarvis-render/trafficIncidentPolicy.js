@@ -30,3 +30,13 @@ export function buildTomTomIncidentDetailsUrl(bbox) {
   url.searchParams.set("timeValidity", "present");
   return url;
 }
+
+/**
+ * TomTom Orbis v2 returns only a minimal incident projection by default.
+ * Request every property consumed by TrafficIncidentParser explicitly.
+ */
+export const TOMTOM_INCIDENT_ATTRIBUTES =
+  "incidents(type,geometry(type,coordinates),properties(" +
+  "id,iconCategory,magnitudeOfDelay,events(description,code,iconCategory)," +
+  "startTime,endTime,from,to,lengthInMeters,delayInSeconds,roadNumbers," +
+  "timeValidity,probabilityOfOccurrence,numberOfReports,lastReportTime))";
