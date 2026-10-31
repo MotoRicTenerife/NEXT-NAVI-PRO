@@ -7,6 +7,7 @@ import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { sanitizeTripContext } from "./tripContextPolicy.js";
 import { extractTrafficDestination, geocodeTrafficDestination } from "./trafficDestination.js";
 import { normalizeLanguageTag } from "./languagePolicy.js";
+import { isTrafficQuery } from "./trafficIntent.js";
 import { fetchTomTomTrafficRoutes, validateTomTomRouteRequest } from "./trafficRoutingService.js";
 import { parseOsmApiFullWayGeometry, parseOverpassWayGeometry } from "./roadGeometry.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -1158,7 +1159,7 @@ async function handle(req, res) {
   let weatherFailureCode = null;
   const normalizedMessage = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const asksWeather = /\b(meteo|che tempo fa|previsioni(?: del)? tempo|previsioni meteo|pioggia|vento|weather|forecast|lluvia|clima|el tiempo|tiempo actual)\b/.test(normalizedMessage);
-  const asksTraffic = /\b(traffico|trafico|traffic|atasco|incidente|retencion|congestion|coda|code|circulation|embouteillage|bouchon|verkehr|stau|transito|engarrafamento|verkeer|file)\b/.test(normalizedMessage);
+  const asksTraffic = isTrafficQuery(message);
 
   if (asksWeather && location) {
     try {
