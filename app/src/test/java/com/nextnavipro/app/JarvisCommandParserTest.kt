@@ -137,6 +137,17 @@ class JarvisCommandParserTest {
         }
     }
 
+    @Test fun placeNamesInOrdinaryConversationNeverBecomeNavigationCommands() {
+        assertEquals(JarvisCommand.Unknown, JarvisCommandParser.parse("Parlami di Los Cristianos"))
+        assertEquals(JarvisCommand.Unknown, JarvisCommandParser.parse("Che cosa sai di Adeje?"))
+        assertEquals(JarvisCommand.Unknown, JarvisCommandParser.parse("Cerca informazioni su Santa Cruz"))
+        assertEquals(JarvisCommand.Navigate("Guaza"), JarvisCommandParser.parse("Voglio andare a Guaza"))
+        assertEquals(JarvisCommand.Navigate("Los Cristianos"), JarvisCommandParser.parse("Portami a Los Cristianos"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Vorrei andare ad Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Portami ad Adeje"))
+        assertEquals(JarvisCommand.Navigate("Adeje"), JarvisCommandParser.parse("Voglio andare ad Adeje"))
+    }
+
     @Test fun unknownRequestsDoNotBecomeInventedDestinations() {
         assertEquals(JarvisCommand.Unknown, JarvisCommandParser.parse("Che tempo farà tra tre giorni?"))
         assertEquals(JarvisCommand.Unknown, JarvisCommandParser.parse(""))
