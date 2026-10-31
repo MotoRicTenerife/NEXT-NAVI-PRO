@@ -25,6 +25,11 @@ if [[ "$started" -ne 1 ]]; then
 fi
 
 sleep 8
+if ! adb shell dumpsys activity activities | grep -q "$PACKAGE"; then
+  echo "Alpha07 process exists but its Activity is not present in the activity stack."
+  adb logcat -d -t 2500 | tail -n 500
+  exit 1
+fi
 if adb logcat -d -t 2500 | grep -E "FATAL EXCEPTION|Process: $PACKAGE" | grep -q "FATAL EXCEPTION"; then
   echo "Fatal exception detected in Alpha07."
   adb logcat -d -t 2500 | tail -n 500
@@ -45,4 +50,5 @@ fi
 
 adb shell screencap -p /sdcard/alpha07-smoke.png
 adb pull /sdcard/alpha07-smoke.png alpha07-emulator-smoke.png
-echo "PASS: Alpha07 installed, launched, survived rotation and produced a screenshot."
+test -s alpha07-emulator-smoke.png
+echo "PASS: Alpha07 installed, its Activity entered the Android task stack, survived rotation and produced a non-empty screenshot."
