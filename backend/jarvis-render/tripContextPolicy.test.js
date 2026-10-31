@@ -9,6 +9,11 @@ const valid = {
   distanceKm: 18.4,
   durationSeconds: 1320,
   fetchedAtEpochMs: now - 60_000,
+  routeSource: "Valhalla motorcycle",
+  routeEstimateType: "baseline_route_engine_estimate_not_traffic_adjusted",
+  trafficSource: "TomTom Orbis Traffic Incidents",
+  trafficObservedAtEpochMs: now - 30_000,
+  trafficCache: "MISS",
   incidents: [{
     id: "incident-1",
     severity: "HEAVY",
