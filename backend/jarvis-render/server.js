@@ -565,7 +565,7 @@ async function handleTomTomTrafficRoute(req, res) {
   const apiKey = process.env.TOMTOM_API_KEY;
   if (!apiKey) return send(res, 503, { error: "TomTom routing provider not configured" });
   const ip = getClientIp(req);
-  const admission = trafficRoutingLimiter.take(ip, Date.now());
+  const admission = trafficRoutingLimiter.check(ip, Date.now());
   if (!admission.allowed) {
     return send(res, 429, { error: "TomTom route request limit reached", retryAfterMs: admission.retryAfterMs });
   }
