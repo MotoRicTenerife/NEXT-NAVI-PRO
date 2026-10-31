@@ -1086,6 +1086,9 @@ async function handle(req, res) {
   if (tripContext) {
     liveContext += "\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
     liveContext += "\nTRAFFIC SAFETY INTERPRETATION: the Valhalla duration is a baseline estimate, NOT a live-traffic-adjusted ETA. TomTom incident records are not a complete traffic-flow measurement. No matched incident does NOT prove free-flowing traffic. The current route matcher does NOT verify carriageway direction, so never claim an event is confirmed on the rider's lane. Do not add overlapping incident delays or invent an overall delay.";
+    if (tripContext.viaRoadName && tripContext.baselineRoute) {
+      liveContext += "\\nNAMED-ROAD COMPARISON: the user requested a route via " + tripContext.viaRoadName + ". Compare the freshly calculated TomTom waypoint route against the freshly calculated direct route only when both TomTom results are present and vehicle-mode verified. Use the Valhalla direct/via metrics as baseline comparisons, not live ETAs. If either TomTom route is missing or unverified, say the live comparison is incomplete. Never reuse an earlier conversational ETA as current.";
+    }
     if (tripContext.trafficUnavailable) {
       liveContext += "\nTOMTOM INCIDENT DETAILS ARE UNAVAILABLE FOR THIS REQUEST. This is missing data, not evidence that the route is clear. Use any independently verified TomTom traffic-aware route result if available; otherwise say live traffic could not be confirmed.";
     }
