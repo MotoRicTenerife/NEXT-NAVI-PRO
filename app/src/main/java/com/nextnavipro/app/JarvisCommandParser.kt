@@ -57,11 +57,11 @@ object JarvisCommandParser {
             val destinationText = original.take(cutAt).trim().trimEnd(',', '.', '!', '?', ' ')
             val normalizedDestination = normalize(destinationText)
             val prefixes = listOf(
-                "devo andare alla ", "devo andare al ", "devo andare a ",
-                "vorrei andare alla ", "vorrei andare al ", "vorrei andare a ",
-                "voglio andare alla ", "voglio andare al ", "voglio andare a ",
+                "devo andare alla ", "devo andare al ", "devo andare ad ", "devo andare a ",
+                "vorrei andare alla ", "vorrei andare al ", "vorrei andare ad ", "vorrei andare a ",
+                "voglio andare alla ", "voglio andare al ", "voglio andare ad ", "voglio andare a ",
                 "devo raggiungere ", "voglio raggiungere ", "raggiungere ",
-                "andare alla ", "andare al ", "andare a "
+                "andare alla ", "andare al ", "andare ad ", "andare a "
             ).sortedByDescending { it.length }
             val prefix = prefixes.firstOrNull { normalizedDestination.startsWith(it) }
             val actual = if (prefix != null) destinationText.drop(prefix.length).trim() else destinationText
