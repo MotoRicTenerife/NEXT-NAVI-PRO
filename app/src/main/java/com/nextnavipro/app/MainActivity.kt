@@ -3834,6 +3834,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Aggiorna il percorso e poi ripeto il controllo.")
             return
         }
+        val gpsFix = currentLocation
+        val gpsAgeMs = gpsFix?.let { System.currentTimeMillis() - it.time } ?: Long.MAX_VALUE
+        if (gpsFix == null || !gpsFix.hasAccuracy() || gpsFix.accuracy > 50f || gpsAgeMs !in 0L..120_000L) {
+            speakJarvis("Per verificare il traffico attuale lungo il percorso mi serve una posizione GPS recente e precisa. Aggiorno prima la posizione.")
+            return
+        }
         val requestGeneration = jarvisResponseGeneration
         jarvisStatusText.text = jarvisAssistantName() + " • verifica traffico e alternative…"
         thread(name = "jarvis-route-traffic") {
@@ -4542,8 +4548,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun previewRouteForJarvis(place: PlaceResult, announce: Boolean = true) {
         val location = currentLocation
         val anyOrigin = location?.let { NavPoint(it.latitude, it.longitude) }
-        val origin = location?.takeIf { it.hasAccuracy() && it.accuracy <= 50f }
-            ?.let { NavPoint(it.latitude, it.longitude) }
+        val origin = location?.takeIf {
+            it.hasAccuracy() && it.accuracy <= 50f &&
+                System.currentTimeMillis() - it.time in 0L..120_000L
+        }?.let { NavPoint(it.latitude, it.longitude) }
         if (origin == null) {
             val cached = RouteInsightCache.loadForDestination(this, place.name, anyOrigin)
             if (cached != null) showCachedRoutePreview(place, cached, announce)
