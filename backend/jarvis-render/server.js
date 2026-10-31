@@ -1155,6 +1155,7 @@ async function handle(req, res) {
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
   let liveContext = "";
   let trafficRouteResult = null;
+  let trafficNearbyResult = null;
   let trafficDestination = "";
   let trafficFailureCode = null;
   const tripContext = sanitizeTripContext(input?.tripContext);
@@ -1332,6 +1333,13 @@ async function handle(req, res) {
       } else {
         nearbyTraffic.incidentsUnavailable = true;
         if (!trafficFailureCode) trafficFailureCode = incidentLookup.reason?.statusCode === 429 ? "rate_limited" : "incidents_unavailable";
+      }
+      if (segmentLookup.status === "fulfilled" || incidentLookup.status === "fulfilled") {
+        trafficNearbyResult = {
+          segmentAvailable: segmentLookup.status === "fulfilled",
+          incidentsAvailable: incidentLookup.status === "fulfilled",
+          observedAtEpochMs: Date.now()
+        };
       }
       if (segmentLookup.status === "rejected" && incidentLookup.status === "rejected") {
         liveContext += "\nNEARBY LIVE TRAFFIC LOOKUP FAILED: no current traffic conditions were verified. Say so clearly and ask whether the user wants a destination-specific route check.";
@@ -1538,7 +1546,8 @@ async function handle(req, res) {
       tripContextAccepted: Boolean(tripContext),
       trafficContext: tripContext
         ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || (tripContext.trafficUnavailable ? "incident_details_unavailable" : tripContext.incidents.length ? "fresh_incidents" : "fresh_no_route_match")
-        : asksTraffic ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || "not_verified" : "not_requested",
+        : asksTraffic ? trafficRouteResult ? "tomtom_route_loaded" : trafficNearbyResult ? "tomtom_nearby_loaded" : trafficFailureCode || "not_verified" : "not_requested",
+      nearbyTraffic: trafficNearbyResult,
       weatherStatus: asksWeather ? weatherResult ? "verified" : weatherFailureCode || "not_verified" : "not_requested"
     }
   });
