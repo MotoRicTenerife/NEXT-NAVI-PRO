@@ -15,5 +15,6 @@ test("normalizes locale underscores and uses Accept-Language when payload is abs
 
 test("rejects malformed language tags and falls back safely", () => {
   assert.equal(normalizeLanguageTag("it<script>"), "en-GB");
+  assert.equal(normalizeLanguageTag("en-" + "x".repeat(40)), "en-GB");
   assert.equal(normalizeLanguageTag(""), "en-GB");
 });
