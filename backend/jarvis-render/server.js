@@ -1161,10 +1161,10 @@ async function handle(req, res) {
       liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask the user to enable location or provide a starting point. Do not refer the user to an external traffic website.";
     } else if (!trafficDestination) {
       trafficFailureCode = "missing_destination";
-      liveContext += "\nNO EXPLICIT DESTINATION WAS FOUND: ask the user where they want to go. Do not guess a destination and do not substitute a local DGT lookup.";
+      liveContext += "\nNO EXPLICIT DESTINATION WAS FOUND: ask the user where they want to go. Do not guess a destination and do not substitute a generic nearby-incident lookup.";
     } else if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED !== "true" || !process.env.TOMTOM_API_KEY) {
       trafficFailureCode = "tomtom_routing_disabled";
-      liveContext += "\nTOMTOM LIVE TRAFFIC ROUTING IS NOT ENABLED OR CONFIGURED ON THE SERVER. State that TomTom traffic cannot currently be verified. Do not use DGT as a fallback and do not invent traffic conditions.";
+      liveContext += "\nTOMTOM LIVE TRAFFIC ROUTING IS NOT ENABLED OR CONFIGURED ON THE SERVER. State that TomTom traffic cannot currently be verified. Do not use another provider as a fallback and do not invent traffic conditions.";
     } else {
       try {
         const destination = await geocodeTrafficDestination(trafficDestination, location);
@@ -1221,7 +1221,7 @@ async function handle(req, res) {
           failureCode: trafficFailureCode,
           errorType: error instanceof Error ? error.name : "UnknownError"
         });
-        liveContext += "\nTOMTOM DESTINATION TRAFFIC LOOKUP FAILED (" + trafficFailureCode + "): say traffic could not be verified. Do not refer to DGT or any external map and do not guess.";
+        liveContext += "\nTOMTOM DESTINATION TRAFFIC LOOKUP FAILED (" + trafficFailureCode + "): say traffic could not be verified. Do not refer to an external map and do not guess.";
       }
     }
   }
