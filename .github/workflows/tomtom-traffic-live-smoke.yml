@@ -1,0 +1,25 @@
+name: TomTom Live Traffic Post-Deploy Smoke
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [fix/jarvis-render-backend]
+
+permissions:
+  contents: read
+
+jobs:
+  live-traffic:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout merged backend
+        uses: actions/checkout@v5
+        with:
+          ref: fix/jarvis-render-backend
+
+      - name: Verify live TomTom traffic and Jarvis on Render
+        env:
+          RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+        run: python roadtools/tomtom_traffic_live_smoke.py
