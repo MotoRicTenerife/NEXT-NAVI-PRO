@@ -18,4 +18,12 @@ class JarvisIntentClassifierTest {
         assertFalse(JarvisIntentClassifier.isWeatherQuestion("Portami a Guaza"))
         assertFalse(JarvisIntentClassifier.isWeatherQuestion(""))
     }
+    @Test fun recognizesTrafficQuestionsAcrossLanguages() {
+        assertTrue(JarvisIntentClassifier.isTrafficQuestion("C'è traffico verso Los Cristianos?"))
+        assertTrue(JarvisIntentClassifier.isTrafficQuestion("¿Hay tráfico o atascos?"))
+        assertTrue(JarvisIntentClassifier.isTrafficQuestion("Is there traffic on my route?"))
+        assertFalse(JarvisIntentClassifier.isTrafficQuestion("Portami a Guaza"))
+        assertFalse(JarvisIntentClassifier.isTrafficQuestion(""))
+    }
+
 }
