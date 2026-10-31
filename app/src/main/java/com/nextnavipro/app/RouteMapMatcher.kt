@@ -7,26 +7,6 @@ package com.nextnavipro.app
 internal object RouteMapMatcher {
     data class Match(val segmentIndex: Int, val distanceMeters: Double, val bearingDegrees: Double, val fraction: Double, val score: Double)
 
-    /** O(1) route-chainage lookup after geometry has been prepared by the matcher. */
-    fun alongRouteDistance(points: List<NavPoint>, pointIndex: Int): Double {
-        if (points.size < 2) return 0.0
-        ensureGeometry(points)
-        return cumulativeMeters[pointIndex.coerceIn(0, points.lastIndex)]
-    }
-
-    private fun ensureGeometry(points: List<NavPoint>) {
-        if (cachedPoints === points) return
-        cachedPoints = points
-        cumulativeMeters = DoubleArray(points.size)
-        for (i in 1 until points.size) {
-            cumulativeMeters[i] = cumulativeMeters[i - 1] +
-                GpxRouteService.distanceMeters(points[i - 1], points[i])
-        }
-        lastAlongMeters = null
-        lastElapsedMs = 0L
-        lastResult = null
-    }
-
     fun match(
         points: List<NavPoint>, latitude: Double, longitude: Double,
         startIndex: Int = 0, endIndex: Int = points.lastIndex - 1, bearingDegrees: Float? = null
@@ -89,6 +69,26 @@ internal class RouteProgressTracker {
     private var lastLongitude = Double.NaN
     private var lastBearing: Float? = null
     private var lastResult: Match? = null
+
+    /** O(1) route-chainage lookup after geometry has been prepared by the matcher. */
+    fun alongRouteDistance(points: List<NavPoint>, pointIndex: Int): Double {
+        if (points.size < 2) return 0.0
+        ensureGeometry(points)
+        return cumulativeMeters[pointIndex.coerceIn(0, points.lastIndex)]
+    }
+
+    private fun ensureGeometry(points: List<NavPoint>) {
+        if (cachedPoints === points) return
+        cachedPoints = points
+        cumulativeMeters = DoubleArray(points.size)
+        for (i in 1 until points.size) {
+            cumulativeMeters[i] = cumulativeMeters[i - 1] +
+                GpxRouteService.distanceMeters(points[i - 1], points[i])
+        }
+        lastAlongMeters = null
+        lastElapsedMs = 0L
+        lastResult = null
+    }
 
     fun reset() {
         cachedPoints = null
