@@ -33,8 +33,8 @@ GitHub Actions defaults `NEXT_NAVI_AI_ENDPOINT` to the Render URL above. If the 
 ## Live traffic overlay and incidents
 
 TomTom Orbis traffic flow tiles and incident details are enabled automatically when
-`TOMTOM_API_KEY` is present. The optional `TRAFFIC_FLOW_ENABLED=false` and
-`TRAFFIC_INCIDENTS_ENABLED=false` environment values act as emergency kill-switches;
+`TOMTOM_API_KEY` is present. The optional `TRAFFIC_FLOW_ENABLED=false`, `TRAFFIC_INCIDENTS_ENABLED=false`, and
+`TRAFFIC_SEGMENT_ENABLED=false` environment values act as emergency kill-switches;
 they are not required for normal activation. The app requests flow vector tiles through
 Render at `/traffic/flow/{z}/{x}/{y}`, so the TomTom credential remains server-side.
 The map's MapLibre style already contains the TomTom vector source and congestion line
