@@ -852,9 +852,9 @@ async function handle(req, res) {
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
   const tripContext = sanitizeTripContext(input?.tripContext);
   if (tripContext) {
-    liveContext += "\\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
+    liveContext += "\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
   } else if (input?.tripContext) {
-    liveContext += "\\nTRIP CONTEXT WAS STALE OR INVALID AND WAS IGNORED. Do not use it for current traffic claims.";
+    liveContext += "\nTRIP CONTEXT WAS STALE OR INVALID AND WAS IGNORED. Do not use it for current traffic claims.";
   }
 
   const rawPersonality = input?.personality && typeof input.personality === "object" ? input.personality : {};
@@ -910,14 +910,14 @@ async function handle(req, res) {
     liveContext += "\nNO GPS COORDINATES WERE PROVIDED: ask for a location or say local weather cannot be verified.";
   }
 
-  if (asksTraffic && location) {
+  if (asksTraffic && location && !tripContext) {
     try {
       trafficResult = await fetchDgtTraffic(location);
       liveContext += "\nVERIFIED DGT TRAFFIC INCIDENT FEED: " + JSON.stringify(trafficResult);
     } catch {
       liveContext += "\nDGT TRAFFIC LOOKUP FAILED: say live traffic could not be verified. Official DGT traffic map: https://infocar.dgt.es/etraffic/ . Do not claim to have checked Google Maps.";
     }
-  } else if (asksTraffic) {
+  } else if (asksTraffic && !tripContext) {
     liveContext += "\nNO GPS COORDINATES WERE PROVIDED: live local traffic cannot be checked. Official DGT traffic map: https://infocar.dgt.es/etraffic/ .";
   }
 
