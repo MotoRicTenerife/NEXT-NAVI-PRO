@@ -99,11 +99,12 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
             probe.close()
         }
 
-        val target = java.io.File(databaseNameForPath())
+        val target = java.io.File(writableDatabase.path)
         val replacement = java.io.File(target.parentFile, target.name + ".restore")
         snapshot.copyTo(replacement, overwrite = true)
         close()
         if (!replacement.renameTo(target)) replacement.copyTo(target, overwrite = true)
+        replacement.delete()
         java.io.File(target.path + "-wal").delete()
         java.io.File(target.path + "-shm").delete()
         java.io.File(target.path + "-journal").delete()
