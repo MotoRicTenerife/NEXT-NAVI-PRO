@@ -120,7 +120,7 @@ async function health(){
  try{
   const h=await checkEndpoint("/health");$("dHealth").textContent="OK · "+String(h.revision||"revisione non esposta").slice(0,12);$("dHealth").className="good";
   $("healthText").textContent="Backend online";$("healthDot").className="dot ok";
-  try{const t=await checkEndpoint("/traffic/status");$("dTraffic").textContent="TomTom: "+(t.tomtomConfigured?"configurato":"non configurato")+" · incidenti "+(t.incidentDetailsEnabled?"ON":"OFF")+" · routing "+(t.trafficAwareRoutingEnabled?"ON":"OFF");$("dTraffic").className=t.tomtomConfigured?"good":"warning";}catch(e){$("dTraffic").textContent="Endpoint non disponibile";$("dTraffic").className="warning";}
+  try{const t=await checkEndpoint("/traffic/status");$("dTraffic").textContent="TomTom: "+(t.tomtomConfigured?"chiave OK":"chiave assente")+" · incidenti "+(t.incidentDetailsEnabled?"ON":"OFF")+" · routing "+(t.trafficAwareRoutingEnabled?"ON":"OFF");$("dTraffic").className=t.tomtomConfigured&&t.trafficAwareRoutingEnabled?"good":"warning";}catch(e){$("dTraffic").textContent="Endpoint non disponibile";$("dTraffic").className="warning";}
   try{const s=await checkEndpoint("/speed-limit/status");$("dSpeed").textContent=s.tomtomConfigured?"TomTom configurato":"TomTom non configurato";$("dSpeed").className=s.tomtomConfigured?"good":"warning";}catch(e){$("dSpeed").textContent="Non verificabile";}
   return true;
  }catch(e){$("healthText").textContent="Backend non raggiungibile";$("healthDot").className="dot bad";$("dHealth").textContent=e.message;$("dHealth").className="badtext";return false;}
