@@ -51,6 +51,19 @@ test("rejects malformed or mismatched route requests without rejecting valid tri
   assert.equal(validResult.routeRequest.vehicleMode, "motorcycle");
 });
 
+test("accepts a fresh route-only context when the incident provider is unavailable", () => {
+  const routeOnly = { ...valid, trafficUnavailable: true };
+  delete routeOnly.trafficSource;
+  delete routeOnly.trafficObservedAtEpochMs;
+  delete routeOnly.incidents;
+  const result = sanitizeTripContext(routeOnly, now);
+  assert.equal(result.trafficUnavailable, true);
+  assert.equal(result.trafficFresh, false);
+  assert.equal(result.incidents.length, 0);
+  assert.equal(result.routeRequest.vehicleMode, "motorcycle");
+  assert.equal(result.incidentEvidence, "incident_service_unavailable");
+});
+
 test("drops stale, expired and malformed incidents", () => {
   const result = sanitizeTripContext({
     ...valid,
