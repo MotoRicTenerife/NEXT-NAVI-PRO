@@ -4151,6 +4151,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(destinationInput, InputMethodManager.SHOW_IMPLICIT)
         }
+        val saveButton = makeButton("SALVA PREFERITO") {
+            val chosen = places.getOrNull(selectedIndex) ?: return@makeButton
+            destination = chosen
+            saveFavoriteAddress()
+        }
         val goButton = makeButton(if (previewOnly) "ANTEPRIMA" else "NAVIGA QUI") {
             val chosen = places.getOrNull(selectedIndex) ?: return@makeButton
             accepted = true
@@ -4159,9 +4164,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (!previewOnly) calculateSelectedRoute()
         }
         val cancelButton = makeButton("ANNULLA") { dialog.dismiss() }
-        actions.addView(changeButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
-        actions.addView(goButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
-        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        actions.addView(changeButton, LinearLayout.LayoutParams(0, dp(48), 0.82f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(48), 0.95f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(goButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(1), 0, dp(1), 0) })
+        actions.addView(cancelButton, LinearLayout.LayoutParams(0, dp(48), 0.62f).apply { setMargins(dp(1), 0, dp(1), 0) })
         page.addView(actions, params(-1, dp(54)))
 
         dialog.setContentView(page)
