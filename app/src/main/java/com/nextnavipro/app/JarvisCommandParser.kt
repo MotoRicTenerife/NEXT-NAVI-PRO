@@ -12,6 +12,7 @@ sealed class JarvisCommand {
     data class Navigate(val destination: String) : JarvisCommand()
     data class PreviewRoute(val destination: String) : JarvisCommand()
     data class TrafficPreview(val destination: String) : JarvisCommand()
+    data class TrafficVia(val roadName: String) : JarvisCommand()
     object BriefRoute : JarvisCommand()
     object AssistantName : JarvisCommand()
     object CancelNavigation : JarvisCommand()
@@ -44,6 +45,15 @@ object JarvisCommandParser {
             "chi sei", "what is your name", "what are you called", "who are you",
             "como te llamas", "cual es tu nombre", "comment tu t appelles", "wie heisst du",
             "como te chamas", "hoe heet je")) return JarvisCommand.AssistantName
+
+        val viaPatterns = listOf(
+            Regex("(?iu)^\\s*(?:e\\s+)?passando\\s+(?:dalla|dal|dallo|da|per|sulla|sul)\\s+(.+?)[?.!,]*$"),
+            Regex("(?iu)^\\s*(?:e\\s+)?se\\s+prendo\\s+(?:la|il|lo|l\\u0027)\\s+(.+?)[?.!,]*$")
+        )
+        val viaRoad = viaPatterns.firstNotNullOfOrNull { it.find(transcript.trim())?.groupValues?.getOrNull(1)?.trim() }
+        if (!viaRoad.isNullOrBlank() && viaRoad.length in 2..60) {
+            return JarvisCommand.TrafficVia(viaRoad)
+        }
 
         val trafficSuffixes = listOf(
             "mi dici se c e traffico", "puoi dirmi se c e traffico",
