@@ -3493,6 +3493,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             )
             return
         }
+        if (JarvisIntentClassifier.isTrafficQuestion(spokenTranscript) &&
+            routeResult != null && destination != null && activeRouteFetchedAt > 0L) {
+            answerJarvisTrafficForRoute(
+                spokenTranscript,
+                destination!!,
+                routeResult!!,
+                activeRouteFetchedAt,
+                lastRouteAlongMeters
+            )
+            return
+        }
         // When the rider explicitly asked to change destination, the next utterance
         // is treated as the requested destination unless it is another known command.
         if (jarvisAwaitingDestination) {
@@ -3739,7 +3750,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         currentRouteDistanceMeters: Double
     ) {
         val now = System.currentTimeMillis()
-        if (routeFetchedAtEpochMs <= 0L || now - routeFetchedAtEpochMs !in 0..(30L * 60L * 1000L)) {
+        if (routeFetchedAtEpochMs <= 0L || routeFetchedAtEpochMs > now || now - routeFetchedAtEpochMs > 30L * 60L * 1000L) {
             pendingJarvisTrafficQuestion = null
             speakJarvis("Il percorso disponibile è troppo vecchio per una verifica affidabile del traffico. Ricalcolo prima il percorso.")
             return
@@ -4446,7 +4457,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     if (cached != null) showCachedRoutePreview(place, cached, announce)
                     else {
                         routeText.text = "ANTEPRIMA NON DISPONIBILE • connessione necessaria"
-                        if (announce) speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        val trafficQuestion = pendingJarvisTrafficQuestion
+                        pendingJarvisTrafficQuestion = null
+                        if (trafficQuestion != null) {
+                            speakJarvis("Non riesco a calcolare il percorso, quindi non posso controllare il traffico sulla destinazione richiesta.")
+                        } else if (announce) {
+                            speakJarvis("Non riesco a calcolare il percorso online e non ho una copia locale utilizzabile per questa destinazione.")
+                        }
                         scheduleRoutePreviewRefresh()
                     }
                 }
