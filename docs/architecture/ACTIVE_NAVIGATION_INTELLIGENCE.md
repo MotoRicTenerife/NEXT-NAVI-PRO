@@ -19,7 +19,7 @@ This is not an LLM-driven navigator. A language model may explain a decision thr
 - Global baseline routing: Valhalla + OpenStreetMap, subject to uptime and regional map-data completeness.
 - Request multiple alternatives when supported; keep stable route identity/version.
 - Motorcycle/scooter access is a hard constraint. Validate the Tricity 300 profile against local legal access. Do not blindly choose Valhalla motor_scooter defaults: its documented default top speed is 45 km/h. Valhalla motorcycle costing is marked beta and requires field validation.
-- Evaluate TomTom Routing as an additional traffic-aware route provider only after confirming account entitlement, geography, motorcycle mode, pricing and terms. TomTom Orbis Routing v2 is currently documented as Public Preview; it must not become the only routing engine without fallback.
+- TomTom Orbis Routing v2 is currently documented as Public Preview and its documented travelMode parameter allows only car. It is therefore NOT a motorcycle alternative provider for the Tricity 300. It may be evaluated separately for a future car mode only after entitlement, coverage, pricing and terms are verified. Motorcycle mode remains on Valhalla plus independently matched traffic evidence.
 
 ### 3. Traffic and hazard perception
 - Map overlay: TomTom Orbis v2 vector flow tiles; draw road geometries and color by relative_speed. Missing tiles mean unknown, never green.
@@ -94,7 +94,7 @@ The first safe decision layer is deterministic and explainable. It is not advert
 - Test stale, contradictory, directional, missing and closure observations.
 
 ### Phase C — rider decision engine
-- Generate alternatives with Valhalla alternates and/or entitled TomTom Routing alternatives.
+- Generate motorcycle alternatives with Valhalla alternates (the current request is not time-dependent; Valhalla documents that alternates are unavailable for time-dependent requests). TomTom Orbis Routing v2 is car-only in its current documentation and must not be used to route the motorcycle.
 - Score by traffic-adjusted ETA, closure constraints, motorcycle suitability, uncertainty and reroute cost.
 - Implement advisory lifecycle: detected → verified → offered → accepted/rejected/expired → resolved.
 - Integrate with the single TTS arbiter and safe rider confirmation UI.
@@ -127,4 +127,4 @@ The first safe decision layer is deterministic and explainable. It is not advert
 - TomTom Orbis Incident Details v2: https://docs.tomtom.com/traffic-api/documentation/tomtom-orbis-maps/v2/traffic-incidents/incident-details
 - TomTom legacy Flow Segment Data v4 (lifecycle/terms must be verified): https://docs.tomtom.com/traffic-api/documentation/tomtom-maps/v1/traffic-flow/flow-segment-data
 - Valhalla route API, alternatives and motorcycle/scooter costing: https://valhalla.github.io/valhalla/api/route/api-reference/
-- TomTom Orbis Routing v2 (Public Preview): https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v2/calculate-route
+- TomTom Orbis Routing v2 (Public Preview; documented travelMode currently car-only): https://docs.tomtom.com/routing-api/documentation/tomtom-orbis-maps/v2/calculate-route
