@@ -32,6 +32,18 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     trafficSource.includes("TomTom Orbis Traffic Incidents") &&
     Number.isSafeInteger(trafficObservedAtEpochMs) && trafficObservedAtEpochMs > 0 &&
     trafficObservedAtEpochMs <= now + 30_000 && now - trafficObservedAtEpochMs <= MAX_INCIDENT_AGE_MS;
+  const viaRoadName = cleanText(raw.viaRoadName, 80) || null;
+  let baselineRoute = null;
+  if (raw.baselineRoute && typeof raw.baselineRoute === "object" && !Array.isArray(raw.baselineRoute)) {
+    const baselineDistanceKm = Number(raw.baselineRoute.distanceKm);
+    const baselineDurationSeconds = Number(raw.baselineRoute.durationSeconds);
+    const baselineSource = cleanText(raw.baselineRoute.routeSource, 80);
+    if (Number.isFinite(baselineDistanceKm) && baselineDistanceKm > 0 && baselineDistanceKm <= 2000 &&
+        Number.isInteger(baselineDurationSeconds) && baselineDurationSeconds > 0 && baselineDurationSeconds <= 86400 &&
+        baselineSource === routeSource) {
+      baselineRoute = { distanceKm: Math.round(baselineDistanceKm * 10) / 10, durationSeconds: baselineDurationSeconds, routeSource: baselineSource };
+    }
+  }
   let routeRequest = null;
   if (raw.routeRequest && typeof raw.routeRequest === "object" && !Array.isArray(raw.routeRequest)) {
     const origin = cleanPoint(raw.routeRequest.origin);
@@ -93,6 +105,8 @@ export function sanitizeTripContext(raw, now = Date.now()) {
     trafficObservedAtEpochMs,
     trafficCache,
     routeRequest,
+    viaRoadName,
+    baselineRoute,
     routeFresh: true,
     trafficFresh: trafficEvidenceValid,
     trafficUnavailable,
