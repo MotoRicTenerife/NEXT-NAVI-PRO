@@ -1000,6 +1000,46 @@ async function handle(req, res) {
     : [];
   const memorySummary = typeof input?.summary === "string" ? input.summary.trim().slice(0, 2500) : "";
   const tripContext = sanitizeTripContext(input?.tripContext);
+  if (tripContext?.routeRequest) {
+    if (process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED === "true" && process.env.TOMTOM_API_KEY) {
+      try {
+        const routeResult = await fetchTomTomTrafficRoutes(tripContext.routeRequest, {
+          apiKey: process.env.TOMTOM_API_KEY
+        });
+        const compactRoutes = routeResult.routes.map(({ points, trafficSections, ...route }) => ({
+          ...route,
+          trafficSections: trafficSections.slice(0, 12)
+        }));
+        const baselineMeters = tripContext.distanceKm * 1000;
+        const primary = compactRoutes.find(route => route.routeId === "primary");
+        const distanceDiscrepancy = primary
+          ? Math.abs(primary.lengthInMeters - baselineMeters) / baselineMeters > 0.35
+          : false;
+        liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING: " + JSON.stringify({
+          source: routeResult.source,
+          observedAtEpochMs: routeResult.observedAtEpochMs,
+          vehicleMode: routeResult.vehicleMode,
+          motorcycleModeBeta: routeResult.motorcycleModeBeta,
+          routes: compactRoutes,
+          rejectedRoutes: routeResult.rejectedRoutes,
+          distanceDiscrepancy
+        });
+        if (tripContext.vehicleMode === "motorcycle") {
+          liveContext += "\nMOTORCYCLE ROUTING LIMIT: TomTom travelMode=motorcycle is beta and restriction data is not complete in every area. Use it only as a traffic-aware cross-check when every returned travel-mode section is verified. Keep the Valhalla motorcycle route as the navigation baseline; never silently replace it or claim full legal-access certainty.";
+        }
+        if (distanceDiscrepancy) {
+          liveContext += "\nROUTE CROSS-CHECK WARNING: TomTom and Valhalla primary route distances differ by more than 35 percent. Do not recommend the TomTom route as a direct equivalent; explain the discrepancy and ask before changing route.";
+        }
+      } catch (error) {
+        console.warn("TomTom traffic-aware routing unavailable", {
+          providerStatus: Number.isInteger(error.statusCode) ? error.statusCode : null
+        });
+        liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS UNAVAILABLE. Do not provide a live-traffic-adjusted ETA or traffic-based alternative route. The Valhalla estimate remains a baseline only.";
+      }
+    } else {
+      liveContext += "\nTOMTOM TRAFFIC-AWARE ROUTING IS NOT ENABLED ON THE SERVER. Do not present the Valhalla baseline as a live-traffic ETA or claim a verified traffic delay.";
+    }
+  }
   if (tripContext) {
     liveContext += "\nVERIFIED TRIP CONTEXT FROM THE APP: " + JSON.stringify(tripContext);
     liveContext += "\nTRAFFIC SAFETY INTERPRETATION: the Valhalla duration is a baseline estimate, NOT a live-traffic-adjusted ETA. TomTom incident records are not a complete traffic-flow measurement. No matched incident does NOT prove free-flowing traffic. The current route matcher does NOT verify carriageway direction, so never claim an event is confirmed on the rider's lane. Do not add overlapping incident delays or invent an overall delay.";
