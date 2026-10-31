@@ -22,4 +22,5 @@ jobs:
       - name: Verify live TomTom traffic and Jarvis on Render
         env:
           RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+          RENDER_EXPECTED_REVISION: ${{ github.event.pull_request.merge_commit_sha }}
         run: python roadtools/tomtom_traffic_live_smoke.py
