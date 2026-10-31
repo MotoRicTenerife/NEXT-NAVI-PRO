@@ -1225,6 +1225,36 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     maxZoom = 22f
                 }
                 style.addSource(VectorSource(SOURCE_TRAFFIC_FLOW, tileSet))
+                // The source is registered here; its styled layer is added above the route below.
+            }
+            // Live incident geometry is fetched through Render; no TomTom key is shipped in the APK.
+            style.addSource(GeoJsonSource(SOURCE_TRAFFIC_INCIDENTS, """{"type":"FeatureCollection","features":[]}"""))
+            style.addLayer(LineLayer("next-live-traffic-incident-lines", SOURCE_TRAFFIC_INCIDENTS).withProperties(
+                PropertyFactory.lineColor("#D50000"),
+                PropertyFactory.lineWidth(4.5f),
+                PropertyFactory.lineOpacity(0.96f),
+                PropertyFactory.lineCap("round"),
+                PropertyFactory.lineJoin("round")
+            ))
+            style.addLayer(CircleLayer("next-live-traffic-incident-points", SOURCE_TRAFFIC_INCIDENTS).withProperties(
+                PropertyFactory.circleColor("#F57C00"),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2f)
+            ))
+            style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
+            // The route is a neutral underlay: TomTom flow geometry is drawn above it.
+            // Uncovered route portions remain grey instead of being presented as traffic-free.
+            style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
+                PropertyFactory.lineColor("#777777"),
+                PropertyFactory.lineWidth(7f),
+                PropertyFactory.lineOpacity(0.92f),
+                PropertyFactory.lineCap("round"),
+                PropertyFactory.lineJoin("round")
+            ))
+            // Draw TomTom flow above the route so each covered road segment communicates
+            // its own relative speed: stopped/red, heavy/orange, light/yellow, free/green.
+            trafficTileTemplate()?.let {
                 val trafficColor = Expression.step(
                     Expression.get("relative_speed"),
                     Expression.literal("#D50000"),
@@ -1246,31 +1276,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     .withProperties(
                         PropertyFactory.lineColor(trafficColor),
                         PropertyFactory.lineWidth(trafficWidth),
-                        PropertyFactory.lineOpacity(0.92f),
+                        PropertyFactory.lineOpacity(0.96f),
                         PropertyFactory.lineCap("round"),
                         PropertyFactory.lineJoin("round")
                     ))
             }
-            // Live incident geometry is fetched through Render; no TomTom key is shipped in the APK.
-            style.addSource(GeoJsonSource(SOURCE_TRAFFIC_INCIDENTS, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(LineLayer("next-live-traffic-incident-lines", SOURCE_TRAFFIC_INCIDENTS).withProperties(
-                PropertyFactory.lineColor("#D50000"),
-                PropertyFactory.lineWidth(4.5f),
-                PropertyFactory.lineOpacity(0.96f),
-                PropertyFactory.lineCap("round"),
-                PropertyFactory.lineJoin("round")
-            ))
-            style.addLayer(CircleLayer("next-live-traffic-incident-points", SOURCE_TRAFFIC_INCIDENTS).withProperties(
-                PropertyFactory.circleColor("#F57C00"),
-                PropertyFactory.circleRadius(7f),
-                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                PropertyFactory.circleStrokeWidth(2f)
-            ))
-            style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
-            style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
-                PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
-                PropertyFactory.lineWidth(5f)
-            ))
             style.addSource(GeoJsonSource(SOURCE_MANUAL_SEGMENTS, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-manual-speed-segment-lines", SOURCE_MANUAL_SEGMENTS).withProperties(PropertyFactory.lineColor("#D500F9"), PropertyFactory.lineWidth(5f)))
             style.addSource(GeoJsonSource(SOURCE_MANUAL_ARROWS, """{"type":"FeatureCollection","features":[]}"""))
