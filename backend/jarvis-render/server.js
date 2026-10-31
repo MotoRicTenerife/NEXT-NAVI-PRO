@@ -1064,7 +1064,7 @@ async function handle(req, res) {
       ];
       const routeResults = await Promise.all(routeJobs.map(async job => {
         try {
-          const result = await fetchTomTomTrafficRoutesCached(job.request, getClientIp(req));
+          const result = await fetchTomTomTrafficRoutesCached(job.request, getClientIp(req), language);
           return { job, result };
         } catch (error) {
           return { job, error: error?.code || (Number.isInteger(error.statusCode) ? String(error.statusCode) : "provider_unavailable") };
