@@ -67,7 +67,7 @@ object TrafficIncidentParser {
         val category = properties.optString("iconCategory").trim()
         val magnitude = properties.optString("magnitudeOfDelay").ifBlank { "unknown" }
         val severity = severityFor(category, magnitude) ?: return null
-        val timeValidity = properties.optString("timeValidity").ifBlank { "present" }
+        val timeValidity = properties.optString("timeValidity")
         if (timeValidity != "present") return null
 
         val startTime = parseEpochMs(properties.optString("startTime"))
@@ -132,7 +132,14 @@ object TrafficIncidentParser {
         coordinates ?: return null
         val pairs = when (type) {
             "Point" -> listOf(coordinates)
-            "LineString" -> (0 until coordinates.length()).mapNotNull { coordinates.optJSONArray(it) }
+            "LineString" -> {
+                if (coordinates.length() < 2) return null
+                val parsed = ArrayList<JSONArray>(coordinates.length())
+                for (index in 0 until coordinates.length()) {
+                    parsed.add(coordinates.optJSONArray(index) ?: return null)
+                }
+                parsed
+            }
             else -> return null
         }
         if (pairs.isEmpty() || pairs.size > 20_000) return null
