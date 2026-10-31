@@ -1186,10 +1186,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val trafficColor = Expression.step(
                     Expression.get("relative_speed"),
                     Expression.literal("#D50000"),
-                    Expression.stop(0.25f, "#D50000"),
-                    Expression.stop(0.45f, "#F57C00"),
-                    Expression.stop(0.65f, "#FBC02D"),
-                    Expression.stop(0.80f, "#2EAD54")
+                    arrayOf(
+                        Expression.stop(0.25f, "#D50000"),
+                        Expression.stop(0.45f, "#F57C00"),
+                        Expression.stop(0.65f, "#FBC02D"),
+                        Expression.stop(0.80f, "#2EAD54")
+                    )
                 )
                 val trafficWidth = Expression.interpolate(
                     Expression.linear(),
