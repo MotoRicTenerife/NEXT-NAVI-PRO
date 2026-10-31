@@ -21,6 +21,7 @@ class AppDataBackupServiceTest {
             File(csv, "ride_01.csv").writeText("time,lat,lon\n1,2,3\n")
             File(gpx, "gpx_recording_in_progress.gpx").writeText("<partial/>")
             File(csv, "gps_trace_in_progress.csv").writeText("partial")
+            val jarvisDb = File(root, "jarvis_memory.db").apply { writeText("sqlite-snapshot") }
 
             val preferences = linkedMapOf<String, Any>(
                 "theme" to "positive",
@@ -31,10 +32,11 @@ class AppDataBackupServiceTest {
                 "favorites" to setOf("Casa", "Lavoro")
             )
             val archive = ByteArrayOutputStream()
-            val summary = AppDataBackupService.export(archive, preferences, gpx, csv)
+            val summary = AppDataBackupService.export(archive, preferences, gpx, csv, jarvisDb)
             assertEquals(1, summary.gpxCount)
             assertEquals(1, summary.csvCount)
             assertEquals(preferences.size, summary.settingsCount)
+            assertTrue(summary.jarvisMemoryIncluded)
 
             val staging = File(root, "staging")
             val plan = AppDataBackupService.import(ByteArrayInputStream(archive.toByteArray()), staging)
@@ -46,6 +48,8 @@ class AppDataBackupServiceTest {
             assertEquals(setOf("Casa", "Lavoro"), plan.preferences["favorites"])
             assertEquals(listOf("ride_01.gpx"), plan.gpxFiles.map { it.name })
             assertEquals(listOf("ride_01.csv"), plan.csvFiles.map { it.name })
+            assertTrue(plan.jarvisMemoryDatabase!!.isFile)
+            assertEquals("sqlite-snapshot", plan.jarvisMemoryDatabase.readText())
         } finally {
             root.deleteRecursively()
         }
