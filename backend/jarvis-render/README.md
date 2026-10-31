@@ -15,7 +15,9 @@ This is the production Node.js backend for Jarvis, deployed on Render. The legac
 ## API contract
 
 - `GET /` and `GET /health`: health response.
-- `POST /jarvis`: accepts JSON containing `message`, optional `language`, and optional `personality` (`preset`, `irony`, `warmth`, `energy`, `concision`); returns `{"reply":"..."}`. Personality fields are bounded and allow-listed by the server. Voice speed and pitch are applied locally by Android and are not sent to the backend.
+- `GET /test`: mobile-friendly Jarvis Lab console, served by the same Render origin; no API keys are exposed to the browser. It supports multi-turn chat history, optional device GPS, browser dictation/speech, guided conversation checks, and safe provider diagnostics.
+- `POST /jarvis`: accepts JSON containing `message`, optional `language`, `history`, `summary`, `location`, `tripContext` and optional `personality` (`preset`, `irony`, `warmth`, `energy`, `concision`); returns `reply` plus non-secret diagnostics. Conversation history is bounded and sanitized. Personality fields are bounded and allow-listed by the server. Voice speed and pitch are applied locally by Android and are not sent to the backend.
+- `GET /traffic/status`: safe diagnostics for TomTom configuration and feature flags; never returns credentials.
 - `GET /speed-limit/status`: reports whether TomTom is configured and the provider guard state without exposing credentials. OSM road-editor endpoints are separate and do not supply automatic legal speed limits.
 - `POST /speed-limit`: accepts 2–8 recent valid GPS points and uses TomTom Snap to Roads. It reads only explicit maximum speed limits from the matched road segment. If TomTom cannot return an explicit, unambiguous limit, the result remains unknown/null; neither the Android automatic display nor the road-editor proposal falls back to OSM `maxspeed`. TomTom is requested in metric mode. Unknown or missing units are rejected instead of being guessed. Requests are rate-limited on the server. Provider keys remain server-side.
 - Gemini key remains server-side in `GEMINI_API_KEY`.
