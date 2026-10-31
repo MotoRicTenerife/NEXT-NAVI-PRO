@@ -67,9 +67,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: backend/jarvis-render/package-lock.json
-      - run: npm ci
       - name: Check backend syntax
         run: npm run check
       - name: Test rate limits and TomTom parsing with mocked upstream
