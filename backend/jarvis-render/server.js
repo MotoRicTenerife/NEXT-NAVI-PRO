@@ -1364,7 +1364,7 @@ async function handle(req, res) {
       historyMessages: history.length,
       tripContextAccepted: Boolean(tripContext),
       trafficContext: tripContext
-        ? tripContext.trafficUnavailable ? (trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || "incident_details_unavailable") : tripContext.incidents.length ? "fresh_incidents" : (trafficRouteResult ? "tomtom_route_loaded" : "fresh_no_route_match")
+        ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || (tripContext.trafficUnavailable ? "incident_details_unavailable" : tripContext.incidents.length ? "fresh_incidents" : "fresh_no_route_match")
         : asksTraffic ? trafficRouteResult ? "tomtom_route_loaded" : trafficFailureCode || "not_verified" : "not_requested",
       weatherStatus: asksWeather ? weatherResult ? "verified" : weatherFailureCode || "not_verified" : "not_requested"
     }
