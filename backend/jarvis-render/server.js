@@ -354,9 +354,10 @@ async function handleCloudSpeedSegments(req, res, url) {
 
 async function handleTrafficFlowTile(req, res, url) {
   if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
-  // Do not consume shared provider quota until Render entitlement and client abuse controls are approved.
-  if (process.env.TRAFFIC_FLOW_ENABLED !== "true") {
-    return send(res, 503, { error: "Traffic flow overlay is not enabled" });
+  // Enabled by default when TomTom is configured. An explicit false is the
+  // operator kill-switch; per-client limits and shared cache protect provider quota.
+  if (!isTomTomTrafficFlowEnabled(process.env.TRAFFIC_FLOW_ENABLED, process.env.TOMTOM_API_KEY)) {
+    return send(res, 503, { error: "Traffic flow overlay is not enabled or TomTom is not configured" });
   }
   const tile = parseTrafficTilePath(url.pathname);
   if (!tile) return send(res, 400, { error: "Invalid traffic tile coordinates" });
@@ -420,10 +421,10 @@ async function handleTrafficFlowTile(req, res, url) {
 
 async function handleTrafficIncidents(req, res, url) {
   if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
-  // Keep the new provider endpoint dark until account entitlement, quota, and
-  // public-client abuse controls are explicitly configured on Render.
-  if (process.env.TRAFFIC_INCIDENTS_ENABLED !== "true") {
-    return send(res, 503, { error: "Traffic incident service is not enabled" });
+  // Enabled by default when TomTom is configured. An explicit false is the
+  // operator kill-switch; per-client limits and short cache protect provider quota.
+  if (!isTomTomTrafficIncidentsEnabled(process.env.TRAFFIC_INCIDENTS_ENABLED, process.env.TOMTOM_API_KEY)) {
+    return send(res, 503, { error: "Traffic incident service is not enabled or TomTom is not configured" });
   }
   const bbox = parseIncidentBbox(url.searchParams.get("bbox"));
   if (!bbox) return send(res, 400, { error: "A valid bbox under 10,000 km² is required" });
@@ -619,7 +620,8 @@ async function handle(req, res) {
     return send(res, 200, {
       ok: true,
       tomtomConfigured: Boolean(process.env.TOMTOM_API_KEY),
-      incidentDetailsEnabled: process.env.TRAFFIC_INCIDENTS_ENABLED === "true",
+      trafficFlowEnabled: isTomTomTrafficFlowEnabled(process.env.TRAFFIC_FLOW_ENABLED, process.env.TOMTOM_API_KEY),
+      incidentDetailsEnabled: isTomTomTrafficIncidentsEnabled(process.env.TRAFFIC_INCIDENTS_ENABLED, process.env.TOMTOM_API_KEY),
       trafficAwareRoutingEnabled: isTomTomTrafficRoutingEnabled(process.env.TOMTOM_TRAFFIC_ROUTING_ENABLED, process.env.TOMTOM_API_KEY)
     });
   }
