@@ -19,12 +19,17 @@ function distanceKm(a, b) {
   return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 }
 
-async function requestJson(url, fetchImpl, label) {
+async function requestJson(url, fetchImpl, label, hooks) {
+  if (hooks?.admit) {
+    const admission = hooks.admit();
+    if (!admission?.allowed) throw new Error("tomtom_" + (admission?.reason || "rate_limited"));
+  }
   const response = await fetchImpl(url, {
     method: "GET",
     headers: { accept: "application/json", "user-agent": "NEXT-NAVI-PRO/0.4 (TomTom live traffic)" },
     signal: AbortSignal.timeout(9000)
   });
+  hooks?.noteUpstreamStatus?.(response.status, response.headers?.get?.("retry-after"));
   if (!response.ok) throw new Error(label + "_http_" + response.status);
   return response.json();
 }
@@ -95,7 +100,7 @@ function parseIncidents(data, location) {
  * Query TomTom's live Flow Segment Data and Incident Details APIs.
  * Results are cached briefly because TomTom's non-tile quota is shared with speed-limit calls.
  */
-export async function fetchTomTomTraffic(location, apiKey, fetchImpl = fetch) {
+export async function fetchTomTomTraffic(location, apiKey, fetchImpl = fetch, hooks = {}) {
   if (!validLocation(location)) throw new Error("traffic_location_invalid");
   if (typeof apiKey !== "string" || !apiKey.trim()) throw new Error("tomtom_api_key_missing");
 
@@ -130,8 +135,8 @@ export async function fetchTomTomTraffic(location, apiKey, fetchImpl = fetch) {
   }).toString();
 
   const [flowOutcome, incidentsOutcome] = await Promise.allSettled([
-    requestJson(flowUrl, fetchImpl, "tomtom_flow"),
-    requestJson(incidentUrl, fetchImpl, "tomtom_incidents")
+    requestJson(flowUrl, fetchImpl, "tomtom_flow", hooks),
+    requestJson(incidentUrl, fetchImpl, "tomtom_incidents", hooks)
   ]);
   let flow = null;
   let incidents = null;
