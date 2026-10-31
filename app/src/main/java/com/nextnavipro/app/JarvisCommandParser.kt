@@ -48,7 +48,7 @@ object JarvisCommandParser {
 
         val viaPatterns = listOf(
             Regex("(?iu)^\\s*(?:e\\s+)?passando\\s+(?:dalla|dal|dallo|da|per|sulla|sul)\\s+(.+?)[?.!,]*$"),
-            Regex("(?iu)^\\s*(?:e\\s+)?se\\s+prendo\\s+(?:la|il|lo|)\\s+(.+?)[?.!,]*$")
+            Regex("(?iu)^\\s*(?:e\\s+)?se\\s+prendo\\s+(?:la|il|lo)\\s+(.+?)[?.!,]*$")
         )
         val viaRoad = viaPatterns.firstNotNullOfOrNull { it.find(transcript.trim())?.groupValues?.getOrNull(1)?.trim() }
         if (!viaRoad.isNullOrBlank() && viaRoad.length in 2..60) {
