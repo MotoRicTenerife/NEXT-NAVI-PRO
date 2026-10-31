@@ -51,6 +51,28 @@ object RoadViaResolver {
             }
     }
 
+    fun distanceToRouteMeters(point: NavPoint, route: List<NavPoint>): Double {
+        if (!valid(point) || route.size < 2 || route.any { !valid(it) }) return Double.POSITIVE_INFINITY
+        val latitudeScale = 111_320.0
+        val longitudeScale = 111_320.0 * cos(Math.toRadians(point.latitude))
+        var best = Double.POSITIVE_INFINITY
+        for (index in 0 until route.lastIndex) {
+            val a = route[index]
+            val b = route[index + 1]
+            val ax = (a.longitude - point.longitude) * longitudeScale
+            val ay = (a.latitude - point.latitude) * latitudeScale
+            val bx = (b.longitude - point.longitude) * longitudeScale
+            val by = (b.latitude - point.latitude) * latitudeScale
+            val dx = bx - ax
+            val dy = by - ay
+            val denominator = dx * dx + dy * dy
+            val t = if (denominator <= 1e-9) 0.0 else ((-(ax * dx + ay * dy)) / denominator).coerceIn(0.0, 1.0)
+            val distance = hypot(ax + t * dx, ay + t * dy)
+            if (distance < best) best = distance
+        }
+        return best
+    }
+
     private fun valid(point: NavPoint): Boolean =
         point.latitude.isFinite() && point.latitude in -90.0..90.0 &&
             point.longitude.isFinite() && point.longitude in -180.0..180.0
