@@ -2887,10 +2887,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun preferredJarvisTtsLocale(): Locale {
-        // The app UI and greeting cover these locales. For other system languages, use English
-        // consistently instead of silently disabling speech when a TTS voice/data pack is absent.
-        val language = Locale.getDefault().language.lowercase(Locale.ROOT)
-        return if (language in setOf("it", "es", "fr", "de", "pt", "nl")) Locale.getDefault() else Locale.ENGLISH
+        // Never force Italian or English: Jarvis must use the device locale.
+        // If the device has no TTS voice/data for this language, report that limitation
+        // rather than silently speaking a different language.
+        return Locale.getDefault()
     }
 
     private fun applyJarvisVoicePreference() {
@@ -3971,6 +3971,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         )
         JarvisOnlineAiClient.ask(
             message = transcript,
+            language = Locale.getDefault().toLanguageTag(),
             assistantName = jarvisAssistantName(),
             location = liveLocation,
             history = history,
