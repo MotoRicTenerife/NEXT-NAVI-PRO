@@ -437,43 +437,52 @@ async function handle(req, res) {
       "https://overpass.private.coffee/api/interpreter"
     ];
 
-    for (const endpoint of endpoints) {
-      try {
+    // Race the mirrors with one shared deadline. The Android caller has a 12 s
+    // read timeout, so sequential 9–11 s mirror waits would make fallback useless.
+    const overpassController = new AbortController();
+    const overpassDeadline = setTimeout(() => overpassController.abort(), 4500);
+    try {
+      const result = await Promise.any(endpoints.map(async endpoint => {
         const upstream = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded; charset=utf-8", accept: "application/json", "User-Agent": userAgent },
           body: new URLSearchParams({ data: overpassQuery }),
-          signal: AbortSignal.timeout(9000)
+          signal: overpassController.signal
         });
-        if (!upstream.ok) { providerErrors.push("Overpass HTTP " + upstream.status); continue; }
+        if (!upstream.ok) throw new Error("HTTP " + upstream.status);
         const data = await upstream.json();
         const parsed = parseOverpassWayGeometry(data, osmId);
-        if (!parsed) { providerErrors.push("Overpass geometry missing or incomplete"); continue; }
-        const way = parsed.way;
-        return send(res, 200, {
-          ok: true, source: "OpenStreetMap/Overpass", fetchedAt: new Date().toISOString(),
-          osmType: "way", osmId, name: way.tags?.name || way.tags?.ref || null,
-          tags: way.tags || {}, geometry: parsed.geometry,
-          direction: {
-            oneway: way.tags?.oneway || null,
-            junction: way.tags?.junction || null,
-            motorVehicle: way.tags?.motor_vehicle || null,
-            access: way.tags?.access || null,
-            note: "Geometry order is OSM digitization order, not by itself proof of legal travel direction."
-          }
-        });
-      } catch (error) {
-        providerErrors.push("Overpass " + (error instanceof Error ? error.name : "provider error"));
-      }
+        if (!parsed) throw new Error("way geometry missing or incomplete");
+        return { ...parsed, source: "OpenStreetMap/Overpass" };
+      }));
+      overpassController.abort();
+      clearTimeout(overpassDeadline);
+      const way = result.way;
+      return send(res, 200, {
+        ok: true, source: result.source, fetchedAt: new Date().toISOString(),
+        osmType: "way", osmId, name: way.tags?.name || way.tags?.ref || null,
+        tags: way.tags || {}, geometry: result.geometry,
+        direction: {
+          oneway: way.tags?.oneway || null,
+          junction: way.tags?.junction || null,
+          motorVehicle: way.tags?.motor_vehicle || null,
+          access: way.tags?.access || null,
+          note: "Geometry order is OSM digitization order, not by itself proof of legal travel direction."
+        }
+      });
+    } catch (error) {
+      clearTimeout(overpassDeadline);
+      const errors = error instanceof AggregateError ? error.errors : [error];
+      providerErrors.push(...errors.map(item => "Overpass " + (item instanceof Error ? item.message : "provider error")));
     }
 
     // Overpass mirrors can all be unavailable or rate-limited. The official OSM API
-    // provides the way's ordered node IDs and their coordinates in one bounded request.
+    // provides the way's ordered node IDs and coordinates in one bounded request.
     try {
       const upstream = await fetch("https://api.openstreetmap.org/api/0.6/way/" + osmId + "/full.json", {
         method: "GET",
         headers: { accept: "application/json", "User-Agent": userAgent },
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(6500)
       });
       if (!upstream.ok) {
         providerErrors.push("OSM API HTTP " + upstream.status);
