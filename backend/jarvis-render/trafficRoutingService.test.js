@@ -57,6 +57,15 @@ test("rejects routes with any unverified or non-motorcycle section", () => {
   assert.equal(result.rejectedRoutes, 1);
 });
 
+test("does not expose alternatives when the primary motorcycle route is unverified", () => {
+  const wrongPrimary = structuredClone(validRoute);
+  wrongPrimary.sections[0].travelMode = "other";
+  const validAlternative = structuredClone(validRoute);
+  const result = normalizeTomTomTrafficRoutes({ routes: [wrongPrimary, validAlternative] }, "motorcycle", 1_800_000_000_000);
+  assert.equal(result.routes.length, 0);
+  assert.equal(result.rejectedRoutes, 1);
+});
+
 test("mocked upstream fetch never returns the API key", async () => {
   let requestedUrl = "";
   const result = await fetchTomTomTrafficRoutes(request, {
