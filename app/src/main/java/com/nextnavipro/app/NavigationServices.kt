@@ -26,6 +26,7 @@ data class RouteResult(
     val firstInstruction: String,
     val maneuvers: List<RouteManeuver> = emptyList()
 )
+data class RouteOptions(val primary: RouteResult, val alternatives: List<RouteResult>)
 
 object NavigationServices {
     private const val CONNECT_TIMEOUT_MS = 10000
@@ -183,7 +184,8 @@ object NavigationServices {
      * Builds a Valhalla request for the selected vehicle. The motorcycle profile is
      * explicitly configured for paved-road touring (not adventure trails).
      */
-    internal fun buildRouteRequest(origin: NavPoint, destination: NavPoint, motorcycle: Boolean): JSONObject {
+    internal fun buildRouteRequest(origin: NavPoint, destination: NavPoint, motorcycle: Boolean, alternatives: Int = 0): JSONObject {
+        require(alternatives in 0..3) { "Valhalla alternatives must be between 0 and 3." }
         val request = JSONObject()
             .put("locations", JSONArray()
                 .put(JSONObject().put("lat", origin.latitude).put("lon", origin.longitude))
@@ -193,6 +195,7 @@ object NavigationServices {
             .put("language", Locale.getDefault().toLanguageTag())
             .put("shape_format", "polyline6")
             .put("directions_options", JSONObject().put("units", "kilometers"))
+        if (alternatives > 0) request.put("alternates", alternatives)
         if (motorcycle) {
             request.put("costing_options", JSONObject().put("motorcycle",
                 JSONObject().put("use_trails", 0.0)))
@@ -215,36 +218,84 @@ object NavigationServices {
             OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
             val body = readResponse(connection)
             val root = JSONObject(body)
-            val trip = root.optJSONObject("trip") ?: throw IllegalStateException(
-                root.optJSONObject("error")?.optString("message") ?: "Il server non ha restituito un percorso."
-            )
-            val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("Percorso senza tappe.")
-            if (legs.length() == 0) throw IllegalStateException("Percorso vuoto.")
-            val leg = legs.getJSONObject(0)
-            val encodedShape = leg.optString("shape")
-            val decoded = decodePolyline6(encodedShape)
-            if (decoded.size < 2) throw IllegalStateException("Geometria del percorso non valida.")
-            val summary = trip.optJSONObject("summary") ?: JSONObject()
-            val legSummary = leg.optJSONObject("summary") ?: summary
-            val distance = legSummary.optDouble("length", summary.optDouble("length", 0.0))
-            val seconds = legSummary.optDouble("time", summary.optDouble("time", 0.0)).roundToInt()
-            val maneuvers = leg.optJSONArray("maneuvers")
-            val parsedManeuvers = ArrayList<RouteManeuver>()
-            if (maneuvers != null) {
-                for (i in 0 until maneuvers.length()) {
-                    val item = maneuvers.optJSONObject(i) ?: continue
-                    val instructionText = item.optString("instruction").ifBlank { "Prosegui" }
-                    val pointIndex = item.optInt("begin_shape_index", 0).coerceIn(0, decoded.lastIndex)
-                    val streetNames = item.optJSONArray("street_names")
-                    val streetName = if (streetNames != null && streetNames.length() > 0) streetNames.optString(0) else ""
-                    parsedManeuvers.add(RouteManeuver(pointIndex, instructionText, item.optInt("type", 0), streetName))
-                }
-            }
-            val instruction = parsedManeuvers.firstOrNull()?.instruction ?: "Segui il percorso evidenziato."
-            return RouteResult(decoded, distance, seconds, instruction, parsedManeuvers)
+            return parseRouteOptions(root).primary
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * Calculates a primary route plus a bounded set of Valhalla alternatives.
+     * Alternatives are candidates only; traffic-aware ranking is performed separately.
+     */
+    fun calculateRouteOptions(
+        origin: NavPoint,
+        destination: NavPoint,
+        motorcycle: Boolean,
+        alternativeCount: Int = 2
+    ): RouteOptions {
+        require(alternativeCount in 0..3) { "Richieste da 0 a 3 alternative." }
+        val request = buildRouteRequest(origin, destination, motorcycle, alternativeCount)
+        val connection = URL("https://valhalla1.openstreetmap.de/route").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("X-Client-Id", "NEXT-NAVI-PRO (github.com/MotoRicTenerife/NEXT-NAVI-PRO)")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
+            return parseRouteOptions(JSONObject(readResponse(connection)))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** Parses Valhalla's root trip and optional alternates[].trip response shape. */
+    internal fun parseRouteOptions(root: JSONObject): RouteOptions {
+        val primaryTrip = root.optJSONObject("trip") ?: throw IllegalStateException(
+            root.optJSONObject("error")?.optString("message") ?: "Il server non ha restituito un percorso."
+        )
+        val primary = parseTrip(primaryTrip)
+        val alternativesJson = root.optJSONArray("alternates") ?: JSONArray()
+        val alternatives = ArrayList<RouteResult>()
+        for (index in 0 until alternativesJson.length()) {
+            val item = alternativesJson.optJSONObject(index) ?: continue
+            val trip = item.optJSONObject("trip") ?: continue
+            val parsed = runCatching { parseTrip(trip) }.getOrNull() ?: continue
+            if (parsed.points.size >= 2 && parsed.distanceKm > 0.0 && parsed.durationSeconds > 0) {
+                alternatives.add(parsed)
+            }
+        }
+        return RouteOptions(primary, alternatives)
+    }
+
+    private fun parseTrip(trip: JSONObject): RouteResult {
+        val legs = trip.optJSONArray("legs") ?: throw IllegalStateException("Percorso senza tappe.")
+        if (legs.length() == 0) throw IllegalStateException("Percorso vuoto.")
+        val leg = legs.getJSONObject(0)
+        val decoded = decodePolyline6(leg.optString("shape"))
+        if (decoded.size < 2) throw IllegalStateException("Geometria del percorso non valida.")
+        val summary = trip.optJSONObject("summary") ?: JSONObject()
+        val legSummary = leg.optJSONObject("summary") ?: summary
+        val distance = legSummary.optDouble("length", summary.optDouble("length", 0.0))
+        val seconds = legSummary.optDouble("time", summary.optDouble("time", 0.0)).roundToInt()
+        val maneuvers = leg.optJSONArray("maneuvers")
+        val parsedManeuvers = ArrayList<RouteManeuver>()
+        if (maneuvers != null) {
+            for (i in 0 until maneuvers.length()) {
+                val item = maneuvers.optJSONObject(i) ?: continue
+                val instructionText = item.optString("instruction").ifBlank { "Prosegui" }
+                val pointIndex = item.optInt("begin_shape_index", 0).coerceIn(0, decoded.lastIndex)
+                val streetNames = item.optJSONArray("street_names")
+                val streetName = if (streetNames != null && streetNames.length() > 0) streetNames.optString(0) else ""
+                parsedManeuvers.add(RouteManeuver(pointIndex, instructionText, item.optInt("type", 0), streetName))
+            }
+        }
+        val instruction = parsedManeuvers.firstOrNull()?.instruction ?: "Segui il percorso evidenziato."
+        return RouteResult(decoded, distance, seconds, instruction, parsedManeuvers)
     }
 
     /**
