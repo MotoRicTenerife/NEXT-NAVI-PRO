@@ -22,7 +22,7 @@ This is not an LLM-driven navigator. A language model may explain a decision thr
 - TomTom Orbis Routing v2 is currently documented as Public Preview and its documented travelMode parameter allows only car. It is therefore NOT a motorcycle alternative provider for the Tricity 300. It may be evaluated separately for a future car mode only after entitlement, coverage, pricing and terms are verified. Motorcycle mode remains on Valhalla plus independently matched traffic evidence.
 
 ### 3. Traffic and hazard perception
-- Map overlay: TomTom Orbis v2 vector flow tiles; draw road geometries and color by relative_speed. Missing tiles mean unknown, never green.
+- Map overlay: TomTom Orbis v2 vector flow tiles; draw road geometries and color by relative_speed. Missing tiles mean unknown, never green. The Render proxy is feature-flagged off by default until provider quota and client abuse controls are verified.
 - Structured incident feed: TomTom Orbis v2 Incident Details for accidents, jams, closures, roadworks, weather hazards and future events.
 - Structured flow assessment: investigate route-corridor sampling via supported Flow Segment Data or server-side vector-tile decoding. Legacy Flow Segment Data exposes current/free-flow speed, travel time, confidence, road closure and geometry; verify lifecycle and commercial terms before depending on it.
 - Other national, regional and community sources are optional adapters with per-source freshness, provenance, coverage, rate limits and license. Never assume a country-specific feed covers another country.
@@ -88,7 +88,7 @@ The first safe decision layer is deterministic and explainable. It is not advert
 - Verify TomTom Traffic entitlements and perform bounded live smoke tests.
 
 ### Phase B — traffic data plane
-- Add Incident Details proxy with bounded bbox, authentication/rate limits, cache, TTL and source metadata.
+- Add Incident Details proxy with bounded bbox, rate limits, cache, TTL and source metadata; keep it disabled until user authentication/app abuse controls are ready. The current per-IP guard is a temporary quota guard, not production authentication.
 - Add route-corridor flow sampling and route/segment matching.
 - Add typed Kotlin traffic observations with freshness/confidence.
 - Test stale, contradictory, directional, missing and closure observations.
