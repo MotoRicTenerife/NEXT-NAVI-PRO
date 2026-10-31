@@ -68,6 +68,16 @@ internal object AppDataBackupService {
         val settingsBytes = settings.toString().toByteArray(Charsets.UTF_8)
         require(settingsBytes.size <= MAX_SETTINGS_BYTES) { "Le impostazioni superano il limite di backup." }
 
+        val gpxFiles = eligibleFiles(gpxDirectory, "gpx")
+        val csvFiles = eligibleFiles(gpsDiagnosticsDirectory, "csv")
+        val totalFileBytes = (gpxFiles + csvFiles).sumOf { file ->
+            require(file.length() <= MAX_FILE_BYTES) { "File troppo grande per il backup: ${file.name}" }
+            file.length()
+        }
+        require(totalFileBytes + settingsBytes.size <= MAX_TOTAL_BYTES) {
+            "L'archivio completo supera il limite di backup di 250 MB."
+        }
+
         var gpxCount = 0
         var csvCount = 0
         ZipOutputStream(output.buffered()).use { zip ->
@@ -82,23 +92,23 @@ internal object AppDataBackupService {
         return BackupSummary(gpxCount, csvCount, entries.length())
     }
 
-    private fun addDirectory(zip: ZipOutputStream, directory: File, prefix: String, extension: String): Int {
-        if (!directory.isDirectory) return 0
-        var count = 0
+    private fun eligibleFiles(directory: File, extension: String): List<File> =
         directory.listFiles()?.filter { file ->
             file.isFile &&
                 file.extension.equals(extension, ignoreCase = true) &&
                 !file.name.contains("in_progress", ignoreCase = true) &&
                 !file.name.endsWith(".tmp", ignoreCase = true) &&
                 isSafeFileName(file.name)
-        }?.sortedBy { it.name }?.forEach { file ->
-            require(file.length() <= MAX_FILE_BYTES) { "File troppo grande per il backup: ${file.name}" }
+        }?.sortedBy { it.name }.orEmpty()
+
+    private fun addDirectory(zip: ZipOutputStream, directory: File, prefix: String, extension: String): Int {
+        val files = eligibleFiles(directory, extension)
+        files.forEach { file ->
             zip.putNextEntry(ZipEntry("$prefix/${file.name}"))
             file.inputStream().buffered().use { it.copyTo(zip, BUFFER_SIZE) }
             zip.closeEntry()
-            count++
         }
-        return count
+        return files.size
     }
 
     /**
@@ -114,6 +124,7 @@ internal object AppDataBackupService {
         val stagedCsv = File(stagingDirectory, "gps_diagnostics").apply { mkdirs() }
         var totalBytes = 0L
         var settingsBytes: ByteArray? = null
+        var entryCount = 0
         val seenEntries = HashSet<String>()
 
         ZipInputStream(input.buffered()).use { zip ->
@@ -123,6 +134,8 @@ internal object AppDataBackupService {
                     zip.closeEntry()
                     continue
                 }
+                entryCount++
+                require(entryCount <= 10_000) { "Il backup contiene troppe voci." }
                 require(seenEntries.add(entry.name)) { "Voce duplicata nel backup: ${entry.name}" }
                 when {
                     entry.name == SETTINGS_ENTRY -> {
