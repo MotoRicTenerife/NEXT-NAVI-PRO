@@ -1,4 +1,5 @@
 import http from "node:http";
+import { readFile } from "node:fs/promises";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
 const HOST = "0.0.0.0";
@@ -384,6 +385,23 @@ async function handle(req, res) {
   }
 
   if (url.pathname === "/speed-limit-segments" || url.pathname === "/speed-limit-segments/upsert") { return handleCloudSpeedSegments(req, res, url); }
+
+  if (req.method === "GET" && url.pathname === "/test") {
+    try {
+      const html = await readFile(new URL("./test-console.html", import.meta.url));
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'"
+      });
+      return res.end(html);
+    } catch (error) {
+      console.error("Jarvis test console could not be loaded", { errorType: error instanceof Error ? error.name : "UnknownError" });
+      return send(res, 503, { error: "Jarvis test console is not available in this deployment" });
+    }
+  }
 
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/")) {
     return send(res, 200, { ok: true, service: "NEXT NAVI PRO Jarvis proxy", revision: process.env.RENDER_GIT_COMMIT || "unknown" });
