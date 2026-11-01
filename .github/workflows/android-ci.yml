@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -117,125 +117,40 @@ jobs:
           echo "NEXT_NAVI_CI_APK=$RUNNER_TEMP/next-navi-pro-debug.apk" >> "$GITHUB_ENV"
           echo "Staged APK for emulator: $RUNNER_TEMP/next-navi-pro-debug.apk"
 
-      - name: Install and launch APK in Android emulator
-        env:
-          NEXT_NAVI_CI_APK: ${{ runner.temp }}/next-navi-pro-debug.apk
+      - name: Enable KVM hardware acceleration
         run: |
-          set -euo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          AVDMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          EMULATOR="$ANDROID_HOME/emulator/emulator"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -c /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
 
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "emulator" "system-images;android-35;google_apis;x86_64"
-          export ANDROID_USER_HOME="$HOME/.android"
-          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
-          export ANDROID_SDK_HOME="$HOME"
-          mkdir -p "$ANDROID_AVD_HOME"
+      - name: Install and launch APK in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env:
+          APK_PATH: ${{ runner.temp }}/next-navi-pro-debug.apk
+          DIAG_DIR: ci-diagnostics
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          cores: 2
+          force-avd-creation: true
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash .github/ci/emulator-check.sh
 
-          AVD_CREATE_OUTPUT="$(printf 'no\n' | "$AVDMANAGER" create avd --force --name next-navi-ci --package "system-images;android-35;google_apis;x86_64" --device "pixel_6" --path "$ANDROID_AVD_HOME/next-navi-ci.avd" 2>&1)"
-          printf '%s\n' "$AVD_CREATE_OUTPUT"
-          if [ ! -s "$ANDROID_AVD_HOME/next-navi-ci.ini" ]; then
-            echo "::error::avdmanager did not create the next-navi-ci.ini file in $ANDROID_AVD_HOME."
-            "$AVDMANAGER" list avd || true
-            find "$ANDROID_USER_HOME" -maxdepth 4 -type f -print 2>/dev/null | sort | head -n 100 || true
-            exit 1
-          fi
-          "$EMULATOR" -list-avds | grep -Fxq "next-navi-ci"
-
-          test -s "$NEXT_NAVI_CI_APK"
-          "$ADB" start-server
-          "$EMULATOR" -port 5554 -avd next-navi-ci -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 4096 -cores 2 -accel off > "$RUNNER_TEMP/next-navi-emulator.log" 2>&1 &
-          EMULATOR_PID=$!
-          cleanup_emulator() {
-            "$ADB" -s emulator-5554 emu kill >/dev/null 2>&1 || true
-            kill "$EMULATOR_PID" >/dev/null 2>&1 || true
-            wait "$EMULATOR_PID" 2>/dev/null || true
-          }
-          trap cleanup_emulator EXIT
-
-          READY=false
-          for attempt in $(seq 1 300); do
-            DEVICE_STATE="$("$ADB" devices | awk '$1 == "emulator-5554" { print $2 }' | tail -n 1)"
-            if [ "$DEVICE_STATE" = "device" ]; then
-              BOOT_COMPLETED="$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-              if [ "$BOOT_COMPLETED" = "1" ]; then
-                PACKAGE_SERVICE="$("$ADB" -s emulator-5554 shell service check package 2>/dev/null || true)"
-                ACTIVITY_SERVICE="$("$ADB" -s emulator-5554 shell service check activity 2>/dev/null || true)"
-                if [[ "$PACKAGE_SERVICE" == *": found"* && "$ACTIVITY_SERVICE" == *": found"* ]]; then
-                  READY=true
-                  break
-                fi
-              fi
-            fi
-            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
-              echo "::error::Android emulator process exited before becoming ready."
-              tail -n 120 "$RUNNER_TEMP/next-navi-emulator.log" || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          if [ "$READY" != "true" ]; then
-            echo "::error::Android emulator did not expose package/activity services within 10 minutes."
-            "$ADB" devices || true
-            tail -n 160 "$RUNNER_TEMP/next-navi-emulator.log" || true
-            exit 1
-          fi
-
-          echo "Emulator booted; package and activity services are available."
-          "$ADB" -s emulator-5554 shell settings put global window_animation_scale 0.0 || true
-          "$ADB" -s emulator-5554 shell settings put global transition_animation_scale 0.0 || true
-          "$ADB" -s emulator-5554 shell settings put global animator_duration_scale 0.0 || true
-
-          echo "Checking package manager before installation."
-          "$ADB" -s emulator-5554 shell service check package
-          "$ADB" -s emulator-5554 shell cmd package list packages >/dev/null
-
-          echo "Installing APK without ADB streaming: $NEXT_NAVI_CI_APK"
-          if ! "$ADB" -s emulator-5554 install --no-streaming -r "$NEXT_NAVI_CI_APK"; then
-            echo "::warning::First APK installation attempt failed; collecting Android diagnostics before one controlled recovery."
-            "$ADB" -s emulator-5554 shell getprop > "$RUNNER_TEMP/android-getprop-before-recovery.txt" 2>&1 || true
-            "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-before-recovery.txt" 2>&1 || true
-            grep -Ei 'PackageManager|installd|system_server|FATAL EXCEPTION|lowmemory|lmkd|binder' "$RUNNER_TEMP/android-logcat-before-recovery.txt" | tail -n 250 || true
-            echo "Rebooting emulator once to recover Android system services."
-            "$ADB" -s emulator-5554 reboot
-            REBOOT_READY=false
-            for attempt in $(seq 1 180); do
-              BOOT_COMPLETED="$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-              PACKAGE_SERVICE="$("$ADB" -s emulator-5554 shell service check package 2>/dev/null || true)"
-              ACTIVITY_SERVICE="$("$ADB" -s emulator-5554 shell service check activity 2>/dev/null || true)"
-              if [ "$BOOT_COMPLETED" = "1" ] && [[ "$PACKAGE_SERVICE" == *": found"* && "$ACTIVITY_SERVICE" == *": found"* ]]; then
-                REBOOT_READY=true
-                break
-              fi
-              sleep 2
-            done
-            if [ "$REBOOT_READY" != "true" ]; then
-              echo "::error::Android package/activity services did not recover after the controlled reboot."
-              "$ADB" devices || true
-              "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-after-recovery.txt" 2>&1 || true
-              tail -n 300 "$RUNNER_TEMP/android-logcat-after-recovery.txt" || true
-              exit 1
-            fi
-            echo "Retrying APK installation once, without ADB streaming."
-            if ! "$ADB" -s emulator-5554 install --no-streaming -r "$NEXT_NAVI_CI_APK"; then
-              echo "::error::APK installation failed again after Android services recovered."
-              "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-after-recovery.txt" 2>&1 || true
-              grep -Ei 'PackageManager|installd|system_server|FATAL EXCEPTION|lowmemory|lmkd|binder|Failure' "$RUNNER_TEMP/android-logcat-after-recovery.txt" | tail -n 350 || true
-              tail -n 160 "$RUNNER_TEMP/next-navi-emulator.log" || true
-              exit 1
-            fi
-          fi
-          "$ADB" -s emulator-5554 shell pm path com.nextnavipro.app.debug
-
-          START_OUTPUT="$("$ADB" -s emulator-5554 shell am start -W -n com.nextnavipro.app.debug/com.nextnavipro.app.MainActivity)"
-          printf '%s\n' "$START_OUTPUT"
-          printf '%s' "$START_OUTPUT" | grep -q 'Status: ok'
-          sleep 8
-          APP_PID="$("$ADB" -s emulator-5554 shell pidof com.nextnavipro.app.debug | tr -d '\r')"
-          test -n "$APP_PID"
-          echo "NEXT NAVI PRO launched successfully; pid=$APP_PID"
+      - name: Upload Android emulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-emulator-diagnostics
+          path: ci-diagnostics/
+          if-no-files-found: warn
 
       - name: Upload debug APK
         if: always() && !cancelled()
