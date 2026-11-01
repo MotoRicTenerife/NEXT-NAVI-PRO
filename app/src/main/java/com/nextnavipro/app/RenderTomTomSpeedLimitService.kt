@@ -158,14 +158,75 @@ object RenderTomTomSpeedLimitService {
     }
 
     /**
-     * Ask TomTom for a nearest-road candidate from one accurate stationary GPS fix.
-     * Snap to Roads requires at least two points, so repeat the identical coordinate:
-     * this adds no invented displacement or heading. The caller must treat the result as provisional.
+     * Query TomTom Reverse Geocoding with one GPS coordinate. The API key remains on Render;
+     * the returned nearest-road limit is provisional until a moving Snap-to-Roads trace confirms it.
      */
     fun findLimitAtPosition(location: Location): TomTomSpeedLimitResult? {
+        val configured = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+        if (!configured.startsWith("https://") || !configured.endsWith("/jarvis")) return null
         if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
             location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return null
-        return findLimit(listOf(Location(location), Location(location)))
+        val base = configured.substringBeforeLast("/jarvis").trimEnd('/')
+        val connection = URL(base + "/speed-limit-position").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 4000
+            connection.readTimeout = 9000
+            connection.doOutput = true
+            connection.setRequestProperty("User-Agent", "NEXT-NAVI-PRO/0.3")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            val payload = JSONObject()
+                .put("latitude", location.latitude)
+                .put("longitude", location.longitude)
+            if (location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f &&
+                location.bearing.isFinite()) {
+                payload.put("bearing", location.bearing.toDouble().let { if (it < 0.0) it + 360.0 else it })
+            }
+            connection.outputStream.use {
+                it.write(payload.toString().toByteArray(Charsets.UTF_8))
+            }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.use { input ->
+                BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
+            }.orEmpty()
+            if (status !in 200..299) {
+                val reason = try {
+                    JSONObject(body).optString("reason").takeIf { it.isNotBlank() } ?: ("http_" + status)
+                } catch (ignored: Exception) { "http_" + status }
+                return TomTomSpeedLimitResult(
+                    null, null, null, null, reason,
+                    statusForHttp(status),
+                    if (status == 429) parseRetryAfter(connection.getHeaderField("Retry-After"), body) else null
+                )
+            }
+            val root = JSONObject(body)
+            val limit = if (root.has("speedLimitKmh") && !root.isNull("speedLimitKmh"))
+                root.optInt("speedLimitKmh", -1).takeIf { it in 5..200 } else null
+            val result = TomTomSpeedLimitResult(
+                speedLimitKmh = limit,
+                road = root.optString("road").takeIf { it.isNotBlank() && it != "null" },
+                ref = root.optString("ref").takeIf { it.isNotBlank() && it != "null" },
+                highwayType = null,
+                reason = root.optString("reason").takeIf { it.isNotBlank() && it != "null" },
+                status = if (limit != null) TomTomLookupStatus.LIMIT else TomTomLookupStatus.NO_LIMIT
+            )
+            Log.i(TAG, if (limit != null) "TomTom single-position candidate returned " + limit + " km/h on " + (result.road ?: "unnamed road")
+                else "TomTom single-position lookup returned no explicit limit; reason=" + (result.reason ?: "not provided"))
+            return result
+        } catch (error: SocketTimeoutException) {
+            Log.w(TAG, "TomTom position lookup timed out", error)
+            return TomTomSpeedLimitResult(null, null, null, null, "timeout", TomTomLookupStatus.TIMEOUT)
+        } catch (error: IOException) {
+            Log.w(TAG, "TomTom position network error", error)
+            return TomTomSpeedLimitResult(null, null, null, null, "network_error", TomTomLookupStatus.NETWORK_ERROR)
+        } catch (error: Exception) {
+            Log.w(TAG, "TomTom position lookup failed", error)
+            return TomTomSpeedLimitResult(null, null, null, null, "bad_response", TomTomLookupStatus.HTTP_ERROR)
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun findLimit(points: List<Location>): TomTomSpeedLimitResult? {
