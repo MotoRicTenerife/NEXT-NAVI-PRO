@@ -75,6 +75,14 @@ class SpeedLimitPolicyTest {
         assertTrue(SpeedLimitPolicy.shouldQuery(null, query))
     }
 
+    @Test fun tomTomTraceWaitsForTwoDistinctGpsFixes() {
+        assertFalse(SpeedLimitPolicy.hasUsableTrace(emptyList()))
+        assertFalse(SpeedLimitPolicy.hasUsableTrace(listOf(query)))
+        assertFalse(SpeedLimitPolicy.hasUsableTrace(listOf(query, fix(0.0, 0.0, 0f, 2_500L))))
+        assertFalse(SpeedLimitPolicy.hasUsableTrace(listOf(query, fix(0.0, 11.0, 0f, 2_500L))))
+        assertTrue(SpeedLimitPolicy.hasUsableTrace(listOf(query, fix(0.0, 13.0, 0f, 2_500L))))
+    }
+
     @Test fun neverFasterThanTheMinimumSpacingEvenAfterATurn() {
         assertFalse(SpeedLimitPolicy.shouldQuery(query, fix(30.0, 100.0, 90f, 2_000L)))
     }
