@@ -6345,6 +6345,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@setOnClickListener
                 }
                 manualSpeedLimit = value
+                speedLimitProvisional = false
                 currentSpeedLimit = value
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putInt("manual_speed_limit_kmh", value)
@@ -6364,6 +6365,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         .apply()
                     currentSpeedLimit = null
                     currentRoadMatch = null
+                    speedLimitProvisional = false
+                    speedLimitInitialPositionLookupAttempted = false
+                    speedLimitNeedsTraceConfirmation = false
                     lastSpeedLimitQueryLocation = null
                     lastSpeedLimitQueryMs = 0L
                     speedingVoiceActive = false
@@ -6376,6 +6380,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     if (location == null) {
                         Toast.makeText(this, "In attesa della posizione GPS", Toast.LENGTH_SHORT).show()
                     } else {
+                        speedLimitInitialPositionLookupAttempted = false
+                        speedLimitNeedsTraceConfirmation = false
+                        speedLimitProvisional = false
                         lastSpeedLimitQueryLocation = null
                         lastSpeedLimitQueryMs = 0L
                         refreshSpeedLimitIfNeeded(location)
