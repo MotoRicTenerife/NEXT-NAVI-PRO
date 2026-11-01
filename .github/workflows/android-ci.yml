@@ -100,6 +100,13 @@ jobs:
           grep -q 'refreshTrafficIncidents' app/src/main/java/com/nextnavipro/app/MainActivity.kt
           echo "Map traffic flow and incident overlay wiring is present."
 
+      - name: Verify live TomTom flow tile and incidents (GET-only; no Gemini spend)
+        if: github.event_name == 'pull_request'
+        env:
+          RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+          TOMTOM_TRAFFIC_GET_ONLY: "true"
+        run: python roadtools/tomtom_traffic_live_smoke.py
+
       - name: Install and launch APK in Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
