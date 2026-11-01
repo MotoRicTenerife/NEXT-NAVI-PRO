@@ -2,6 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { createFixedWindowLimiter, createSpeedLimitGuard } from "./speedLimitGuard.js";
 import { buildTomTomTrafficTileUrl, parseTrafficTilePath } from "./trafficTilePolicy.js";
+import { buildTomTomPositionSpeedLimitUrl, parseTomTomPositionSpeedLimit } from "./speedLimitPosition.js";
 import { buildTomTomIncidentDetailsUrl, parseIncidentBbox, TOMTOM_INCIDENT_ATTRIBUTES } from "./trafficIncidentPolicy.js";
 import { selectJarvisResponseMode } from "./jarvisPolicy.js";
 import { sanitizeTripContext } from "./tripContextPolicy.js";
@@ -878,6 +879,62 @@ async function handle(req, res) {
       revision: process.env.RENDER_GIT_COMMIT || "unknown"
     });
   }
+  if (url.pathname === "/speed-limit-position") {
+    if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    const tomtomApiKey = process.env.TOMTOM_API_KEY;
+    if (!tomtomApiKey) return send(res, 503, { error: "TomTom speed-limit provider not configured" });
+    let input;
+    try { input = await readJson(req); }
+    catch (error) { return send(res, error.statusCode || 400, { error: "Invalid position speed-limit request" }); }
+    const latitude = input?.latitude;
+    const longitude = input?.longitude;
+    const heading = input?.bearing;
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+        (heading !== undefined && (!Number.isFinite(heading) || heading < 0 || heading >= 360))) {
+      return send(res, 400, { error: "A valid GPS position and optional heading are required" });
+    }
+    const admission = speedLimitGuard.admit(getClientIp(req));
+    if (!admission.allowed) {
+      return send(res, 429, {
+        error: "Speed-limit requests are temporarily limited; try again later",
+        reason: admission.reason,
+        retryAfterSeconds: admission.retryAfterSeconds
+      }, { "retry-after": String(admission.retryAfterSeconds) });
+    }
+    try {
+      const target = buildTomTomPositionSpeedLimitUrl({
+        latitude, longitude, apiKey: tomtomApiKey, heading
+      });
+      const upstream = await fetch(target, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        signal: AbortSignal.timeout(8000)
+      });
+      speedLimitGuard.noteUpstreamStatus(upstream.status, upstream.headers?.get?.("retry-after"));
+      if (!upstream.ok) {
+        const status = upstream.status === 429 ? 429 : 502;
+        const retryAfterSeconds = status === 429 ? Math.max(1, speedLimitGuard.cooldown().seconds) : undefined;
+        return send(res, status, {
+          error: "TomTom position speed-limit lookup failed",
+          reason: status === 429 ? "tomtom_quota_or_rate_limit" : "tomtom_http_" + upstream.status,
+          ...(retryAfterSeconds ? { retryAfterSeconds } : {})
+        }, retryAfterSeconds ? { "retry-after": String(retryAfterSeconds) } : {});
+      }
+      const data = await upstream.json();
+      const result = parseTomTomPositionSpeedLimit(data);
+      return send(res, 200, {
+        source: "TomTom Reverse Geocoding",
+        ...result
+      });
+    } catch (error) {
+      console.warn("TomTom position speed-limit lookup failed", {
+        errorType: error instanceof Error ? error.name : "UnknownError"
+      });
+      return send(res, 502, { error: "TomTom position speed-limit provider unavailable" });
+    }
+  }
+
   if (url.pathname === "/speed-limit-route") {
     if (req.method !== "POST") return send(res, 405, { error: "Method not allowed" });
     const tomtomApiKey = process.env.TOMTOM_API_KEY;
