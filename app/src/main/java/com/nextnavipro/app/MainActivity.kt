@@ -5597,6 +5597,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val match = ManualSpeedLimitMatcher.find(manualSpeedLimitSegments, location.latitude, location.longitude, b, if (location.hasAccuracy()) location.accuracy else null)
             if (match != null) { speedLimitProvisional = false; currentSpeedLimit = match.limitKmh; updateSpeedLimitDisplay(); return }
             // Do not carry a previous segment limit onto a nearby parallel road or beyond its endpoint.
+            speedLimitProvisional = false
             currentSpeedLimit = null
             updateSpeedLimitDisplay()
         } else manualSpeedLimit?.let { speedLimitProvisional = false; currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
@@ -5622,6 +5623,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     currentRoadMatch = RoadMatch(cachedLimit.road, cachedLimit.ref, cachedLimit.speedLimitKmh,
                         null, (eligible?.second ?: 0f), location.bearing.takeIf { location.hasBearing() } ?: 0f)
                     currentSpeedLimit = cachedLimit.speedLimitKmh
+                    speedLimitProvisional = false
                     speedLimitVerifiedFix = nowFix
                     updateSpeedLimitDisplay()
                     return
@@ -5637,6 +5639,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             !SpeedLimitPolicy.isLimitApplicable(verifiedFix, nowFix)) {
             currentRoadMatch = null
             currentSpeedLimit = null
+            speedLimitProvisional = false
             speedLimitVerifiedFix = null
             updateGpsStatus(location)
             updateSpeedLimitDisplay()
