@@ -107,6 +107,16 @@ jobs:
           TOMTOM_TRAFFIC_GET_ONLY: "true"
         run: python roadtools/tomtom_traffic_live_smoke.py
 
+      - name: Stage debug APK for emulator
+        run: |
+          set -e
+          APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          cp "$APK" "$RUNNER_TEMP/next-navi-pro-debug.apk"
+          test -s "$RUNNER_TEMP/next-navi-pro-debug.apk"
+          echo "NEXT_NAVI_CI_APK=$RUNNER_TEMP/next-navi-pro-debug.apk" >> "$GITHUB_ENV"
+          echo "Staged APK for emulator: $RUNNER_TEMP/next-navi-pro-debug.apk"
+
       - name: Install and launch APK in Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -117,8 +127,8 @@ jobs:
           disable-animations: true
           script: |
             set -e
-            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
-            test -n "$APK"
+            APK="${NEXT_NAVI_CI_APK:?Staged APK path is missing}"
+            test -s "$APK"
             echo "Installing APK: $APK"
             adb install -r "$APK"
             adb shell pm path com.nextnavipro.app.debug
