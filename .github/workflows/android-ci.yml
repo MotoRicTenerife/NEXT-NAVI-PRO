@@ -128,8 +128,20 @@ jobs:
           EMULATOR="$ANDROID_HOME/emulator/emulator"
 
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "emulator" "system-images;android-35;google_apis;x86_64"
-          mkdir -p "$HOME/.android/avd"
-          printf 'no\n' | "$AVDMANAGER" create avd --force -n next-navi-ci -k "system-images;android-35;google_apis;x86_64" --device "pixel_6"
+          export ANDROID_USER_HOME="$HOME/.android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          export ANDROID_SDK_HOME="$HOME"
+          mkdir -p "$ANDROID_AVD_HOME"
+
+          AVD_CREATE_OUTPUT="$(printf 'no\n' | "$AVDMANAGER" create avd --force --name next-navi-ci --package "system-images;android-35;google_apis;x86_64" --device "pixel_6" --path "$ANDROID_AVD_HOME/next-navi-ci.avd" 2>&1)"
+          printf '%s\n' "$AVD_CREATE_OUTPUT"
+          if [ ! -s "$ANDROID_AVD_HOME/next-navi-ci.ini" ]; then
+            echo "::error::avdmanager did not create the next-navi-ci.ini file in $ANDROID_AVD_HOME."
+            "$AVDMANAGER" list avd || true
+            find "$ANDROID_USER_HOME" -maxdepth 4 -type f -print 2>/dev/null | sort | head -n 100 || true
+            exit 1
+          fi
+          "$EMULATOR" -list-avds | grep -Fxq "next-navi-ci"
 
           test -s "$NEXT_NAVI_CI_APK"
           "$ADB" start-server
