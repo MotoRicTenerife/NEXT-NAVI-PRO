@@ -911,7 +911,11 @@ async function handle(req, res) {
         headers: { "Accept": "application/json" },
         signal: AbortSignal.timeout(8000)
       });
-      speedLimitGuard.noteUpstreamStatus(upstream.status, upstream.headers?.get?.("retry-after"));
+      // A Search API permission failure must not cool down the existing Snap-to-Roads service.
+      // Only TomTom's explicit 429 is shared provider backoff across both endpoints.
+      if (upstream.status === 429) {
+        speedLimitGuard.noteUpstreamStatus(upstream.status, upstream.headers?.get?.("retry-after"));
+      }
       if (!upstream.ok) {
         const status = upstream.status === 429 ? 429 : 502;
         const retryAfterSeconds = status === 429 ? Math.max(1, speedLimitGuard.cooldown().seconds) : undefined;
