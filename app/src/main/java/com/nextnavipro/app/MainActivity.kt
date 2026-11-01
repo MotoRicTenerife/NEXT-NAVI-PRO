@@ -251,6 +251,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
     private var speedLimitLookupInFlight = false
+    // A one-position TomTom result is shown as a candidate only; it never drives overspeed alerts.
+    private var speedLimitInitialPositionLookupAttempted = false
+    private var speedLimitNeedsTraceConfirmation = false
+    private var speedLimitProvisional = false
     // Where/when the currently displayed provider limit was verified, and the paid-provider backoff.
     private var speedLimitVerifiedFix: SpeedLimitFix? = null
     private val tomTomBackoff = ProviderBackoff()
@@ -1422,6 +1426,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun isSpeedingWithKnownLimit(): Boolean {
+        if (speedLimitProvisional) return false
         val limit = currentSpeedLimit ?: return false
         val speedKmh = speedForLimitAlertsKmh() ?: return false
         return speedKmh > limit + 3f
@@ -5590,11 +5595,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (manualSpeedLimitSegments.isNotEmpty()) {
             val b = location.bearing.takeIf { location.hasBearing() && location.hasSpeed() && location.speed >= 2.5f }
             val match = ManualSpeedLimitMatcher.find(manualSpeedLimitSegments, location.latitude, location.longitude, b, if (location.hasAccuracy()) location.accuracy else null)
-            if (match != null) { currentSpeedLimit = match.limitKmh; updateSpeedLimitDisplay(); return }
+            if (match != null) { speedLimitProvisional = false; currentSpeedLimit = match.limitKmh; updateSpeedLimitDisplay(); return }
             // Do not carry a previous segment limit onto a nearby parallel road or beyond its endpoint.
             currentSpeedLimit = null
             updateSpeedLimitDisplay()
-        } else manualSpeedLimit?.let { currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
+        } else manualSpeedLimit?.let { speedLimitProvisional = false; currentSpeedLimit = it; updateSpeedLimitDisplay(); return }
         val now = System.currentTimeMillis()
         val nowFix = speedLimitFix(location, now)
         // Prefer a prefetched TomTom result only after the rider has reached its route sample.
@@ -5636,33 +5641,85 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateGpsStatus(location)
             updateSpeedLimitDisplay()
         }
-        // Ask the providers again by distance travelled, not every few seconds: the paid TomTom
-        // quota is limited and the previous 8 s / 150 m cadence also tripped the backend limiter.
-        val previousFix = lastSpeedLimitQueryLocation?.let { speedLimitFix(it, lastSpeedLimitQueryMs) }
-        if (!SpeedLimitPolicy.shouldQuery(previousFix, nowFix)) {
-            updateSpeedLimitDisplay()
-            return
-        }
-        // Never launch a second slow network lookup while the previous one is running.
-        // Otherwise each new GPS fix supersedes the older response and the sign can
-        // remain blank forever on a moving vehicle.
-        if (speedLimitLookupInFlight) {
-            updateSpeedLimitDisplay()
-            return
-        }
         val queryLocation = Location(location)
         val queryFix = speedLimitFix(queryLocation, now)
-        // Build the trace before recording an attempt. The first GPS fix alone is not enough
-        // for TomTom Snap-to-Roads; do not consume the lookup cadence until a usable trace exists.
         val tracePoints = synchronized(speedLimitTrace) {
             val recent = speedLimitTrace.map { Location(it) }.takeLast(8)
             if (recent.isEmpty() || recent.last().distanceTo(queryLocation) > 3f) recent + Location(queryLocation) else recent
         }.takeLast(8)
         val traceFixes = tracePoints.map { speedLimitFix(it, now) }
-        if (!SpeedLimitPolicy.hasUsableTrace(traceFixes)) {
-            android.util.Log.d("NEXT_NAVI_SPEED_LIMIT",
-                "Initial TomTom lookup deferred: waiting for at least two GPS points spanning " +
-                    SpeedLimitPolicy.MIN_TRACE_DISTANCE_M.toInt() + " m (points=" + tracePoints.size + ")")
+        val traceReady = SpeedLimitPolicy.hasUsableTrace(traceFixes)
+
+        // TomTom Snap to Roads requires at least two input points. At startup, send the same
+        // accurate GPS position twice (no fabricated heading or movement) to obtain a provisional
+        // nearest-road candidate. The rider can compare it with the live map marker. This candidate
+        // is explicitly not trusted for overspeed warnings until a real movement trace confirms it.
+        if (!traceReady) {
+            if (speedLimitInitialPositionLookupAttempted || speedLimitLookupInFlight) {
+                updateSpeedLimitDisplay()
+                return
+            }
+            if (!location.hasAccuracy() ||
+                !SpeedLimitPolicy.canUseProvisionalPositionLookup(location.accuracy)) {
+                android.util.Log.d("NEXT_NAVI_SPEED_LIMIT", "Waiting for a sufficiently accurate initial GPS fix")
+                updateSpeedLimitDisplay()
+                return
+            }
+            if (tomTomBackoff.isBlocked(now)) {
+                updateSpeedLimitDisplay()
+                return
+            }
+            speedLimitInitialPositionLookupAttempted = true
+            speedLimitNeedsTraceConfirmation = true
+            lastSpeedLimitQueryLocation = Location(location)
+            lastSpeedLimitQueryMs = now
+            speedLimitLookupInFlight = true
+            thread(name = "speed-limit-position-candidate") {
+                val result = try {
+                    RenderTomTomSpeedLimitService.findLimitAtPosition(queryLocation)
+                } catch (error: Exception) {
+                    android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "TomTom initial position lookup failed", error)
+                    null
+                }
+                recordTomTomOutcome(result)
+                val candidate = result?.speedLimitKmh?.let { limit ->
+                    RoadMatch(result.road, result.ref, limit, result.highwayType, 0f, 0f)
+                }
+                runOnUiThread {
+                    speedLimitLookupInFlight = false
+                    if (lastSpeedLimitQueryMs != now) return@runOnUiThread
+                    val latest = currentLocation
+                    val latestFix = latest?.let { speedLimitFix(it, System.currentTimeMillis()) }
+                    if (latestFix != null && !SpeedLimitPolicy.isLimitApplicable(queryFix, latestFix)) {
+                        currentRoadMatch = null
+                        currentSpeedLimit = null
+                        speedLimitVerifiedFix = null
+                        speedLimitProvisional = false
+                    } else {
+                        currentRoadMatch = candidate
+                        currentSpeedLimit = candidate?.speedLimitKmh
+                        speedLimitVerifiedFix = if (candidate?.speedLimitKmh != null) queryFix else null
+                        speedLimitProvisional = candidate?.speedLimitKmh != null
+                    }
+                    android.util.Log.i("NEXT_NAVI_SPEED_LIMIT",
+                        if (speedLimitProvisional) "Provisional TomTom position candidate shown; waiting for movement trace confirmation"
+                        else "No initial TomTom position candidate; waiting for movement trace")
+                    latest?.let { updateGpsStatus(it) }
+                    updateSpeedLimitDisplay()
+                }
+            }
+            updateSpeedLimitDisplay()
+            return
+        }
+
+        // A real GPS trace is now available. It takes priority over the initial candidate even
+        // when the ordinary distance/time refresh cadence has not elapsed.
+        val previousFix = lastSpeedLimitQueryLocation?.let { speedLimitFix(it, lastSpeedLimitQueryMs) }
+        if (!speedLimitNeedsTraceConfirmation && !SpeedLimitPolicy.shouldQuery(previousFix, nowFix)) {
+            updateSpeedLimitDisplay()
+            return
+        }
+        if (speedLimitLookupInFlight) {
             updateSpeedLimitDisplay()
             return
         }
@@ -5678,6 +5735,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         lastSpeedLimitQueryLocation = Location(location)
         lastSpeedLimitQueryMs = now
+        speedLimitNeedsTraceConfirmation = false
         speedLimitLookupInFlight = true
         thread(name = "speed-limit-provider-match") {
             val tomTomResult = try {
@@ -5713,6 +5771,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 }
                 currentRoadMatch = match
                 currentSpeedLimit = manualSpeedLimit ?: match?.speedLimitKmh
+                speedLimitProvisional = false
                 speedLimitVerifiedFix = if (manualSpeedLimit == null && match?.speedLimitKmh != null) queryFix else null
                 if (match == null) {
                     android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "No plausible road match for current GPS fix")
@@ -6333,7 +6392,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Speak on first confirmed overspeed, then at most once every 120 seconds.
         // A short missing-limit interval must not reset the episode and cause repeated speech.
         val nowElapsed = SystemClock.elapsedRealtime()
-        if (limit != null && speedKmh != null) {
+        if (!speedLimitProvisional && limit != null && speedKmh != null) {
             if (speedKmh > limit + 3) {
                 lastSpeedingValidLimitMs = nowElapsed
                 val firstWarning = !speedingVoiceActive
@@ -6369,9 +6428,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
 
         if (!::limitValue.isInitialized) return
-        limitValue.text = limit?.toString() ?: "—"
+        limitValue.text = when {
+            limit == null -> "—"
+            speedLimitProvisional -> "~$limit"
+            else -> limit.toString()
+        }
         limitValue.contentDescription = when {
             manualSpeedLimit != null -> "Limite manuale $limit chilometri orari. Tocca per modificarlo o riattivare l'aggiornamento automatico"
+            speedLimitProvisional -> "Limite indicativo TomTom $limit chilometri orari, da verificare sulla mappa. Non usato per gli avvisi di velocità"
             limit != null -> "Limite automatico $limit chilometri orari. Tocca per impostarlo manualmente o aggiornare"
             else -> "Limite di velocità non disponibile. Tocca per impostarlo manualmente o riprovare la ricerca"
         }
