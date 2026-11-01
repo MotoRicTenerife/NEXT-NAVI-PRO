@@ -88,27 +88,30 @@ def main():
         raise RuntimeError("TomTom incidents response schema invalid: " + repr(payload)[:500])
     print(f"TomTom live incident query PASSED: HTTP {status}, {len(incidents)} incidents, observedAt={payload.get('observedAtEpochMs')}")
 
-    # Exercise Jarvis's conversational nearby-traffic path without a destination.
-    status, jarvis = post_json("/jarvis", {
-        "message": "How is traffic around my current location right now? Check the nearest road segment and reported incidents. Use only verified TomTom data.",
-        "language": "en-GB",
-        "location": {"latitude": lat, "longitude": lon},
-        "vehicleMode": "car"
-    })
-    diagnostics = jarvis.get("diagnostics", {})
-    nearby = diagnostics.get("nearbyTraffic") or {}
-    reply = jarvis.get("reply", "")
-    if (status != 200 or not reply.strip() or diagnostics.get("responseMode") != "gemini"
-            or diagnostics.get("trafficContext") != "tomtom_nearby_loaded"
-            or diagnostics.get("language") != "en-GB"
-            or nearby.get("segmentAvailable") is not True
-            or nearby.get("incidentsAvailable") is not True):
-        raise RuntimeError("Jarvis nearby traffic conversation failed: diagnostics=" + repr(diagnostics) + ", reply=" + repr(reply[:240]))
-    print("Jarvis nearby live traffic PASSED:", {
-        "segmentAvailable": nearby.get("segmentAvailable"),
-        "incidentsAvailable": nearby.get("incidentsAvailable"),
-        "reply": reply[:220]
-    })
+    if os.environ.get("TOMTOM_TRAFFIC_GET_ONLY", "").strip().lower() == "true":
+        print("GET-only mode: skipped Jarvis/Gemini POST to avoid provider spend.")
+    else:
+        # Exercise Jarvis's conversational nearby-traffic path without a destination.
+        status, jarvis = post_json("/jarvis", {
+            "message": "How is traffic around my current location right now? Check the nearest road segment and reported incidents. Use only verified TomTom data.",
+            "language": "en-GB",
+            "location": {"latitude": lat, "longitude": lon},
+            "vehicleMode": "car"
+        })
+        diagnostics = jarvis.get("diagnostics", {})
+        nearby = diagnostics.get("nearbyTraffic") or {}
+        reply = jarvis.get("reply", "")
+        if (status != 200 or not reply.strip() or diagnostics.get("responseMode") != "gemini"
+                or diagnostics.get("trafficContext") != "tomtom_nearby_loaded"
+                or diagnostics.get("language") != "en-GB"
+                or nearby.get("segmentAvailable") is not True
+                or nearby.get("incidentsAvailable") is not True):
+            raise RuntimeError("Jarvis nearby traffic conversation failed: diagnostics=" + repr(diagnostics) + ", reply=" + repr(reply[:240]))
+        print("Jarvis nearby live traffic PASSED:", {
+            "segmentAvailable": nearby.get("segmentAvailable"),
+            "incidentsAvailable": nearby.get("incidentsAvailable"),
+            "reply": reply[:220]
+        })
 
 
 if __name__ == "__main__":
