@@ -3712,7 +3712,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * Fetch it directly from Open-Meteo so a missing Gemini backend cannot
      * prevent Jarvis from answering a weather question.
      */
-    private fun answerJarvisWeather(transcript: String) {
+    private fun answerJarvisWeather(transcript: String = "") {
         val request = JarvisWeatherRequest.parse(transcript)
         val now = System.currentTimeMillis()
         val gps = currentLocation?.takeIf {
