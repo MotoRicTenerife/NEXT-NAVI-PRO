@@ -157,6 +157,17 @@ object RenderTomTomSpeedLimitService {
         }
     }
 
+    /**
+     * Ask TomTom for a nearest-road candidate from one accurate stationary GPS fix.
+     * Snap to Roads requires at least two points, so repeat the identical coordinate:
+     * this adds no invented displacement or heading. The caller must treat the result as provisional.
+     */
+    fun findLimitAtPosition(location: Location): TomTomSpeedLimitResult? {
+        if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
+            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return null
+        return findLimit(listOf(Location(location), Location(location)))
+    }
+
     fun findLimit(points: List<Location>): TomTomSpeedLimitResult? {
         val configured = BuildConfig.JARVIS_AI_ENDPOINT.trim()
         if (!configured.startsWith("https://") || !configured.endsWith("/jarvis")) return null
