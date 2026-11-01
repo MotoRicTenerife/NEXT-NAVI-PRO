@@ -117,19 +117,19 @@ jobs:
           disable-animations: true
           script: |
             set -e
-APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
-test -n "$APK"
-echo "Installing APK: $APK"
-adb install -r "$APK"
-adb shell pm path com.nextnavipro.app.debug
-# Launch the app directly: monkey can hang on heavily loaded software-rendered CI emulators.
-START_OUTPUT="$(adb shell am start -W -n com.nextnavipro.app.debug/com.nextnavipro.app.MainActivity)"
-printf '%s\\n' "$START_OUTPUT"
-printf '%s' "$START_OUTPUT" | grep -q 'Status: ok'
-sleep 8
-PID="$(adb shell pidof com.nextnavipro.app.debug | tr -d '\\r')"
-test -n "$PID"
-echo "NEXT NAVI PRO launched successfully; pid=$PID"
+            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
+            test -n "$APK"
+            echo "Installing APK: $APK"
+            adb install -r "$APK"
+            adb shell pm path com.nextnavipro.app.debug
+            # Launch directly; monkey may hang on heavily loaded software-rendered CI emulators.
+            START_OUTPUT="$(adb shell am start -W -n com.nextnavipro.app.debug/com.nextnavipro.app.MainActivity)"
+            printf '%s\\n' "$START_OUTPUT"
+            printf '%s' "$START_OUTPUT" | grep -q 'Status: ok'
+            sleep 8
+            PID="$(adb shell pidof com.nextnavipro.app.debug | tr -d '\\r')"
+            test -n "$PID"
+            echo "NEXT NAVI PRO launched successfully; pid=$PID"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v5
