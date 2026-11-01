@@ -92,6 +92,25 @@ jobs:
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
         run: gradle --no-daemon testDebugUnitTest
+      - name: Verify live traffic overlay wiring
+        run: |
+          grep -q 'SOURCE_TRAFFIC_FLOW' app/src/main/java/com/nextnavipro/app/MainActivity.kt
+          grep -q 'next-live-traffic-lines' app/src/main/java/com/nextnavipro/app/MainActivity.kt
+          grep -q '/traffic/flow/{z}/{x}/{y}' app/src/main/java/com/nextnavipro/app/MainActivity.kt
+          grep -q 'refreshTrafficIncidents' app/src/main/java/com/nextnavipro/app/MainActivity.kt
+          echo "Map traffic flow and incident overlay wiring is present."
+
+      - name: Install and launch APK in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)" && test -n "$APK" && echo "Installing APK: $APK" && adb install -r "$APK" && adb shell pm path com.nextnavipro.app.debug && adb shell monkey -p com.nextnavipro.app.debug 1 && sleep 8 && adb shell pidof com.nextnavipro.app.debug
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v5
         with:
