@@ -101,8 +101,15 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
-            test -n "$APK"
+            echo "Emulator script working directory: $(pwd)"
+            echo "GitHub workspace: $GITHUB_WORKSPACE"
+            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
+            if [ -z "$APK" ]; then
+              echo "::error::APK not found under $GITHUB_WORKSPACE/app/build/outputs/apk/debug"
+              find "$GITHUB_WORKSPACE/app/build/outputs" -maxdepth 5 -type f -print || true
+              exit 1
+            fi
+            echo "Installing APK: $APK"
             adb install -r "$APK"
             adb shell pm path com.nextnavipro.app.debug
             adb shell monkey -p com.nextnavipro.app.debug 1
