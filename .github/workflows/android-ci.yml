@@ -100,21 +100,10 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          # The runner executes each script line in a separate shell; keep stateful
+          # APK lookup and install/launch verification in one fail-fast command.
           script: |
-            echo "Emulator script working directory: $(pwd)"
-            echo "GitHub workspace: $GITHUB_WORKSPACE"
-            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
-            if [ -z "$APK" ]; then
-              echo "::error::APK not found under $GITHUB_WORKSPACE/app/build/outputs/apk/debug"
-              find "$GITHUB_WORKSPACE/app/build/outputs" -maxdepth 5 -type f -print || true
-              exit 1
-            fi
-            echo "Installing APK: $APK"
-            adb install -r "$APK"
-            adb shell pm path com.nextnavipro.app.debug
-            adb shell monkey -p com.nextnavipro.app.debug 1
-            sleep 5
-            adb shell pidof com.nextnavipro.app.debug
+            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)" && test -n "$APK" && echo "Installing APK: $APK" && adb install -r "$APK" && adb shell pm path com.nextnavipro.app.debug && adb shell monkey -p com.nextnavipro.app.debug 1 && sleep 5 && adb shell pidof com.nextnavipro.app.debug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v5
