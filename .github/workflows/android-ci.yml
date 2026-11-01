@@ -146,13 +146,11 @@ jobs:
           for attempt in $(seq 1 300); do
             DEVICE_STATE="$("$ADB" devices | awk '$1 == "emulator-5554" { print $2 }' | tail -n 1)"
             if [ "$DEVICE_STATE" = "device" ]; then
-              BOOT_COMPLETED="$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
+              BOOT_COMPLETED="$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
               if [ "$BOOT_COMPLETED" = "1" ]; then
                 PACKAGE_SERVICE="$("$ADB" -s emulator-5554 shell service check package 2>/dev/null || true)"
                 ACTIVITY_SERVICE="$("$ADB" -s emulator-5554 shell service check activity 2>/dev/null || true)"
-                if printf '%s\\n%s\\n' "$PACKAGE_SERVICE" "$ACTIVITY_SERVICE" | grep -q 'found' &&
-                   printf '%s\\n' "$PACKAGE_SERVICE" | grep -q 'found' &&
-                   printf '%s\\n' "$ACTIVITY_SERVICE" | grep -q 'found'; then
+                if [[ "$PACKAGE_SERVICE" == *": found"* && "$ACTIVITY_SERVICE" == *": found"* ]]; then
                   READY=true
                   break
                 fi
@@ -183,10 +181,10 @@ jobs:
           "$ADB" -s emulator-5554 shell pm path com.nextnavipro.app.debug
 
           START_OUTPUT="$("$ADB" -s emulator-5554 shell am start -W -n com.nextnavipro.app.debug/com.nextnavipro.app.MainActivity)"
-          printf '%s\\n' "$START_OUTPUT"
+          printf '%s\n' "$START_OUTPUT"
           printf '%s' "$START_OUTPUT" | grep -q 'Status: ok'
           sleep 8
-          APP_PID="$("$ADB" -s emulator-5554 shell pidof com.nextnavipro.app.debug | tr -d '\\r')"
+          APP_PID="$("$ADB" -s emulator-5554 shell pidof com.nextnavipro.app.debug | tr -d '\r')"
           test -n "$APP_PID"
           echo "NEXT NAVI PRO launched successfully; pid=$APP_PID"
 
