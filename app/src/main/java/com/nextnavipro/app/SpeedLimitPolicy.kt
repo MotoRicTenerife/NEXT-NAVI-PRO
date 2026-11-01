@@ -38,6 +38,7 @@ object SpeedLimitPolicy {
     const val CROSS_TRACK_TOLERANCE_M = 25.0
     const val BACKWARD_TOLERANCE_M = 15.0
     const val MAX_BEARING_DELTA_DEG = 60.0
+    const val MIN_TRACE_DISTANCE_M = 12.0
 
     private const val METERS_PER_DEGREE = 111_320.0
 
@@ -51,6 +52,16 @@ object SpeedLimitPolicy {
     fun distanceMeters(from: SpeedLimitFix, to: SpeedLimitFix): Double {
         val offset = offsetMeters(from, to)
         return hypot(offset.first, offset.second)
+    }
+
+    /**
+     * TomTom Snap-to-Roads needs a short movement trace, not a duplicated first GPS fix.
+     * Defer the initial lookup until two accepted fixes span a meaningful distance; callers
+     * must not count a deferred lookup against the provider refresh cadence.
+     */
+    fun hasUsableTrace(points: List<SpeedLimitFix>): Boolean {
+        if (points.size < 2) return false
+        return distanceMeters(points.first(), points.last()) >= MIN_TRACE_DISTANCE_M
     }
 
     private fun bearingDelta(a: Double, b: Double): Double = abs(((a - b + 540.0) % 360.0) - 180.0)

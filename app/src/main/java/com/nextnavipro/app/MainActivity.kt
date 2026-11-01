@@ -5650,25 +5650,37 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateSpeedLimitDisplay()
             return
         }
-        lastSpeedLimitQueryLocation = Location(location)
-        lastSpeedLimitQueryMs = now
         val queryLocation = Location(location)
         val queryFix = speedLimitFix(queryLocation, now)
-        // Ignore bearing while almost stationary: Android may retain a stale course.
-        val bearing = queryLocation.bearing.takeIf {
-            queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
-        }
-        speedLimitLookupInFlight = true
+        // Build the trace before recording an attempt. The first GPS fix alone is not enough
+        // for TomTom Snap-to-Roads; do not consume the lookup cadence until a usable trace exists.
         val tracePoints = synchronized(speedLimitTrace) {
             val recent = speedLimitTrace.map { Location(it) }.takeLast(8)
             if (recent.isEmpty() || recent.last().distanceTo(queryLocation) > 3f) recent + Location(queryLocation) else recent
         }.takeLast(8)
+        val traceFixes = tracePoints.map { speedLimitFix(it, now) }
+        if (!SpeedLimitPolicy.hasUsableTrace(traceFixes)) {
+            android.util.Log.d("NEXT_NAVI_SPEED_LIMIT",
+                "Initial TomTom lookup deferred: waiting for at least two GPS points spanning " +
+                    SpeedLimitPolicy.MIN_TRACE_DISTANCE_M.toInt() + " m (points=" + tracePoints.size + ")")
+            updateSpeedLimitDisplay()
+            return
+        }
+        // Respect provider backoff without marking a new lookup attempt. The next accepted GPS
+        // update can retry as soon as the backoff expires, without a manual button press.
+        if (tomTomBackoff.isBlocked(now)) {
+            updateSpeedLimitDisplay()
+            return
+        }
+        // Ignore bearing while almost stationary: Android may retain a stale course.
+        val bearing = queryLocation.bearing.takeIf {
+            queryLocation.hasBearing() && queryLocation.hasSpeed() && queryLocation.speed >= 2.5f
+        }
+        lastSpeedLimitQueryLocation = Location(location)
+        lastSpeedLimitQueryMs = now
+        speedLimitLookupInFlight = true
         thread(name = "speed-limit-provider-match") {
-            val tomTomResult = if (tomTomBackoff.isBlocked(System.currentTimeMillis())) {
-                android.util.Log.i("NEXT_NAVI_SPEED_LIMIT", "TomTom lookup skipped: backoff for " +
-                    tomTomBackoff.remainingMs(System.currentTimeMillis()) / 1000L + " s")
-                null
-            } else try {
+            val tomTomResult = try {
                 RenderTomTomSpeedLimitService.findLimit(tracePoints)
             } catch (error: Exception) {
                 android.util.Log.w("NEXT_NAVI_SPEED_LIMIT", "TomTom trace lookup failed", error)
