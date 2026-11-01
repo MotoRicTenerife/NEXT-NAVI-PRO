@@ -39,6 +39,7 @@ object SpeedLimitPolicy {
     const val BACKWARD_TOLERANCE_M = 15.0
     const val MAX_BEARING_DELTA_DEG = 60.0
     const val MIN_TRACE_DISTANCE_M = 12.0
+    const val MAX_PROVISIONAL_GPS_ACCURACY_M = 35.0
 
     private const val METERS_PER_DEGREE = 111_320.0
 
@@ -63,6 +64,11 @@ object SpeedLimitPolicy {
         if (points.size < 2) return false
         return distanceMeters(points.first(), points.last()) >= MIN_TRACE_DISTANCE_M
     }
+
+    /** A stationary position is only useful as a provisional candidate with a reasonably tight fix. */
+    fun canUseProvisionalPositionLookup(accuracyMeters: Float?): Boolean =
+        accuracyMeters != null && accuracyMeters.isFinite() &&
+            accuracyMeters > 0f && accuracyMeters <= MAX_PROVISIONAL_GPS_ACCURACY_M
 
     private fun bearingDelta(a: Double, b: Double): Double = abs(((a - b + 540.0) % 360.0) - 180.0)
 
