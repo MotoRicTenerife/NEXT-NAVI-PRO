@@ -3513,7 +3513,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         // Live weather requests take priority over any pending destination clarification.
         if (JarvisIntentClassifier.isWeatherQuestion(spokenTranscript)) {
-            answerJarvisWeather()
+            answerJarvisWeather(spokenTranscript)
             return
         }
         if (JarvisIntentClassifier.isTrafficQuestion(spokenTranscript) &&
@@ -3712,61 +3712,145 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * Fetch it directly from Open-Meteo so a missing Gemini backend cannot
      * prevent Jarvis from answering a weather question.
      */
-    private fun answerJarvisWeather() {
+    private fun answerJarvisWeather(transcript: String = "") {
+        val request = JarvisWeatherRequest.parse(transcript)
         val now = System.currentTimeMillis()
         val gps = currentLocation?.takeIf {
             it.hasAccuracy() && it.accuracy <= 100f && now - it.time in 0..120_000L
         }
         val approximate = if (gps == null) approximateLocation else null
-        if (gps == null && approximate == null) {
+        val origin = when {
+            gps != null -> NavPoint(gps.latitude, gps.longitude)
+            approximate != null -> NavPoint(approximate.latitude, approximate.longitude)
+            else -> null
+        }
+
+        // Only a genuinely local-weather request depends on GPS. A named city can
+        // be geocoded and queried even when the device has no location fix.
+        if (request is JarvisWeatherRequest.Current && origin == null) {
             pendingJarvisWeather = true
             requestIpLocationFallback()
             speakJarvis("Non ho ancora una posizione attendibile. Cerco una zona approssimativa e riprovo automaticamente appena arriva il GPS o la posizione di rete.")
             return
         }
 
-        val latitude = gps?.latitude ?: approximate!!.latitude
-        val longitude = gps?.longitude ?: approximate!!.longitude
-        val locationDescription = if (gps != null) {
-            "nella posizione GPS corrente"
-        } else {
-            "nella zona approssimativa " + approximate!!.areaLabel
-        }
+        val requestedDestination = destination
+        val requestedRoute = routeResult
         val requestGeneration = jarvisResponseGeneration
-        jarvisStatusText.text = jarvisAssistantName() + " • verifica meteo Open-Meteo…"
+        jarvisStatusText.text = jarvisAssistantName() + " • ricerca meteo…"
         thread(name = "jarvis-live-weather") {
-            val result = try {
-                WeatherService.fetch(latitude, longitude)
+            var observations: List<Pair<String, WeatherSnapshot>> = emptyList()
+            var updateDashboardWeather = false
+            var failureMessage: String? = null
+
+            try {
+                when (request) {
+                    is JarvisWeatherRequest.Current -> {
+                        val point = origin ?: throw IllegalStateException("Posizione corrente non disponibile")
+                        val snapshot = WeatherService.fetch(point.latitude, point.longitude)
+                        val label = if (gps != null) "nella posizione GPS corrente"
+                            else "nella zona approssimativa " + (approximate?.areaLabel ?: "rilevata")
+                        observations = listOf(label to snapshot)
+                        updateDashboardWeather = true
+                    }
+                    is JarvisWeatherRequest.Place -> {
+                        val results = NavigationServices.searchPlaces(request.name, origin)
+                        val exact = results.filter { JarvisDestinationResolver.isExactLocalityMatch(it, request.name) }
+                        val localityCandidates = if (exact.isNotEmpty()) exact else results.filter {
+                            it.kind.lowercase(Locale.ROOT) in setOf("city", "town", "village", "municipality", "locality", "hamlet")
+                        }
+                        val selected = when {
+                            localityCandidates.size == 1 -> localityCandidates.single()
+                            localityCandidates.isNotEmpty() && origin != null ->
+                                localityCandidates.minByOrNull { JarvisDestinationResolver.distanceMeters(origin, it.point) }
+                            else -> null
+                        } ?: throw IllegalArgumentException(
+                            if (results.isEmpty()) "Non trovo una località chiamata ${request.name}. Prova ad aggiungere la provincia o il Paese."
+                            else "Ho trovato più località possibili per ${request.name}. Specifica la provincia o il Paese."
+                        )
+                        val snapshot = WeatherService.fetch(selected.point.latitude, selected.point.longitude)
+                        val details = selected.description.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
+                        observations = listOf("a ${selected.name}${details}" to snapshot)
+                    }
+                    is JarvisWeatherRequest.Destination -> {
+                        val place = requestedDestination
+                            ?: throw IllegalArgumentException("Non hai ancora impostato una destinazione nel navigatore. Dimmi prima dove vuoi andare.")
+                        val snapshot = WeatherService.fetch(place.point.latitude, place.point.longitude)
+                        observations = listOf("a destinazione, ${place.name}" to snapshot)
+                    }
+                    is JarvisWeatherRequest.Route -> {
+                        val route = requestedRoute
+                            ?: throw IllegalArgumentException("Non c'è un percorso attivo da analizzare. Imposta prima una destinazione e calcola il tragitto.")
+                        if (route.points.isEmpty()) throw IllegalArgumentException("Il percorso non contiene punti geografici verificabili.")
+                        val last = route.points.lastIndex
+                        val sampleIndexes = listOf(last / 3, (last * 2) / 3, last).distinct()
+                        val labels = listOf("a circa un terzo del percorso", "a circa due terzi del percorso", "in prossimità della destinazione")
+                        val samples = sampleIndexes.mapIndexed { index, pointIndex ->
+                            val label = if (pointIndex == last && requestedDestination != null)
+                                "in prossimità di ${requestedDestination.name}"
+                            else labels[index.coerceAtMost(labels.lastIndex)]
+                            label to route.points[pointIndex]
+                        }
+                        val executor = java.util.concurrent.Executors.newFixedThreadPool(samples.size)
+                        try {
+                            val futures = samples.map { sample ->
+                                executor.submit(java.util.concurrent.Callable {
+                                    sample.first to WeatherService.fetch(sample.second.latitude, sample.second.longitude)
+                                })
+                            }
+                            observations = futures.mapNotNull { future ->
+                                try { future.get(35, java.util.concurrent.TimeUnit.SECONDS) }
+                                catch (error: Exception) {
+                                    android.util.Log.w("NEXT_NAVI_WEATHER", "Route weather sample unavailable", error)
+                                    null
+                                }
+                            }
+                        } finally {
+                            executor.shutdownNow()
+                        }
+                        if (observations.isEmpty()) throw IllegalStateException("Non riesco a verificare il meteo lungo il percorso.")
+                    }
+                }
             } catch (error: Exception) {
-                android.util.Log.w("NEXT_NAVI_WEATHER", "Jarvis live weather lookup failed", error)
-                null
+                failureMessage = error.message?.take(220)
+                    ?: "Non riesco a verificare il meteo richiesto."
+                android.util.Log.w("NEXT_NAVI_WEATHER", "Jarvis weather request failed", error)
             }
+
             runOnUiThread {
                 if (requestGeneration != jarvisResponseGeneration || jarvisListening || isFinishing) return@runOnUiThread
-                if (result == null) {
+                if (failureMessage != null) {
                     jarvisStatusText.text = jarvisAssistantName() + " • meteo non disponibile"
-                    speakJarvis("Non riesco a verificare il meteo attuale da Open-Meteo. Non voglio inventare temperatura o vento; riprova quando la connessione è disponibile.")
+                    speakJarvis(failureMessage!!)
                     return@runOnUiThread
                 }
-                latestWeather = result
-                weatherUsesApproximateLocation = gps == null
-                updateWeatherDisplay(result)
-                val time = result.currentTime.substringAfter("T", "").take(5).ifBlank { "ora locale del servizio" }
+                if (observations.isEmpty()) {
+                    jarvisStatusText.text = jarvisAssistantName() + " • meteo non disponibile"
+                    speakJarvis("Non ho ricevuto dati meteorologici verificabili. Riprova tra poco.")
+                    return@runOnUiThread
+                }
+                if (updateDashboardWeather) {
+                    latestWeather = observations.first().second
+                    weatherUsesApproximateLocation = gps == null
+                    updateWeatherDisplay(observations.first().second)
+                }
                 jarvisStatusText.text = jarvisAssistantName() + " • meteo verificato"
-                speakJarvis(
-                    "Meteo attuale verificato da Open-Meteo $locationDescription: " +
+                val speech = observations.joinToString(separator = if (observations.size > 1) ". " else "") { (label, result) ->
+                    val time = result.currentTime.substringAfter("T", "").take(5).ifBlank { "ora locale del servizio" }
+                    "Meteo attuale verificato da Open-Meteo $label: " +
                         WeatherService.description(result.weatherCode).lowercase(Locale.ITALIAN) + ", " +
                         WeatherService.format(result.temperatureC) + " gradi, vento " +
                         WeatherService.format(result.windKmh) + " chilometri orari da " +
                         WeatherService.windDirection(result.windDirectionDegrees) +
                         ", raffiche fino a " + WeatherService.format(result.gustKmh) +
-                        " chilometri orari. Dato valido alle $time."
-                )
+                        " chilometri orari. Dato valido alle $time"
+                }
+                speakJarvis(if (observations.size > 1)
+                    "Ho controllato le condizioni meteo attuali in più punti del percorso. $speech. Sono rilevazioni attuali, non una previsione garantita all'orario di arrivo."
+                else speech + ".")
             }
         }
     }
-
-
 
     private fun buildJarvisTripContext(
         place: PlaceResult,

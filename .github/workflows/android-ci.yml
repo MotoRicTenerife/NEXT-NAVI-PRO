@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -107,18 +107,53 @@ jobs:
           TOMTOM_TRAFFIC_GET_ONLY: "true"
         run: python roadtools/tomtom_traffic_live_smoke.py
 
+      - name: Stage debug APK for emulator
+        run: |
+          set -e
+          APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          cp "$APK" "$RUNNER_TEMP/next-navi-pro-debug.apk"
+          test -s "$RUNNER_TEMP/next-navi-pro-debug.apk"
+          echo "NEXT_NAVI_CI_APK=$RUNNER_TEMP/next-navi-pro-debug.apk" >> "$GITHUB_ENV"
+          echo "Staged APK for emulator: $RUNNER_TEMP/next-navi-pro-debug.apk"
+
+      - name: Enable KVM hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -c /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+
       - name: Install and launch APK in Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env:
+          APK_PATH: ${{ runner.temp }}/next-navi-pro-debug.apk
+          DIAG_DIR: ci-diagnostics
         with:
           api-level: 35
           target: google_apis
           arch: x86_64
-          profile: pixel_6
+          ram-size: 4096M
+          cores: 2
+          force-avd-creation: true
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)" && test -n "$APK" && echo "Installing APK: $APK" && adb install -r "$APK" && adb shell pm path com.nextnavipro.app.debug && adb shell monkey -p com.nextnavipro.app.debug 1 && sleep 8 && adb shell pidof com.nextnavipro.app.debug
+          emulator-boot-timeout: 900
+          script: bash .github/ci/emulator-check.sh
+
+      - name: Upload Android emulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-emulator-diagnostics
+          path: ci-diagnostics/
+          if-no-files-found: warn
 
       - name: Upload debug APK
+        if: always() && !cancelled()
         uses: actions/upload-artifact@v5
         with:
           name: next-navi-pro-debug-apk
