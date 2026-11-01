@@ -145,7 +145,7 @@ jobs:
 
           test -s "$NEXT_NAVI_CI_APK"
           "$ADB" start-server
-          "$EMULATOR" -port 5554 -avd next-navi-ci -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel off > "$RUNNER_TEMP/next-navi-emulator.log" 2>&1 &
+          "$EMULATOR" -port 5554 -avd next-navi-ci -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 4096 -cores 2 -accel off > "$RUNNER_TEMP/next-navi-emulator.log" 2>&1 &
           EMULATOR_PID=$!
           cleanup_emulator() {
             "$ADB" -s emulator-5554 emu kill >/dev/null 2>&1 || true
@@ -188,8 +188,45 @@ jobs:
           "$ADB" -s emulator-5554 shell settings put global transition_animation_scale 0.0 || true
           "$ADB" -s emulator-5554 shell settings put global animator_duration_scale 0.0 || true
 
-          echo "Installing APK: $NEXT_NAVI_CI_APK"
-          "$ADB" -s emulator-5554 install -r "$NEXT_NAVI_CI_APK"
+          echo "Checking package manager before installation."
+          "$ADB" -s emulator-5554 shell service check package
+          "$ADB" -s emulator-5554 shell cmd package list packages >/dev/null
+
+          echo "Installing APK without ADB streaming: $NEXT_NAVI_CI_APK"
+          if ! "$ADB" -s emulator-5554 install --no-streaming -r "$NEXT_NAVI_CI_APK"; then
+            echo "::warning::First APK installation attempt failed; collecting Android diagnostics before one controlled recovery."
+            "$ADB" -s emulator-5554 shell getprop > "$RUNNER_TEMP/android-getprop-before-recovery.txt" 2>&1 || true
+            "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-before-recovery.txt" 2>&1 || true
+            grep -Ei 'PackageManager|installd|system_server|FATAL EXCEPTION|lowmemory|lmkd|binder' "$RUNNER_TEMP/android-logcat-before-recovery.txt" | tail -n 250 || true
+            echo "Rebooting emulator once to recover Android system services."
+            "$ADB" -s emulator-5554 reboot
+            REBOOT_READY=false
+            for attempt in $(seq 1 180); do
+              BOOT_COMPLETED="$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+              PACKAGE_SERVICE="$("$ADB" -s emulator-5554 shell service check package 2>/dev/null || true)"
+              ACTIVITY_SERVICE="$("$ADB" -s emulator-5554 shell service check activity 2>/dev/null || true)"
+              if [ "$BOOT_COMPLETED" = "1" ] && [[ "$PACKAGE_SERVICE" == *": found"* && "$ACTIVITY_SERVICE" == *": found"* ]]; then
+                REBOOT_READY=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$REBOOT_READY" != "true" ]; then
+              echo "::error::Android package/activity services did not recover after the controlled reboot."
+              "$ADB" devices || true
+              "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-after-recovery.txt" 2>&1 || true
+              tail -n 300 "$RUNNER_TEMP/android-logcat-after-recovery.txt" || true
+              exit 1
+            fi
+            echo "Retrying APK installation once, without ADB streaming."
+            if ! "$ADB" -s emulator-5554 install --no-streaming -r "$NEXT_NAVI_CI_APK"; then
+              echo "::error::APK installation failed again after Android services recovered."
+              "$ADB" -s emulator-5554 logcat -b all -d -v threadtime > "$RUNNER_TEMP/android-logcat-after-recovery.txt" 2>&1 || true
+              grep -Ei 'PackageManager|installd|system_server|FATAL EXCEPTION|lowmemory|lmkd|binder|Failure' "$RUNNER_TEMP/android-logcat-after-recovery.txt" | tail -n 350 || true
+              tail -n 160 "$RUNNER_TEMP/next-navi-emulator.log" || true
+              exit 1
+            fi
+          fi
           "$ADB" -s emulator-5554 shell pm path com.nextnavipro.app.debug
 
           START_OUTPUT="$("$ADB" -s emulator-5554 shell am start -W -n com.nextnavipro.app.debug/com.nextnavipro.app.MainActivity)"
@@ -201,6 +238,7 @@ jobs:
           echo "NEXT NAVI PRO launched successfully; pid=$APP_PID"
 
       - name: Upload debug APK
+        if: always() && !cancelled()
         uses: actions/upload-artifact@v5
         with:
           name: next-navi-pro-debug-apk
