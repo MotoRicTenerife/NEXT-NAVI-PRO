@@ -83,6 +83,15 @@ class SpeedLimitPolicyTest {
         assertTrue(SpeedLimitPolicy.hasUsableTrace(listOf(query, fix(0.0, 13.0, 0f, 2_500L))))
     }
 
+    @Test fun provisionalPositionLookupRequiresUsableGpsAccuracy() {
+        assertFalse(SpeedLimitPolicy.canUseProvisionalPositionLookup(null))
+        assertFalse(SpeedLimitPolicy.canUseProvisionalPositionLookup(Float.NaN))
+        assertFalse(SpeedLimitPolicy.canUseProvisionalPositionLookup(0f))
+        assertFalse(SpeedLimitPolicy.canUseProvisionalPositionLookup(35.1f))
+        assertTrue(SpeedLimitPolicy.canUseProvisionalPositionLookup(35f))
+        assertTrue(SpeedLimitPolicy.canUseProvisionalPositionLookup(8f))
+    }
+
     @Test fun neverFasterThanTheMinimumSpacingEvenAfterATurn() {
         assertFalse(SpeedLimitPolicy.shouldQuery(query, fix(30.0, 100.0, 90f, 2_000L)))
     }
