@@ -5566,7 +5566,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
 
         if (!::limitValue.isInitialized) return
-        limitValue.text = if (limit != null && speedLimitProvisional) "~$limit" else limit?.toString() ?: "—"
+        limitValue.text = limit?.toString() ?: "—"
         limitValue.contentDescription = when {
             manualSpeedLimit != null -> "Limite manuale $limit chilometri orari. Tocca per modificarlo o riattivare l'aggiornamento automatico"
             speedLimitProvisional && limit != null -> "Limite provvisorio TomTom $limit chilometri orari, in attesa della conferma durante la marcia"
@@ -5574,7 +5574,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             else -> "Limite di velocità non disponibile. Tocca per impostarlo manualmente o riprovare la ricerca"
         }
         // The speed-limit digits stay black inside the white/red regulatory sign.
-        limitValue.setTextColor(Color.BLACK)
+        limitValue.setTextColor(if (speedLimitProvisional && limit != null) Color.LTGRAY else Color.BLACK)
     }
 
     private fun checkRadarProximityAlert(location: Location) {
