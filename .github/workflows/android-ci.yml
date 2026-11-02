@@ -9,6 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
+  actions: read
   contents: read
 jobs:
   build:
@@ -92,6 +93,59 @@ jobs:
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
         run: gradle --no-daemon testDebugUnitTest
+      - name: Download the exact previously supplied alpha09 APK for upgrade validation
+        uses: actions/download-artifact@v5
+        with:
+          name: next-navi-pro-debug-apk
+          path: old-apk
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 41349308265
+      - name: Stage alpha09 and alpha10 APKs for upgrade validation
+        run: |
+          set -e
+          OLD_APK="$(find old-apk -type f -name '*.apk' -print -quit)"
+          NEW_APK="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          test -s "$OLD_APK"
+          test -s "$NEW_APK"
+          mkdir -p "$RUNNER_TEMP/next-navi-upgrade"
+          cp "$OLD_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha09.apk"
+          cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha10.apk"
+          echo "OLD_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha09.apk" >> "$GITHUB_ENV"
+          echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha10.apk" >> "$GITHUB_ENV"
+          sha256sum "$RUNNER_TEMP/next-navi-upgrade/"*.apk
+      - name: Enable KVM hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -c /dev/kvm && test -r /dev/kvm && test -w /dev/kvm
+      - name: Install alpha09 and upgrade to alpha10 in Android emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        env:
+          OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
+          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha10.apk
+          DIAG_DIR: ci-upgrade-diagnostics
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          cores: 2
+          force-avd-creation: true
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash .github/ci/emulator-upgrade-check.sh
+      - name: Upload Android upgrade diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-upgrade-diagnostics
+          path: ci-upgrade-diagnostics/
+          if-no-files-found: warn
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v5
         with:
