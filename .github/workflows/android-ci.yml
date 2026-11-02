@@ -161,7 +161,7 @@ jobs:
                       # endpoint and TomTom Reverse Geocoding permission without exposing
                       # the provider key. A null speed limit is valid when TomTom has no
                       # explicit limit for the sampled road.
-                      status, position_limit = post_json(base_url + "/speed-limit-position", {
+                      status, position_limit = post_json(endpoint[:-len("/jarvis")] + "/speed-limit-position", {
                           "latitude": 28.05,
                           "longitude": -16.68
                       }, 15)
