@@ -109,7 +109,13 @@ jobs:
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           # Render deploys from backend/jarvis-render, not from unrelated Android/workflow commits.
           # Always compare the live service with the latest backend-changing commit in this head.
-          export EXPECTED_RENDER_REVISION="$(git log --first-parent -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # On a push to the Render-connected branch, Render deploys that exact commit.
+            export EXPECTED_RENDER_REVISION="${{ github.sha }}"
+          else
+            # The PR-only diagnostic path does not deploy the PR head to Render.
+            export EXPECTED_RENDER_REVISION="$(git log --first-parent -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          fi
           if [ -z "$EXPECTED_RENDER_REVISION" ]; then
             echo "::error::Could not identify the latest backend commit for this revision."
             exit 1
