@@ -109,7 +109,13 @@ jobs:
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           # Render deploys from backend/jarvis-render, not from unrelated Android/workflow commits.
           # Always compare the live service with the latest backend-changing commit in this head.
-          export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # On a push to the Render-connected branch, Render deploys that exact commit.
+            export EXPECTED_RENDER_REVISION="${{ github.sha }}"
+          else
+            # The PR-only diagnostic path does not deploy the PR head to Render.
+            export EXPECTED_RENDER_REVISION="$(git log --first-parent -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          fi
           if [ -z "$EXPECTED_RENDER_REVISION" ]; then
             echo "::error::Could not identify the latest backend commit for this revision."
             exit 1
@@ -155,6 +161,26 @@ jobs:
                           "revision": provider_status.get("revision"),
                           "tomtomConfigured": provider_status.get("tomtomConfigured"),
                           "roadEditorOsm": provider_status.get("roadEditorOsm")
+                      })
+
+                      # One bounded live request verifies the new stationary-position
+                      # endpoint and TomTom Reverse Geocoding permission without exposing
+                      # the provider key. A null speed limit is valid when TomTom has no
+                      # explicit limit for the sampled road.
+                      status, position_limit = post_json(endpoint[:-len("/jarvis")] + "/speed-limit-position", {
+                          "latitude": 28.05,
+                          "longitude": -16.68
+                      }, 15)
+                      limit_value = position_limit.get("speedLimitKmh")
+                      if (status != 200 or
+                          position_limit.get("source") != "TomTom Reverse Geocoding" or
+                          (limit_value is not None and (not isinstance(limit_value, int) or not 5 <= limit_value <= 200)) or
+                          (position_limit.get("road") is not None and not isinstance(position_limit.get("road"), str))):
+                          raise RuntimeError("Render stationary TomTom lookup returned an invalid payload: " + repr(position_limit)[:240])
+                      print("Render stationary TomTom position lookup PASSED:", {
+                          "road": position_limit.get("road"),
+                          "speedLimitKmh": limit_value,
+                          "reason": position_limit.get("reason")
                       })
 
                       base_url = endpoint[:-len("/jarvis")]
