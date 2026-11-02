@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101a24"><title>NEXT NAVI PRO · Jarvis Lab</title>
+<style>
+:root{color-scheme:dark;--bg:#0b121a;--panel:#131f2b;--panel2:#1a2a38;--line:#2b4051;--text:#edf5f7;--muted:#9bb0bd;--teal:#20c6bd;--teal2:#123f43;--red:#ff6474;--green:#5dd69a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 600px at 90% -10%,#173440 0,transparent 60%),var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:#0b121aeF;backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:14px max(16px,env(safe-area-inset-left))}
+.head{max-width:1100px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{font-weight:800;letter-spacing:.04em}.brand span{color:var(--teal)}.sub{font-size:12px;color:var(--muted)}
+main{max-width:1100px;margin:18px auto;padding:0 14px 40px;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(270px,.8fr);gap:16px}
+.panel{background:linear-gradient(160deg,#152330,#101a24);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 12px 36px #0003}.panelHead{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}.panelHead h2{font-size:15px;margin:0}.body{padding:14px 16px}
+.status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:#81919c}.dot.ok{background:var(--green);box-shadow:0 0 10px #5dd69a66}.dot.bad{background:var(--red)}
+button,input,select,textarea{font:inherit}button{border:1px solid #3b5668;background:var(--panel2);color:var(--text);border-radius:12px;padding:10px 13px;cursor:pointer}button.primary{background:var(--teal);color:#052326;border-color:var(--teal);font-weight:800}button:disabled{opacity:.45;cursor:not-allowed}button.small{font-size:12px;padding:7px 10px}.toolbar{display:flex;gap:8px;flex-wrap:wrap}
+.chat{height:min(56vh,590px);min-height:330px;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:#09121a66}
+.msg{max-width:88%;padding:11px 13px;border-radius:15px;white-space:pre-wrap;overflow-wrap:anywhere}.msg.user{align-self:flex-end;background:#17494a;border:1px solid #287b79}.msg.assistant{align-self:flex-start;background:#1b2b39;border:1px solid #30485a}.msg.system{align-self:center;background:#302b1b;border:1px solid #66552c;color:#f2dca7;font-size:12px;max-width:96%}.msg .meta{font-size:10px;color:#a8bec8;margin-bottom:5px}.composer{padding:12px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end}.composer textarea{flex:1;min-height:46px;max-height:120px;resize:vertical;background:#0b151e;border:1px solid #334b5c;border-radius:12px;padding:11px;color:var(--text)}.composer button{min-height:46px}.hint{font-size:11px;color:var(--muted);margin-top:8px}
+.field{display:grid;gap:5px;margin-bottom:12px}.field label{font-size:12px;color:var(--muted)}input,select{width:100%;background:#0b151e;border:1px solid #334b5c;border-radius:10px;color:var(--text);padding:10px}input[type=range]{padding:0;accent-color:var(--teal)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}.divider{height:1px;background:var(--line);margin:14px 0}.diag{display:grid;gap:8px}.diagrow{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:9px 10px;border-radius:10px;background:#0c1720}.diagrow span:last-child{text-align:right;color:var(--muted);overflow-wrap:anywhere}.quick{display:grid;gap:8px}.quick button{text-align:left}.note{font-size:12px;color:var(--muted)}.result{font-size:12px;padding:9px 10px;border-radius:10px;background:#0c1720;border-left:3px solid var(--teal);margin-top:8px}.warning{color:#f4cb82}.good{color:var(--green)}.badtext{color:var(--red)}.footer{padding:12px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+@media(max-width:800px){main{grid-template-columns:1fr}.chat{height:48vh;min-height:300px}.head{align-items:flex-start}.sub{max-width:180px;text-align:right}}
+</style></head>
+<body>
+<header><div class="head"><div><div class="brand">NEXT NAVI <span>PRO</span> · JARVIS LAB</div><div class="sub">Banco prova conversazionale · ambiente di test</div></div><div class="status"><i id="healthDot" class="dot"></i><span id="healthText">Connessione da verificare</span></div></div></header>
+<main>
+<section class="panel">
+ <div class="panelHead"><h2>Conversazione con Jarvis</h2><div class="toolbar"><button id="voiceToggle" class="small">Voce: OFF</button><button id="clearChat" class="small">Pulisci</button></div></div>
+ <div id="chat" class="chat" aria-live="polite"><div class="msg system">Questa console interroga il backend reale. Nessuna risposta simulata. Inizia con una domanda oppure avvia un test guidato.</div></div>
+ <div class="composer"><button id="mic" title="Dettatura vocale">🎙</button><textarea id="message" placeholder="Scrivi a Jarvis… (Invio per inviare, Shift+Invio per andare a capo)"></textarea><button id="send" class="primary">Invia</button></div>
+ <div class="body hint">La cronologia recente viene inviata al backend per mantenere il contesto. La cronologia resta nella sessione corrente del browser e viene inviata al backend per il contesto; usa “Pulisci” per azzerarla.</div>
+</section>
+<aside class="panel">
+ <div class="panelHead"><h2>Strumenti di prova</h2><button id="runHealth" class="small">Verifica servizi</button></div>
+ <div class="body">
+  <div class="diag" id="diagnostics">
+   <div class="diagrow"><span>Backend Render</span><span id="dHealth">Non verificato</span></div>
+   <div class="diagrow"><span>Gemini / conversazione</span><span id="dGemini">Da testare</span></div>
+   <div class="diagrow"><span>Traffico TomTom</span><span id="dTraffic">Da verificare</span></div>
+   <div class="diagrow"><span>Limiti TomTom</span><span id="dSpeed">Da verificare</span></div>
+  </div>
+  <div class="divider"></div>
+  <div class="field"><label for="name">Nome assistente</label><input id="name" value="Jarvis" maxlength="30"></div>
+  <div class="field"><label for="preset">Stile conversazionale</label><select id="preset"><option value="jarvis">Jarvis intelligente e discreto</option><option value="friendly">Amichevole</option><option value="ironic">Ironico</option><option value="professional">Professionale</option><option value="discreet">Essenziale</option></select></div>
+  <div class="grid2">
+   <div class="field"><label for="irony">Ironia <b id="ironyV">45</b></label><input id="irony" type="range" min="0" max="100" value="45"></div>
+   <div class="field"><label for="warmth">Calore <b id="warmthV">80</b></label><input id="warmth" type="range" min="0" max="100" value="80"></div>
+   <div class="field"><label for="energy">Energia <b id="energyV">55</b></label><input id="energy" type="range" min="0" max="100" value="55"></div>
+   <div class="field"><label for="concision">Sintesi <b id="concisionV">75</b></label><input id="concision" type="range" min="0" max="100" value="75"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="field"><label for="trafficDestination">Destinazione per la verifica traffico</label><input id="trafficDestination" value="Los Cristianos" maxlength="120" placeholder="Es. Los Cristianos"></div>
+  <div class="field"><label for="vehicleMode">Tipo di veicolo per TomTom</label><select id="vehicleMode"><option value="motorcycle" selected>Modalità moto</option><option value="car">Modalità auto</option></select></div>
+  <div class="field"><label>Posizione GPS attuale (necessaria per il percorso)</label><div class="grid2"><input id="lat" inputmode="decimal" placeholder="Latitudine"><input id="lon" inputmode="decimal" placeholder="Longitudine"></div></div>
+  <div class="toolbar"><button id="getGps" class="small">Usa GPS del dispositivo</button><button id="clearGps" class="small">Rimuovi GPS</button></div>
+  <div class="divider"></div>
+  <h2 style="font-size:14px;margin:0 0 10px">Test guidati · conversazione reale</h2>
+  <div class="quick">
+   <button id="testMemory">① Continuità: ricorda una destinazione</button>
+   <button id="testFollow">② Follow-up: “E passando dalla TF-1?”</button>
+   <button id="testTraffic">③ Traffico TomTom sul percorso</button>
+   <button id="testNearbyTraffic">④ Traffico vicino a me</button>
+   <button id="testWeather">⑤ Meteo locale verificato</button>
+  </div>
+  <div id="suiteResult" class="result" hidden></div>
+ </div>
+ <div class="footer">Il test ③ richiede GPS e destinazione: calcola un percorso senza avviare la navigazione e interroga TomTom. Il test ④ richiede solo GPS e interroga velocità reale del segmento stradale più vicino e incidenti nell'area. Il test ⑤ richiede GPS. La modalità moto usa il profilo TomTom motorcycle beta, se abilitato sul server. Non usare il telefono durante la guida.</div>
+</aside>
+</main>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const chat=$("chat"), input=$("message"), send=$("send");
+const deviceLanguage=(navigator.languages&&navigator.languages[0])||navigator.language||"en-GB";
+const languageBase=deviceLanguage.split("-")[0].toLowerCase();
+document.documentElement.lang=deviceLanguage;
+$("healthText").title="Device language: "+deviceLanguage;
+let messages=[], busy=false, voiceOn=false, recognition=null;
+function localizedPrompt(key,destination){
+ const prompts={
+  it:{traffic:"Che traffico c'è per andare da qui a "+destination+"? Usa i dati aggiornati, indica tempo di percorrenza e ritardo se disponibili e distingui i dati mancanti dall'assenza di traffico.",weather:"Com'è il meteo adesso nella mia posizione? Indica fonte e orario del dato.",memory:"Per questa prova, la mia destinazione si chiama Los Cristianos. Tienilo a mente durante la conversazione.",follow:"E passando dalla TF-1?"},
+  es:{traffic:"¿Qué tráfico hay desde aquí hasta "+destination+"? Usa datos actualizados, indica el tiempo de viaje y los retrasos si están disponibles, y distingue los datos que faltan de la ausencia de tráfico.",weather:"¿Qué tiempo hace ahora en mi ubicación? Indica la fuente y la hora del dato.",memory:"Para esta prueba, mi destino es Los Cristianos. Recuérdalo durante la conversación.",follow:"¿Y pasando por la TF-1?"},
+  en:{traffic:"What's the traffic like from here to "+destination+"? Use current verified data, give travel time and delay if available, and distinguish missing data from no traffic.",weather:"What's the weather like at my current location? Give the source and observation time.",memory:"For this test, my destination is Los Cristianos. Remember it during this conversation.",follow:"What about going via the TF-1?"},
+  fr:{traffic:"Quelle est la circulation d'ici à "+destination+" ? Utilise des données à jour, indique le temps de trajet et les retards si disponibles, et distingue les données manquantes de l'absence de trafic.",weather:"Quel temps fait-il actuellement à ma position ? Indique la source et l'heure de l'observation.",memory:"Pour ce test, ma destination est Los Cristianos. Garde-la en mémoire pendant la conversation.",follow:"Et en passant par la TF-1 ?"},
+  de:{traffic:"Wie ist die Verkehrslage von hier nach "+destination+"? Verwende aktuelle geprüfte Daten, nenne Fahrzeit und Verzögerung, sofern verfügbar, und unterscheide fehlende Daten von freier Fahrt.",weather:"Wie ist das aktuelle Wetter an meinem Standort? Nenne Quelle und Beobachtungszeit.",memory:"Für diesen Test ist mein Ziel Los Cristianos. Merke es dir für dieses Gespräch.",follow:"Wie sieht es über die TF-1 aus?"},
+  pt:{traffic:"Como está o trânsito daqui até "+destination+"? Usa dados atuais verificados, indica o tempo de viagem e atrasos se disponíveis e distingue dados em falta de ausência de trânsito.",weather:"Como está o tempo agora na minha localização? Indica a fonte e a hora da observação.",memory:"Neste teste, o meu destino é Los Cristianos. Lembra-te disso durante a conversa.",follow:"E passando pela TF-1?"},
+  nl:{traffic:"Hoe is het verkeer vanaf hier naar "+destination+"? Gebruik actuele gecontroleerde gegevens, vermeld reistijd en vertraging indien beschikbaar, en maak onderscheid tussen ontbrekende gegevens en geen verkeer.",weather:"Hoe is het weer op mijn huidige locatie? Vermeld de bron en waarnemingstijd.",memory:"Voor deze test is mijn bestemming Los Cristianos. Onthoud dat tijdens dit gesprek.",follow:"En via de TF-1?"}
+ };
+ return (prompts[languageBase]||prompts.en)[key];
+}
+function addMessage(role,content,meta){
+ const el=document.createElement("div");el.className="msg "+role;
+ if(meta){const m=document.createElement("div");m.className="meta";m.textContent=meta;el.appendChild(m);}
+ const body=document.createElement("div");body.textContent=content;el.appendChild(body);chat.appendChild(el);chat.scrollTop=chat.scrollHeight;return el;
+}
+function setBusy(v){busy=v;send.disabled=v;$("mic").disabled=v;send.textContent=v?"…":"Invia";}
+function getLocation(){const lat=Number($("lat").value),lon=Number($("lon").value);return Number.isFinite(lat)&&Number.isFinite(lon)&&Math.abs(lat)<=90&&Math.abs(lon)<=180?{latitude:lat,longitude:lon}:null;}
+function personality(){return{preset:$("preset").value,irony:Number($("irony").value),warmth:Number($("warmth").value),energy:Number($("energy").value),concision:Number($("concision").value)};}
+function updateRange(id){$(id+"V").textContent=$(id).value;}
+["irony","warmth","energy","concision"].forEach(id=>$(id).addEventListener("input",()=>updateRange(id)));
+function say(text){if(!voiceOn||!("speechSynthesis"in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=deviceLanguage;u.rate=.94;window.speechSynthesis.speak(u);}
+async function sendMessage(text){
+ text=(text||"").trim();if(!text||busy)return;
+ addMessage("user",text);messages.push({role:"user",content:text});input.value="";setBusy(true);
+ const started=performance.now();let bubble=null;
+ try{
+  const body={message:text,language:deviceLanguage,assistantName:$("name").value.trim()||"Jarvis",personality:personality(),history:messages.slice(0,-1).slice(-10),vehicleMode:$("vehicleMode").value};
+  const location=getLocation();if(location)body.location=location;
+  const response=await fetch("/jarvis",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),cache:"no-store"});
+  const data=await response.json().catch(()=>({error:"Risposta JSON non valida"}));
+  const elapsed=Math.round(performance.now()-started);
+  if(!response.ok)throw new Error((data.error||"Errore backend")+" (HTTP "+response.status+")");
+  if(typeof data.reply!=="string"||!data.reply.trim())throw new Error("Il backend non ha restituito una risposta testuale");
+  const diag=data.diagnostics||{};
+  const meta=elapsed+" ms"+(diag.model?" · "+diag.model:"")+(diag.responseMode?" · "+diag.responseMode:"");
+  bubble=addMessage("assistant",data.reply,meta);messages.push({role:"assistant",content:data.reply});
+  $("dGemini").textContent=diag.responseMode==="gemini"?"Gemini · risposta generata": "Risposta ricevuta";
+  $("dGemini").className=diag.responseMode==="gemini"?"good":"warning";
+  if(diag.trafficContext)$("dTraffic").textContent="Contesto traffico: "+diag.trafficContext;
+  if(diag.weatherStatus&&diag.weatherStatus!=="not_requested")$("dTraffic").textContent="Meteo: "+diag.weatherStatus;
+  if(diag.tripContextAccepted!==undefined)$("dTraffic").textContent=diag.tripContextAccepted?"Contesto viaggio accettato · "+(diag.trafficContext||""):"Nessun contesto viaggio · "+(diag.trafficContext||"");
+  if(data.weatherDiagnostics)$("dTraffic").textContent="Meteo: "+data.weatherDiagnostics.status;
+  say(data.reply);
+  return {ok:true,reply:data.reply,elapsed,diagnostics:diag};
+ }catch(error){const msg=error.message||"Errore sconosciuto";addMessage("system",msg,"ERRORE");return{ok:false,error:msg};}
+ finally{setBusy(false);input.focus();}
+}
+send.addEventListener("click",()=>sendMessage(input.value));
+input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage(input.value);}});
+$("clearChat").addEventListener("click",()=>{messages=[];chat.innerHTML="";window.speechSynthesis?.cancel();addMessage("system","Nuova sessione. La cronologia precedente è stata cancellata.");});
+$("voiceToggle").addEventListener("click",()=>{voiceOn=!voiceOn;$("voiceToggle").textContent="Voce: "+(voiceOn?"ON":"OFF");if(!voiceOn)window.speechSynthesis?.cancel();});
+$("getGps").addEventListener("click",()=>{if(!navigator.geolocation){addMessage("system","Geolocalizzazione non supportata dal browser.");return;}navigator.geolocation.getCurrentPosition(p=>{$("lat").value=p.coords.latitude.toFixed(6);$("lon").value=p.coords.longitude.toFixed(6);addMessage("system","GPS acquisito · precisione circa "+Math.round(p.coords.accuracy)+" m.");},e=>addMessage("system","GPS non disponibile: "+e.message),{enableHighAccuracy:true,timeout:12000,maximumAge:30000});});
+$("clearGps").addEventListener("click",()=>{$("lat").value="";$("lon").value="";});
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(SpeechRecognition){recognition=new SpeechRecognition();recognition.lang=deviceLanguage;recognition.interimResults=false;recognition.maxAlternatives=1;recognition.onresult=e=>{input.value=e.results[0][0].transcript;input.focus();};recognition.onerror=e=>addMessage("system","Dettatura: "+e.error);recognition.onend=()=>$("mic").textContent="🎙";}
+$("mic").addEventListener("click",()=>{if(!recognition){addMessage("system","Dettatura vocale non supportata da questo browser. Puoi usare la tastiera.");return;}try{$("mic").textContent="⏺";recognition.start();}catch(e){$("mic").textContent="🎙";}});
+async function checkEndpoint(path){const r=await fetch(path,{cache:"no-store"});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"HTTP "+r.status);return d;}
+async function health(){
+ $("healthText").textContent="Verifica…";$("healthDot").className="dot";
+ try{
+  const h=await checkEndpoint("/health");$("dHealth").textContent="OK · "+String(h.revision||"revisione non esposta").slice(0,12);$("dHealth").className="good";
+  $("healthText").textContent="Backend online";$("healthDot").className="dot ok";
+  try{const t=await checkEndpoint("/traffic/status");$("dTraffic").textContent="TomTom: "+(t.tomtomConfigured?"chiave OK":"chiave assente")+" · incidenti "+(t.incidentDetailsEnabled?"ON":"OFF")+" · routing "+(t.trafficAwareRoutingEnabled?"ON":"OFF");$("dTraffic").className=t.tomtomConfigured&&t.trafficAwareRoutingEnabled?"good":"warning";}catch(e){$("dTraffic").textContent="Endpoint non disponibile";$("dTraffic").className="warning";}
+  try{const s=await checkEndpoint("/speed-limit/status");$("dSpeed").textContent=s.tomtomConfigured?"TomTom configurato":"TomTom non configurato";$("dSpeed").className=s.tomtomConfigured?"good":"warning";}catch(e){$("dSpeed").textContent="Non verificabile";}
+  return true;
+ }catch(e){$("healthText").textContent="Backend non raggiungibile";$("healthDot").className="dot bad";$("dHealth").textContent=e.message;$("dHealth").className="badtext";return false;}
+}
+$("runHealth").addEventListener("click",health);
+function suiteResult(text,ok){const el=$("suiteResult");el.hidden=false;el.textContent=text;el.className="result "+(ok?"good":"warning");}
+async function runSuite(items,label){
+ if(busy)return;suiteResult(label+" · test in corso…",false);let results=[];
+ for(const item of items){const r=await sendMessage(item.text);results.push(r);if(!r.ok)break;if(item.wait)await new Promise(resolve=>setTimeout(resolve,450));}
+ const good=results.length===items.length&&results.every(r=>r.ok);
+ suiteResult(label+": "+results.length+"/"+items.length+" richieste completate. Controlla le risposte nel pannello: il completamento HTTP non certifica da solo la qualità semantica.",good);
+}
+$("testMemory").addEventListener("click",()=>{$("clearChat").click();runSuite([{text:localizedPrompt("memory")},{text:languageBase==="es"?"¿Cuál es el destino que acabo de indicar?":languageBase==="fr"?"Quelle destination viens-je d'indiquer ?":languageBase==="de"?"Welches Ziel habe ich gerade genannt?":languageBase==="pt"?"Qual é o destino que acabei de indicar?":languageBase==="nl"?"Welke bestemming heb ik net genoemd?":languageBase==="it"?"Qual è la destinazione che ti ho appena indicato?":"What destination did I just give you?"}],"Conversation continuity");});
+$("testFollow").addEventListener("click",()=>runSuite([{text:languageBase==="es"?"Estoy pensando en ir a Los Cristianos. ¿Qué necesitas para verificar el tráfico?":languageBase==="fr"?"J'envisage d'aller à Los Cristianos. De quelles informations as-tu besoin pour vérifier la circulation ?":languageBase==="de"?"Ich möchte nach Los Cristianos fahren. Welche Informationen brauchst du, um den Verkehr zu prüfen?":languageBase==="pt"?"Estou a pensar ir para Los Cristianos. De que informações precisas para verificar o trânsito?":languageBase==="nl"?"Ik wil naar Los Cristianos rijden. Welke informatie heb je nodig om het verkeer te controleren?":languageBase==="it"?"Sto valutando un percorso per Los Cristianos. Quali informazioni ti servono per verificare il traffico?":"I'm considering a trip to Los Cristianos. What information do you need to verify traffic?"},{text:localizedPrompt("follow")}],"Alternative-road follow-up"));
+$("testTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Acquire GPS or enter latitude and longitude first.",false);return;}const destination=$("trafficDestination").value.trim();if(destination.length<2){suiteResult("Enter a valid destination.",false);return;}sendMessage(localizedPrompt("traffic",destination));});
+$("testNearbyTraffic").addEventListener("click",()=>{if(!getLocation()){suiteResult("Acquire GPS or enter latitude and longitude first.",false);return;}const prompts={it:"Com'è il traffico intorno alla mia posizione adesso? Controlla il segmento stradale più vicino e gli incidenti segnalati. Dimmi velocità attuale e velocità a traffico libero se disponibili; non dedurre che le strade siano libere se non trovi incidenti.",es:"¿Cómo está el tráfico cerca de mi posición ahora? Comprueba el tramo de carretera más cercano y los incidentes notificados. Indica la velocidad actual y la velocidad de flujo libre si están disponibles; no supongas que las carreteras están despejadas si no hay incidentes.",en:"How is traffic around my current location right now? Check the nearest road segment and reported incidents. Tell me current speed and free-flow speed if available; do not assume roads are clear just because no incidents are found.",fr:"Comment est la circulation autour de ma position maintenant ? Vérifie le segment routier le plus proche et les incidents signalés. Indique la vitesse actuelle et la vitesse en circulation libre si elles sont disponibles.",de:"Wie ist der Verkehr in meiner Nähe gerade? Prüfe den nächstgelegenen Straßenabschnitt und gemeldete Vorfälle. Nenne aktuelle Geschwindigkeit und freie Geschwindigkeit, sofern verfügbar.",pt:"Como está o trânsito perto da minha localização agora? Verifica o troço de estrada mais próximo e os incidentes comunicados. Indica a velocidade atual e a velocidade em fluxo livre, se disponíveis.",nl:"Hoe is het verkeer rond mijn huidige locatie? Controleer het dichtstbijzijnde wegsegment en gemelde incidenten. Geef de huidige snelheid en de vrije doorstromingssnelheid indien beschikbaar."};sendMessage(prompts[languageBase]||prompts.en);});
+$("testWeather").addEventListener("click",()=>{if(!getLocation()){suiteResult("Acquire GPS or enter latitude and longitude first.",false);return;}sendMessage(localizedPrompt("weather"));});
+health();
+})();
+</script></body></html>

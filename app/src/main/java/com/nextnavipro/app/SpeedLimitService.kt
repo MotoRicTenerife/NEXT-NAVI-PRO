@@ -31,25 +31,60 @@ data class RoadMatch(
 }
 
 object SpeedLimitService {
-    private const val ENDPOINT = "https://overpass-api.de/api/interpreter"
+    // The primary public Overpass instance can rate-limit or temporarily fail.
+    // Retry a second public instance before reporting the road/limit as unknown.
+    private val ENDPOINTS = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
+    )
     private const val RADIUS_METERS = 80
-    private const val MAX_MATCH_DISTANCE_METERS = 28f
+    private const val BASE_MATCH_DISTANCE_METERS = 28f
+    private const val MAX_MATCH_DISTANCE_WITH_GPS_UNCERTAINTY_METERS = 45f
     private const val MAX_HEADING_DIFFERENCE_DEGREES = 50f
-    private const val CONNECT_TIMEOUT_MS = 8000
-    private const val READ_TIMEOUT_MS = 12000
+    private const val CONNECT_TIMEOUT_MS = 3000
+    private const val READ_TIMEOUT_MS = 5000
 
     /**
      * Finds the closest plausible road segment first, then reads that road's
      * name/ref/maxspeed. This prevents borrowing a limit from a parallel road
      * or a nearby slip road simply because it is the only tagged candidate.
      */
-    fun findRoadNear(point: NavPoint, bearing: Float?): RoadMatch? {
+    fun findRoadNear(point: NavPoint, bearing: Float?, accuracyMeters: Float? = null): RoadMatch? {
+        var lastError: Exception? = null
+        var hadSuccessfulResponse = false
+        var bestRoadWithoutLimit: RoadMatch? = null
+        for (endpoint in ENDPOINTS) {
+            try {
+                val match = findRoadNearAtEndpoint(point, bearing, accuracyMeters, endpoint)
+                // A road match without maxspeed is not a complete speed-limit result.
+                // Continue to independent mirrors before deciding the limit is unknown.
+                if (match?.speedLimitKmh != null) return match
+                if (match != null && bestRoadWithoutLimit == null) bestRoadWithoutLimit = match
+                // A valid empty response is not an outage; keep trying mirrors because
+                // their data replication/cache can differ slightly.
+                hadSuccessfulResponse = true
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        if (bestRoadWithoutLimit != null) return bestRoadWithoutLimit
+        if (!hadSuccessfulResponse) throw lastError ?: IllegalStateException("Nessun servizio Overpass disponibile")
+        return null
+    }
+
+    private fun findRoadNearAtEndpoint(
+        point: NavPoint,
+        bearing: Float?,
+        accuracyMeters: Float?,
+        endpoint: String
+    ): RoadMatch? {
         require(point.latitude.isFinite() && point.latitude in -90.0..90.0)
         require(point.longitude.isFinite() && point.longitude in -180.0..180.0)
         val lat = point.latitude.toString()
         val lon = point.longitude.toString()
-        val query = "[out:json][timeout:12];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
+        val query = "[out:json][timeout:5];way[highway][highway!~\"^(footway|cycleway|path|steps|pedestrian|bridleway|corridor|elevator|proposed|construction)$\"](around:$RADIUS_METERS,$lat,$lon);out tags geom;"
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = CONNECT_TIMEOUT_MS
@@ -67,8 +102,19 @@ object SpeedLimitService {
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
             }.orEmpty()
             if (status !in 200..299) throw IllegalStateException("Overpass HTTP $status")
-            val elements = JSONObject(body).optJSONArray("elements") ?: return null
+            val responseJson = JSONObject(body)
+            val elements = responseJson.optJSONArray("elements") ?: run {
+                val remark = responseJson.optString("remark").take(180)
+                throw IllegalStateException(if (remark.isNotBlank()) "Overpass: $remark" else "Overpass response missing elements")
+            }
 
+            // A good GPS fix keeps the strict base radius. When Android reports a
+            // larger but still useful uncertainty, permit a bounded wider match;
+            // heading checks still reject many parallel/crossing-road false matches.
+            val allowedMatchDistance = maxOf(
+                BASE_MATCH_DISTANCE_METERS,
+                (accuracyMeters?.takeIf { it.isFinite() && it > 0f }?.times(0.9f) ?: 0f)
+            ).coerceAtMost(MAX_MATCH_DISTANCE_WITH_GPS_UNCERTAINTY_METERS)
             var best: RoadMatch? = null
             var bestScore = Float.MAX_VALUE
             for (i in 0 until elements.length()) {
@@ -95,7 +141,7 @@ object SpeedLimitService {
                         wayBestBearing = segmentBearing
                     }
                 }
-                if (wayBestDistance > MAX_MATCH_DISTANCE_METERS) continue
+                if (wayBestDistance > allowedMatchDistance) continue
                 val headingDelta = bearing?.let { headingAxisDifference(it, wayBestBearing) }
                 if (headingDelta != null && wayBestDistance > 8f &&
                     headingDelta > MAX_HEADING_DIFFERENCE_DEGREES) continue
@@ -107,7 +153,13 @@ object SpeedLimitService {
                     best = RoadMatch(
                         name = tags.optString("name").takeIf { it.isNotBlank() && it != "null" },
                         ref = tags.optString("ref").takeIf { it.isNotBlank() && it != "null" },
-                        speedLimitKmh = parseLimit(tags.optString("maxspeed")),
+                        speedLimitKmh = selectLimit(
+                            tags.optString("maxspeed"),
+                            tags.optString("maxspeed:forward"),
+                            tags.optString("maxspeed:backward"),
+                            bearing,
+                            wayBestBearing
+                        ),
                         highwayType = tags.optString("highway").takeIf { it.isNotBlank() && it != "null" },
                         distanceMeters = wayBestDistance,
                         roadBearing = wayBestBearing
@@ -123,6 +175,38 @@ object SpeedLimitService {
     /** Backwards-compatible helper for callers interested only in a numeric limit. */
     fun findNear(point: NavPoint, bearing: Float?): Int? =
         findRoadNear(point, bearing)?.speedLimitKmh
+
+    /**
+     * Resolve generic or explicitly directional OSM limits without guessing direction.
+     * OSM's forward/backward refer to the digitized way geometry; when the vehicle
+     * heading is ambiguous, only a generic limit (or identical directional limits) is safe.
+     */
+    internal fun selectLimit(
+        genericRaw: String,
+        forwardRaw: String,
+        backwardRaw: String,
+        vehicleBearing: Float?,
+        wayBearing: Float?
+    ): Int? {
+        val generic = parseLimit(genericRaw)
+        val forward = parseLimit(forwardRaw)
+        val backward = parseLimit(backwardRaw)
+        if (vehicleBearing == null || wayBearing == null) {
+            return if (forward != null && forward == backward) forward else generic
+        }
+        val difference = directedHeadingDifference(vehicleBearing, wayBearing)
+        val directional = when {
+            difference <= 60f -> forward
+            difference >= 120f -> backward
+            else -> null
+        }
+        return directional ?: generic
+    }
+
+    internal fun directedHeadingDifference(vehicleBearing: Float, wayBearing: Float): Float {
+        val diff = abs((vehicleBearing - wayBearing + 540f) % 360f - 180f)
+        return diff.coerceIn(0f, 180f)
+    }
 
     /**
      * Accepts only explicit numeric OSM limits. Contextual/conditional values
