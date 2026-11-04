@@ -70,6 +70,26 @@ internal class RouteProgressTracker {
     private var lastBearing: Float? = null
     private var lastResult: Match? = null
 
+    /** O(1) route-chainage lookup after geometry has been prepared by the matcher. */
+    fun alongRouteDistance(points: List<NavPoint>, pointIndex: Int): Double {
+        if (points.size < 2) return 0.0
+        ensureGeometry(points)
+        return cumulativeMeters[pointIndex.coerceIn(0, points.lastIndex)]
+    }
+
+    private fun ensureGeometry(points: List<NavPoint>) {
+        if (cachedPoints === points) return
+        cachedPoints = points
+        cumulativeMeters = DoubleArray(points.size)
+        for (i in 1 until points.size) {
+            cumulativeMeters[i] = cumulativeMeters[i - 1] +
+                GpxRouteService.distanceMeters(points[i - 1], points[i])
+        }
+        lastAlongMeters = null
+        lastElapsedMs = 0L
+        lastResult = null
+    }
+
     fun reset() {
         cachedPoints = null
         cumulativeMeters = DoubleArray(0)
@@ -93,17 +113,7 @@ internal class RouteProgressTracker {
         if (points.size < 2 || !latitude.isFinite() || !longitude.isFinite() ||
             latitude !in -90.0..90.0 || longitude !in -180.0..180.0 ||
             !accuracyMeters.isFinite() || accuracyMeters < 0.0) return null
-        if (cachedPoints !== points) {
-            cachedPoints = points
-            cumulativeMeters = DoubleArray(points.size)
-            for (i in 1 until points.size) {
-                cumulativeMeters[i] = cumulativeMeters[i - 1] +
-                    GpxRouteService.distanceMeters(points[i - 1], points[i])
-            }
-            lastAlongMeters = null
-            lastElapsedMs = 0L
-            lastResult = null
-        }
+        ensureGeometry(points)
         if (elapsedRealtimeMs == lastElapsedMs && latitude == lastLatitude && longitude == lastLongitude &&
             bearingDegrees == lastBearing && lastResult != null) return lastResult
 

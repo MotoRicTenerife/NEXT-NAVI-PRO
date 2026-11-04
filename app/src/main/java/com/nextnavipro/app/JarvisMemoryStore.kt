@@ -65,6 +65,56 @@ class JarvisMemoryStore(context: Context) : SQLiteOpenHelper(
         return parts.joinToString("\n").takeLast(maxChars.coerceIn(500, 8000))
     }
 
+    /**
+     * Creates a consistent standalone SQLite snapshot after checkpointing the WAL.
+     * The destination is an app-private temporary file chosen by the caller.
+     */
+    @Synchronized
+    fun exportDatabaseSnapshot(destination: java.io.File) {
+        val db = writableDatabase
+        val checkpointComplete = db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { cursor ->
+            cursor.moveToFirst() && cursor.getInt(0) == 0
+        }
+        require(checkpointComplete) { "Impossibile consolidare in sicurezza il database memoria Jarvis." }
+        val source = java.io.File(db.path)
+        val wal = java.io.File(source.path + "-wal")
+        require(source.isFile && source.length() > 0L && (!wal.exists() || wal.length() == 0L)) {
+            "Archivio memoria Jarvis non disponibile o non completamente consolidato."
+        }
+        source.copyTo(destination, overwrite = true)
+    }
+
+    /**
+     * Validates and replaces the private transcript database, then reopens it.
+     * Existing WAL/journal sidecars are removed only after the helper is closed.
+     */
+    @Synchronized
+    fun restoreDatabaseSnapshot(snapshot: java.io.File) {
+        require(snapshot.isFile && snapshot.length() in 1L..(50L * 1024L * 1024L)) {
+            "Backup memoria Jarvis non valido o troppo grande."
+        }
+        val probe = SQLiteDatabase.openDatabase(snapshot.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+        try {
+            val integrity = probe.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else ""
+            }
+            require(integrity == "ok") { "Il database memoria Jarvis non ha superato il controllo d'integrità." }
+        } finally {
+            probe.close()
+        }
+
+        val target = java.io.File(writableDatabase.path)
+        val replacement = java.io.File(target.parentFile, target.name + ".restore")
+        snapshot.copyTo(replacement, overwrite = true)
+        close()
+        if (!replacement.renameTo(target)) replacement.copyTo(target, overwrite = true)
+        replacement.delete()
+        java.io.File(target.path + "-wal").delete()
+        java.io.File(target.path + "-shm").delete()
+        java.io.File(target.path + "-journal").delete()
+        writableDatabase // Reopen immediately so subsequent Jarvis calls use the restored database.
+    }
+
     @Synchronized
     fun stats(): Stats {
         val db = readableDatabase
