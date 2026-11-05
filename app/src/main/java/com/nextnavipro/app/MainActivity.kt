@@ -6347,13 +6347,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // The live vehicle marker must follow the accepted GPS fix, never the planned route.
         // Route geometry is reserved for maneuver guidance and route-progress calculations.
         val markerTarget = Location(target)
+        val previousMarker = displayedMarkerLocation?.let { Location(it) }
+        val reliableCourse = markerTarget.hasBearing() && markerTarget.hasSpeed() &&
+            markerTarget.speed >= 3f &&
+            (!markerTarget.hasBearingAccuracy() || markerTarget.bearingAccuracyDegrees <= 35f)
+        if (!reliableCourse) {
+            // At low speed or with a poor course estimate, hold the last stable heading.
+            // Never rotate the arrow using a stale Android bearing while stopped.
+            if (previousMarker?.hasBearing() == true) {
+                markerTarget.bearing = previousMarker.bearing
+                markerTarget.setBearing(previousMarker.bearing)
+            } else {
+                markerTarget.removeBearing()
+            }
+        }
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerTarget)
             return
         }
-        val start = displayedMarkerLocation?.let { Location(it) }
-            ?: currentLocation?.let { Location(it) }
-            ?: Location(markerTarget)
+        val start = previousMarker ?: Location(markerTarget)
         val distance = start.distanceTo(markerTarget)
         gpsMarkerAnimator?.cancel()
         if (!activityResumed || distance < 0.5f || distance > 80f) {
