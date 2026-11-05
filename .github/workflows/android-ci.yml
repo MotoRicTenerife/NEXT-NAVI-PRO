@@ -40,6 +40,11 @@ jobs:
         env:
           RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
         run: python roadtools/render_stress_test.py
+      - name: Verify live TomTom traffic flow tile and incidents (GET-only)
+        env:
+          RENDER_BASE_URL: https://next-navi-pro-jarvis.onrender.com
+          TOMTOM_TRAFFIC_GET_ONLY: "true"
+        run: python roadtools/tomtom_traffic_live_smoke.py
       - name: Check Jarvis backend JavaScript syntax
         working-directory: backend/jarvis-render
         run: npm run check
