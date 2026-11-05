@@ -4596,7 +4596,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
         lastAcceptedFixElapsedMs = fixElapsedMs
         lastRawGpsLocation = Location(location)
-        val smoothed = smoothLocation(smoothedGpsLocation, location)
+        val smoothed = smoothLocation(smoothedGpsLocation, location, movingTimeMs)
         currentLocation = Location(smoothed)
         appendSpeedLimitTracePoint(smoothed)
         if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
@@ -4636,35 +4636,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return previous.distanceTo(incoming) > maximumPlausibleDistance
     }
 
-    private fun smoothLocation(previous: Location?, incoming: Location): Location {
-        // Adaptive low-pass filter: suppress stationary GPS wander, but rapidly accept
-        // genuine movement and course changes so the marker does not cut across a turn.
+    private fun smoothLocation(previous: Location?, incoming: Location, movingTimeMs: Long): Location {
         val result = Location(incoming)
-        if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
-            val jump = previous.distanceTo(incoming)
-            if (jump < 35f) {
-                val accuracyAlpha = when {
-                    incoming.accuracy <= 5f -> 0.70f
-                    incoming.accuracy <= 10f -> 0.64f
-                    incoming.accuracy <= 20f -> 0.55f
-                    incoming.accuracy <= 35f -> 0.42f
-                    else -> 0.30f
-                }
-                val speed = if (incoming.hasSpeed()) incoming.speed else 0f
-                // Keep enough of the raw fix to avoid visible lag, but do not let
-                // one-second GNSS updates move the marker almost entirely in one jump.
-                var alpha = when {
-                    speed >= 8f -> (accuracyAlpha - 0.08f).coerceIn(0.48f, 0.68f)
-                    speed < 2.5f -> 0.14f
-                    else -> (accuracyAlpha - 0.06f).coerceIn(0.42f, 0.66f)
-                }
-                // A larger displacement can be real motion; respond faster without
-                // reverting to the previous near-raw filter.
-                if (jump > 12f) alpha = maxOf(alpha, 0.76f)
-                if (previous.hasBearing() && incoming.hasBearing() && speed >= 2.5f) {
-                    val courseDelta = abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
-                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.76f)
-                }
+        if (previous != null) {
+            val displacement = previous.distanceTo(incoming)
+            if (displacement < 35f) {
+                val courseDelta = if (previous.hasBearing() && incoming.hasBearing()) {
+                    abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
+                } else null
+                val speed = incoming.speed.takeIf { incoming.hasSpeed() }
+                val accuracy = incoming.accuracy.takeIf { incoming.hasAccuracy() }
+                val deltaSeconds = (movingTimeMs.coerceAtLeast(0L) / 1000f)
+                    .takeIf { it > 0f } ?: 1f
+                val alpha = GpsSmoothingPolicy.alpha(
+                    deltaSeconds = deltaSeconds,
+                    displacementMeters = displacement,
+                    accuracyMeters = accuracy,
+                    speedMetersPerSecond = speed,
+                    courseDeltaDegrees = courseDelta
+                )
                 result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
                 result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
             }
