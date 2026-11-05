@@ -93,6 +93,22 @@ jobs:
           NEXT_NAVI_KEY_ALIAS: ${{ secrets.NEXT_NAVI_KEY_ALIAS }}
           NEXT_NAVI_KEY_PASSWORD: ${{ secrets.NEXT_NAVI_KEY_PASSWORD }}
         run: gradle --no-daemon testDebugUnitTest
+      - name: Verify TomTom live traffic map overlay wiring
+        run: |
+          FILE=app/src/main/java/com/nextnavipro/app/MainActivity.kt
+          grep -q 'SOURCE_TRAFFIC_FLOW' "$FILE"
+          grep -q '/traffic/flow/{z}/{x}/{y}' "$FILE"
+          grep -q 'next-live-traffic-lines' "$FILE"
+          grep -q 'relative_speed' "$FILE"
+          grep -q 'withSourceLayer("Traffic flow")' "$FILE"
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("app/src/main/java/com/nextnavipro/app/MainActivity.kt").read_text()
+          route = source.index('LineLayer("next-route-line"')
+          flow = source.index('LineLayer("next-live-traffic-lines"')
+          assert flow > route, "Traffic flow must render above the route underlay"
+          print("TomTom flow source, proxy URL, speed styling and layer order verified.")
+          PY
       - name: Download the exact previously supplied alpha09 APK for upgrade validation
         uses: actions/download-artifact@v5
         with:
