@@ -19,14 +19,16 @@ object RouteRadarPlanner {
         for (camera in cameras) {
             var bestDistance = Double.POSITIVE_INFINITY
             var bestAlong = 0.0
+            var bestBearing = 0.0
             for (i in 0 until route.lastIndex) {
                 val projection = project(camera.point, route[i], route[i + 1])
                 if (projection.distanceMeters < bestDistance) {
                     bestDistance = projection.distanceMeters
                     bestAlong = cumulative[i] + distance(route[i], route[i + 1]) * projection.fraction
+                    bestBearing = projection.routeBearingDegrees
                 }
             }
-            if (bestDistance <= corridorMeters) {
+            if (bestDistance <= corridorMeters && directionMatches(camera.direction, bestBearing)) {
                 val candidate = RouteRadarMatch(camera, bestAlong, bestDistance)
                 val previous = matches[camera.osmId]
                 if (previous == null || candidate.distanceFromStartMeters < previous.distanceFromStartMeters) {
@@ -61,7 +63,7 @@ object RouteRadarPlanner {
         return result
     }
 
-    private data class Projection(val fraction: Double, val distanceMeters: Double)
+    private data class Projection(val fraction: Double, val distanceMeters: Double, val routeBearingDegrees: Double)
 
     private fun project(p: NavPoint, a: NavPoint, b: NavPoint): Projection {
         val lat0 = Math.toRadians((a.latitude + b.latitude + p.latitude) / 3.0)
@@ -75,7 +77,25 @@ object RouteRadarPlanner {
         val dx = bx - ax; val dy = by - ay
         val denominator = dx * dx + dy * dy
         val t = if (denominator <= 1e-9) 0.0 else ((px * dx + py * dy) / denominator).coerceIn(0.0, 1.0)
-        return Projection(t, hypot(px - t * dx, py - t * dy))
+        val bearing = ((Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0)
+        return Projection(t, hypot(px - t * dx, py - t * dy), bearing)
+    }
+
+    private fun directionMatches(direction: String, routeBearing: Double): Boolean {
+        val normalized = direction.trim().lowercase()
+        val degrees = normalized.toDoubleOrNull() ?: when (normalized) {
+            "n", "north" -> 0.0
+            "ne", "northeast" -> 45.0
+            "e", "east" -> 90.0
+            "se", "southeast" -> 135.0
+            "s", "south" -> 180.0
+            "sw", "southwest" -> 225.0
+            "w", "west" -> 270.0
+            "nw", "northwest" -> 315.0
+            else -> return true
+        }
+        val delta = abs(((degrees - routeBearing + 540.0) % 360.0) - 180.0)
+        return delta <= 60.0
     }
 
     private fun distance(a: NavPoint, b: NavPoint): Double {
