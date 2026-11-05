@@ -224,6 +224,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
+    private var routeRadarCameras: List<RadarCamera> = emptyList()
+    private var routeRadarRequestId = 0L
+    private var routeRadarReady = false
     private var radarFetchFailed = false
     private var radarCacheCoversCurrentArea = false
     private var lastRadarAttemptMs = 0L
@@ -2451,6 +2454,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routeResult = result
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
+                    prefetchRouteRadars(result, showBriefing = true)
                     resetRouteProgress()
                     announcedManeuverIndex = -1
                     announcedStage = 0
@@ -4168,6 +4172,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routeResult = result
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
+                    prefetchRouteRadars(result, showBriefing = true)
                     navigationArrived = false
                     arrivalClosestMeters = Float.MAX_VALUE
                     arrivalStopSinceMs = 0L
@@ -4237,6 +4242,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        routeRadarRequestId++
+        routeRadarReady = false
+        routeRadarCameras = emptyList()
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -5575,6 +5583,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             !location.hasSpeed() || location.speed < 4f) return
 
         val route = routeResult
+        val routeCameras = if (route != null && route.points.size >= 2 && routeRadarReady) routeRadarCameras else radarCameras
         val candidates = if (route != null && route.points.size >= 2) {
             var currentIndex = 0
             var currentDistance = Float.MAX_VALUE
@@ -5595,7 +5604,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
                 cumulative[i] = cumulative[i - 1] + d[0]
             }
-            radarCameras.mapNotNull { camera ->
+            routeCameras.mapNotNull { camera ->
                 var cameraIndex = -1
                 var crossTrackMeters = Float.MAX_VALUE
                 for (i in route.points.indices) {
@@ -5771,6 +5780,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    prefetchRouteRadars(recalculated, showBriefing = true)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -5998,6 +6008,73 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeMetricsText.text = String.format(Locale.ITALY, "ARRIVO %s  •  %.1f km", arrival, remainingKm)
     }
 
+
+    /**
+     * Fetch enforcement devices along the complete active route, not just around the rider.
+     * Request generations prevent a slow response for an old route replacing a newer one.
+     */
+    private fun prefetchRouteRadars(route: RouteResult, showBriefing: Boolean) {
+        if (route.points.size < 2) return
+        val requestId = ++routeRadarRequestId
+        routeRadarReady = false
+        routeRadarCameras = emptyList()
+        drawRadars()
+        if (::radarText.isInitialized) {
+            radarText.text = "RADAR • analisi controlli lungo il percorso…"
+            updateRadarStatusColor()
+        }
+        thread(name = "route-radar-prefetch") {
+            try {
+                val fetched = RouteRadarService.fetchAlongRoute(route.points)
+                val matches = RouteRadarPlanner.match(fetched, route.points)
+                runOnUiThread {
+                    if (requestId != routeRadarRequestId || (routeResult !== route && routeResult != route)) return@runOnUiThread
+                    routeRadarCameras = matches.map { it.camera }
+                    routeRadarReady = true
+                    radarFetchFailed = false
+                    drawRadars()
+                    updateRadarLabel()
+                    if (showBriefing) showRouteRadarBriefing(matches)
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_RADAR", "Route-wide radar prefetch failed", error)
+                runOnUiThread {
+                    if (requestId != routeRadarRequestId || (routeResult !== route && routeResult != route)) return@runOnUiThread
+                    routeRadarReady = false
+                    radarFetchFailed = true
+                    drawRadars()
+                    updateRadarLabel()
+                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Restano attivi gli avvisi locali.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun showRouteRadarBriefing(matches: List<RouteRadarMatch>) {
+        val speedCameras = matches.count { it.camera.kind.contains("velocità", ignoreCase = true) || it.camera.kind.contains("autovelox", ignoreCase = true) }
+        val trafficLights = matches.count { it.camera.kind.contains("semaforo", ignoreCase = true) }
+        val averageSpeed = matches.count { it.camera.kind.contains("media", ignoreCase = true) }
+        val lines = matches.take(12).mapIndexed { index, match ->
+            val distance = if (match.distanceFromStartMeters >= 1000.0)
+                String.format(Locale.ITALY, "%.1f km", match.distanceFromStartMeters / 1000.0)
+            else "${match.distanceFromStartMeters.toInt()} m"
+            "${index + 1}. ${match.camera.kind} • $distance"
+        }
+        val details = if (lines.isEmpty()) {
+            "Nessun dispositivo censito trovato lungo il tracciato."
+        } else lines.joinToString("\n") + if (matches.size > lines.size) "\n… e altri ${matches.size - lines.size}" else ""
+        val summary = "Controlli censiti: ${matches.size}\n" +
+            "Autovelox/velocità: $speedCameras\n" +
+            "Semafori controllati: $trafficLights\n" +
+            "Velocità media: $averageSpeed\n\n" +
+            details + "\n\nDati comunitari OpenStreetMap: la copertura non è completa e l'assenza di un dispositivo nell'elenco non garantisce che non sia presente."
+        AlertDialog.Builder(this)
+            .setTitle("Controlli lungo il percorso")
+            .setMessage(summary)
+            .setPositiveButton("Ho capito", null)
+            .show()
+    }
+
     private fun refreshRadarsIfNeeded(location: Location) {
         val center = NavPoint(location.latitude, location.longitude)
         radarCameras = RadarCache.loadNear(this, center)
@@ -6057,7 +6134,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun drawRadars() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_RADARS) as? GeoJsonSource ?: return
-        val features = radarCameras.map { camera ->
+        val visibleCameras = if (routeResult != null && routeRadarReady) routeRadarCameras else radarCameras
+        val features = visibleCameras.map { camera ->
             Feature.fromGeometry(Point.fromLngLat(camera.point.longitude, camera.point.latitude))
         }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
