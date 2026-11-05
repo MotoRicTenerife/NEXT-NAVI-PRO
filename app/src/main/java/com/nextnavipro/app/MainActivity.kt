@@ -103,6 +103,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val REQUEST_IMPORT_GPX = 2001
         private const val REQUEST_EXPORT_GPX = 2002
         private const val REQUEST_EXPORT_GPS_TRACE = 2003
+        private const val REQUEST_EXPORT_ARROW_TRACE = 2004
         private const val SOURCE_USER = "next-user-position"
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
@@ -183,6 +184,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var gpsDiagnosticRecording = false
     private val gpsDiagnosticSamples = ArrayList<GpsTraceSample>()
     private var pendingGpsDiagnosticCsv: String? = null
+    private var pendingArrowTelemetryCsv: String? = null
+    private val arrowTelemetrySamples = ArrayList<ArrowTraceSample>()
+    private var arrowTelemetryCheckpointCount = 0
     private var pendingGpxExportPoints: List<NavPoint>? = null
     private var recordingGpx = false
     // True when recording was explicitly started from the dashboard, independently of navigation.
@@ -1798,7 +1802,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun gpsDiagnosticsDirectory(): File = File(filesDir, "gps_diagnostics").apply { if (!exists()) mkdirs() }
 
     private fun savedGpsDiagnosticFiles(): List<File> =
-        gpsDiagnosticsDirectory().listFiles()?.filter { it.isFile && it.extension.equals("csv", true) && it.name != "gps_trace_in_progress.csv" }
+        gpsDiagnosticsDirectory().listFiles()?.filter { it.isFile && it.extension.equals("csv", true) && it.name != "gps_trace_in_progress.csv" && !it.name.endsWith("_arrow.csv") }
             ?.sortedByDescending { it.lastModified() }.orEmpty()
 
     private fun stopAndSaveGpsDiagnosticRecording(reason: String) {
@@ -1823,8 +1827,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val allBytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
         val pairedBytes = saved.filter { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }.sumOf { it.length() }
-        val active = if (recordingGpx && gpsDiagnosticRecording) "Registrazione GPX + CSV ATTIVA • ${gpsDiagnosticSamples.size} campioni"
-            else "Registrazione GPX + CSV ferma"
+        val active = if (recordingGpx && gpsDiagnosticRecording) "Registrazione GPX + GPS + freccia ATTIVA • ${gpsDiagnosticSamples.size} GPS / ${arrowTelemetrySamples.size} freccia"
+            else "Registrazione GPX + GPS + freccia ferma"
         val status = "$active\nCSV associati: ${saved.count { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }} • ${String.format(Locale.getDefault(), "%.2f", pairedBytes / (1024.0 * 1024.0))} MB\nTutti i CSV: ${saved.size} • ${String.format(Locale.getDefault(), "%.2f", allBytes / (1024.0 * 1024.0))} MB" +
             if (orphaned.isNotEmpty()) "\nCSV senza GPX associato: ${orphaned.size} (eliminabili)" else ""
         val dialog = AlertDialog.Builder(this).setTitle("DEBUG • GPX / CSV GPS")
@@ -1848,6 +1852,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             })
         }
         action("Apri archivio GPX + CSV (esporta / elimina)") { showSavedGpxRoutes() }
+        action("Esporta ultima telemetria freccia") {
+            val latest = savedArrowTelemetryFiles().firstOrNull()
+            if (latest == null) Toast.makeText(this, "Nessuna telemetria freccia salvata.", Toast.LENGTH_LONG).show()
+            else exportArrowTelemetry(latest)
+        }
         action("Esporta ultimo CSV GPS") {
             val latest = savedGpsDiagnosticFiles().firstOrNull()
             if (latest == null) Toast.makeText(this, "Nessun CSV GPS salvato.", Toast.LENGTH_LONG).show()
@@ -1973,6 +1982,63 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             putExtra(Intent.EXTRA_TITLE, file.name)
         }
         startActivityForResult(intent, REQUEST_EXPORT_GPS_TRACE)
+    }
+
+    private fun appendArrowTelemetrySample(rendered: Location, animationFraction: Float) {
+        if (!recordingGpx || arrowTelemetrySamples.size >= 120_000) return
+        val raw = lastRawGpsLocation
+        val filtered = currentLocation
+        val camera = runCatching { map?.cameraPosition }.getOrNull()
+        arrowTelemetrySamples.add(ArrowTraceSample(
+            timestampEpochMs = System.currentTimeMillis(),
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos(),
+            gpsFixEpochMs = raw?.time?.takeIf { it > 0L },
+            gpsFixElapsedRealtimeNanos = raw?.elapsedRealtimeNanos?.takeIf { it > 0L },
+            rawLatitude = raw?.latitude, rawLongitude = raw?.longitude,
+            rawBearingDegrees = raw?.takeIf { it.hasBearing() }?.bearing,
+            filteredLatitude = filtered?.latitude, filteredLongitude = filtered?.longitude,
+            filteredBearingDegrees = filtered?.takeIf { it.hasBearing() }?.bearing,
+            renderedLatitude = rendered.latitude, renderedLongitude = rendered.longitude,
+            renderedBearingDegrees = rendered.bearing.takeIf { rendered.hasBearing() },
+            gpsAccuracyMeters = raw?.takeIf { it.hasAccuracy() }?.accuracy,
+            bearingAccuracyDegrees = raw?.takeIf { it.hasBearingAccuracy() }?.bearingAccuracyDegrees,
+            gpsSpeedMetersPerSecond = raw?.takeIf { it.hasSpeed() }?.speed,
+            animationFraction = animationFraction.takeIf { it.isFinite() && it >= 0f },
+            cameraLatitude = camera?.target?.latitude, cameraLongitude = camera?.target?.longitude,
+            cameraBearingDegrees = camera?.bearing, cameraZoom = camera?.zoom
+        ))
+        if (arrowTelemetrySamples.size - arrowTelemetryCheckpointCount >= 250) saveArrowTelemetryCheckpoint()
+    }
+
+    private fun arrowTelemetryCheckpointFile() = File(gpsDiagnosticsDirectory(), "arrow_trace_in_progress.csv")
+
+    private fun saveArrowTelemetryCheckpoint() {
+        if (arrowTelemetryCheckpointCount >= arrowTelemetrySamples.size) return
+        try {
+            val batch = arrowTelemetrySamples.subList(arrowTelemetryCheckpointCount, arrowTelemetrySamples.size).toList()
+            val file = arrowTelemetryCheckpointFile()
+            FileOutputStream(file, true).use {
+                it.write(ArrowTraceDiagnostics.toCsv(batch, includeHeader = !file.exists()).toByteArray(Charsets.UTF_8))
+            }
+            arrowTelemetryCheckpointCount = arrowTelemetrySamples.size
+        } catch (_: Exception) { /* Keep samples in memory; finalization retries. */ }
+    }
+
+    private fun savedArrowTelemetryFiles(): List<File> = gpsDiagnosticsDirectory().listFiles()
+        ?.filter { it.isFile && it.name.endsWith("_arrow.csv") }
+        ?.sortedByDescending { it.lastModified() }.orEmpty()
+
+    private fun exportArrowTelemetry(file: File) {
+        pendingArrowTelemetryCsv = try { file.readText(Charsets.UTF_8) } catch (e: Exception) {
+            Toast.makeText(this, "Impossibile leggere la telemetria: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/csv"
+            putExtra(Intent.EXTRA_TITLE, file.name)
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_ARROW_TRACE)
     }
 
     private fun appendGpsDiagnosticSample(location: Location, rejectionStatus: String? = null) {
@@ -2104,13 +2170,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showGpxMenu() {
         val recordingLabel = if (recordingGpx || gpsDiagnosticRecording)
-            "FERMA E SALVA registrazione GPX + CSV"
-        else "AVVIA registrazione GPX + CSV"
+            "FERMA E SALVA GPX + GPS + FRECCIA"
+        else "AVVIA registrazione GPX + GPS + FRECCIA"
         val choices = arrayOf(
             recordingLabel,
             "Importa GPX dal telefono",
             "Salva percorso attivo",
-            "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
+            "GESTISCI VIAGGI: GPX + GPS + FRECCIA",
             "Esporta GPX attivo…",
             "DEBUG: CSV GPS e memoria"
         )
@@ -2130,7 +2196,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (recordingGpx) return
         AlertDialog.Builder(this)
             .setTitle("Memorizzare il viaggio?")
-            .setMessage("Vuoi registrare il viaggio in GPX? Se confermi, verrà registrato anche il CSV GPS associato. Eliminando il GPX, verrà eliminato anche il suo CSV.")
+            .setMessage("Vuoi registrare il viaggio? Saranno salvati GPX, CSV GPS e telemetria della freccia. Potrai esportarli o eliminarli insieme.")
             .setPositiveButton("Sì, registra") { _, _ ->
                 recordingIndependentOfNavigation = false
                 startGpxRecording()
@@ -2170,6 +2236,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRecordedGpxPoint = null
         lastGpxPointTimeMs = 0L
         gpsDiagnosticSamples.clear()
+        arrowTelemetrySamples.clear()
+        arrowTelemetryCheckpointCount = 0
+        File(gpsDiagnosticsDirectory(), "arrow_trace_in_progress.csv").delete()
         gpsDiagnosticRecording = true
         recordingGpx = true
         updateGpxButtonState()
@@ -2184,8 +2253,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         lastRawGpsLocation?.let { appendGpsDiagnosticSample(it) }
         currentLocation?.let { appendGpxRecordingPoint(it, force = true) }
         saveGpsDiagnosticCheckpoint()
+        saveArrowTelemetryCheckpoint()
         saveGpxRecordingCheckpoint()
-        Toast.makeText(this, "Registrazione GPX + CSV GPS avviata insieme.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Registrazione GPX + CSV GPS + telemetria freccia avviata.", Toast.LENGTH_LONG).show()
     }
 
     private fun appendGpxRecordingPoint(location: Location, force: Boolean = false) {
@@ -2236,11 +2306,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Write both checkpoints before clearing memory or changing the active state.
         saveGpxRecordingCheckpoint()
         saveGpsDiagnosticCheckpoint()
+        saveArrowTelemetryCheckpoint()
         recordingGpx = false
         recordingIndependentOfNavigation = false
         updateGpxButtonState()
         val points = gpxRecordingPoints.toList()
         val samples = gpsDiagnosticSamples.toList()
+        val arrowSamples = arrowTelemetrySamples.toList()
         gpsDiagnosticRecording = false
         stopService(Intent(this, GpsRecordingForegroundService::class.java))
         if (!save) {
@@ -2248,7 +2320,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (showResult) Toast.makeText(this, "Registrazione fermata. I dati parziali sono conservati per il recupero.", Toast.LENGTH_LONG).show()
             return
         }
-        if (points.isEmpty() && samples.isEmpty()) {
+        if (points.isEmpty() && samples.isEmpty() && arrowSamples.isEmpty()) {
             if (showResult) Toast.makeText(this, "Registrazione vuota: nessun dato da salvare.", Toast.LENGTH_LONG).show()
             return
         }
@@ -2263,6 +2335,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val csvDir = gpsDiagnosticsDirectory()
                 val gpxTemp = File(gpxDir, "$baseName.gpx.tmp")
                 val csvTemp = File(csvDir, "$baseName.csv.tmp")
+                val arrowTemp = File(csvDir, "${baseName}_arrow.csv.tmp")
                 if (points.isNotEmpty()) {
                     FileOutputStream(gpxTemp).use { GpxRouteService.write(it, label, points) }
                     finalGpx = File(gpxDir, "$baseName.gpx")
@@ -2270,12 +2343,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // Always persist the CSV companion, including its header if Android delivered no GPS fixes.
                 FileOutputStream(csvTemp).use { it.write(GpsTraceDiagnostics.toCsv(samples).toByteArray(Charsets.UTF_8)) }
                 finalCsv = File(csvDir, "$baseName.csv")
+                val finalArrow = File(csvDir, "${baseName}_arrow.csv")
+                FileOutputStream(arrowTemp).use { it.write(ArrowTraceDiagnostics.toCsv(arrowSamples).toByteArray(Charsets.UTF_8)) }
                 // Publish final names only after each temporary file has been completely written.
                 if (gpxTemp.exists() && !gpxTemp.renameTo(finalGpx!!)) gpxTemp.copyTo(finalGpx!!, overwrite = true)
                 if (csvTemp.exists() && !csvTemp.renameTo(finalCsv!!)) csvTemp.copyTo(finalCsv!!, overwrite = true)
+                if (arrowTemp.exists() && !arrowTemp.renameTo(finalArrow)) arrowTemp.copyTo(finalArrow, overwrite = true)
                 val gpxReady = finalGpx?.isFile == true && finalGpx!!.length() > 0L
                 val csvReady = finalCsv?.isFile == true && finalCsv!!.length() > 0L
-                if (!gpxReady || !csvReady) {
+                val arrowReady = finalArrow.isFile && finalArrow.length() > 0L
+                if (!gpxReady || !csvReady || !arrowReady) {
                     throw IllegalStateException("Una o entrambe le registrazioni non sono state scritte completamente")
                 }
                 // Only delete checkpoints after both paired files are safely present.
@@ -2283,11 +2360,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 File(gpxDirectory(), "gpx_recording_in_progress.tmp").delete()
                 File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv").delete()
                 File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.tmp").delete()
+                arrowTelemetryCheckpointFile().delete()
                 runOnUiThread {
                     gpxRecordingPoints.clear()
                     gpsDiagnosticSamples.clear()
+                    arrowTelemetrySamples.clear()
+                    arrowTelemetryCheckpointCount = 0
                     lastRecordedGpxPoint = null
-                    if (showResult) Toast.makeText(this, "Viaggio salvato insieme: GPX + CSV GPS • ${points.size} punti • ${samples.size} campioni.", Toast.LENGTH_LONG).show()
+                    if (showResult) Toast.makeText(this, "Viaggio salvato: GPX + CSV GPS + freccia • ${points.size} punti • ${samples.size} GPS • ${arrowSamples.size} freccia.", Toast.LENGTH_LONG).show()
                 }
             } catch (error: Exception) {
                 // Do not remove checkpoints on failure; the user can recover them from the library.
@@ -2301,7 +2381,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun recoverInterruptedPairedRecording() {
         val gpxCheckpoint = gpxRecordingCheckpointFile()
         val csvCheckpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
-        if (!gpxCheckpoint.isFile && !csvCheckpoint.isFile) return
+        val arrowCheckpoint = arrowTelemetryCheckpointFile()
+        if (!gpxCheckpoint.isFile && !csvCheckpoint.isFile && !arrowCheckpoint.isFile) return
         val base = "Viaggio_interrotto_${System.currentTimeMillis()}"
         var recoveredAny = false
         try {
@@ -2318,8 +2399,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else { csvCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { csvCheckpoint.delete(); recoveredAny = true } }
             }
         } catch (_: Exception) { /* Keep original checkpoint for another recovery attempt. */ }
+        try {
+            if (arrowCheckpoint.isFile && arrowCheckpoint.length() > 0L) {
+                val target = File(gpsDiagnosticsDirectory(), "${base}_arrow.csv")
+                if (arrowCheckpoint.renameTo(target)) recoveredAny = true
+                else { arrowCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { arrowCheckpoint.delete(); recoveredAny = true } }
+            }
+        } catch (_: Exception) { /* Preserve the checkpoint for a later recovery attempt. */ }
         if (recoveredAny) {
-            android.util.Log.i("NEXT-NAVI-PRO", "Recovered interrupted GPX/CSV recording as $base")
+            android.util.Log.i("NEXT-NAVI-PRO", "Recovered interrupted GPX/CSV/arrow telemetry recording as $base")
         }
     }
 
@@ -2370,10 +2458,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return@runOnUiThread
                 }
                 val totalBytes = tracks.sumOf { it.first.length() }
-                val pairedCsvFiles = tracks.map { (gpxFile, _) ->
-                    File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv")
-                }.filter { it.isFile }
+                val pairedCsvFiles = tracks.map { (gpxFile, _) -> File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + ".csv") }.filter { it.isFile }
+                val pairedArrowFiles = tracks.map { (gpxFile, _) -> File(gpsDiagnosticsDirectory(), gpxFile.nameWithoutExtension + "_arrow.csv") }.filter { it.isFile }
                 val csvBytes = pairedCsvFiles.sumOf { it.length() }
+                val arrowBytes = pairedArrowFiles.sumOf { it.length() }
                 val totalMb = totalBytes / (1024.0 * 1024.0)
                 val csvMb = csvBytes / (1024.0 * 1024.0)
                 // Android AlertDialog cannot reliably show both setMessage() and setItems()
@@ -2381,8 +2469,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 // Put the storage summary in the title so every saved GPX remains selectable.
                 val libraryTitle = String.format(
                     Locale.getDefault(),
-                    "Libreria GPX • %d • %.2f MB | CSV: %d • %.2f MB",
-                    tracks.size, totalMb, pairedCsvFiles.size, csvMb
+                    "Libreria GPX • %d • %.2f MB | GPS CSV: %d • %.2f MB | Freccia: %d • %.2f MB",
+                    tracks.size, totalMb, pairedCsvFiles.size, csvMb, pairedArrowFiles.size, arrowBytes / (1024.0 * 1024.0)
                 )
                 AlertDialog.Builder(this).setTitle(libraryTitle)
                     .setItems(tracks.map { (_, track) ->
@@ -2395,21 +2483,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showSavedGpxActions(file: File, track: GpxTrack) {
         val pairedCsv = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + ".csv")
-        val csvInfo = if (pairedCsv.isFile) {
-            "CSV GPS: ${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB"
-        } else {
-            "CSV GPS: non presente"
-        }
+        val pairedArrow = File(gpsDiagnosticsDirectory(), file.nameWithoutExtension + "_arrow.csv")
+        val csvInfo = if (pairedCsv.isFile) "CSV GPS: ${String.format(Locale.getDefault(), "%.2f", pairedCsv.length() / (1024.0 * 1024.0))} MB" else "CSV GPS: non presente"
+        val arrowInfo = if (pairedArrow.isFile) "Telemetria freccia: ${String.format(Locale.getDefault(), "%.2f", pairedArrow.length() / (1024.0 * 1024.0))} MB" else "Telemetria freccia: non presente"
         // Non combinare setMessage() e setItems(): su alcuni dispositivi Android
         // il messaggio può sostituire l'elenco delle azioni. Tutte le azioni restano selezionabili.
-        val title = "${track.name}\n${String.format(Locale.getDefault(), "%.1f", track.distanceKm)} km • ${track.points.size} punti\n$csvInfo"
+        val title = "${track.name}\n${String.format(Locale.getDefault(), "%.1f", track.distanceKm)} km • ${track.points.size} punti\n$csvInfo\n$arrowInfo"
         val actions = arrayOf(
             "Segui questa traccia GPX",
             "Visualizza sulla mappa",
             "Esporta / condividi GPX…",
             if (pairedCsv.isFile) "Esporta CSV GPS associato…" else "CSV GPS associato non disponibile",
+            if (pairedArrow.isFile) "Esporta telemetria freccia…" else "Telemetria freccia non disponibile",
             "Elimina solo GPX",
-            if (pairedCsv.isFile) "Elimina GPX + CSV associato" else "Elimina GPX"
+            if (pairedCsv.isFile || pairedArrow.isFile) "Elimina GPX + tutti i CSV associati" else "Elimina GPX"
         )
         AlertDialog.Builder(this).setTitle(title)
             .setItems(actions) { _, which ->
@@ -2422,24 +2509,26 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     2 -> exportGpxTrack(track)
                     3 -> if (pairedCsv.isFile) exportSavedGpsDiagnostic(pairedCsv) else
                         Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
-                    4 -> AlertDialog.Builder(this).setTitle("Eliminare solo il GPX?")
-                        .setMessage("Verrà eliminato ${file.name}. Il CSV associato, se presente, resterà nella memoria.")
+                    4 -> if (pairedArrow.isFile) exportArrowTelemetry(pairedArrow) else Toast.makeText(this, "Telemetria freccia non disponibile.", Toast.LENGTH_LONG).show()
+                    5 -> AlertDialog.Builder(this).setTitle("Eliminare solo il GPX?")
+                        .setMessage("Verrà eliminato ${file.name}. I CSV GPS e freccia associati resteranno nella memoria.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina GPX") { _, _ ->
                             val deleted = file.delete()
                             Toast.makeText(this, if (deleted) "GPX eliminato." else "Impossibile eliminare il GPX.", Toast.LENGTH_LONG).show()
                             showSavedGpxRoutes()
                         }.show()
-                    5 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e CSV associato?")
-                        .setMessage("Verranno eliminati definitivamente ${file.name} e il CSV GPS con lo stesso nome, se presente.")
+                    6 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e dati diagnostici associati?")
+                        .setMessage("Verranno eliminati definitivamente ${file.name}, il CSV GPS e la telemetria freccia associati, se presenti.")
                         .setNegativeButton(appText("Annulla"), null)
-                        .setPositiveButton("Elimina entrambi") { _, _ ->
+                        .setPositiveButton("Elimina tutto") { _, _ ->
                             val deleted = file.delete()
                             val csvDeleted = !pairedCsv.exists() || pairedCsv.delete()
+                            val arrowDeleted = !pairedArrow.exists() || pairedArrow.delete()
                             val message = when {
                                 !deleted -> "Impossibile eliminare il GPX."
-                                !csvDeleted -> "GPX eliminato, ma non è stato possibile eliminare il CSV associato."
-                                else -> "GPX e CSV associato eliminati; memoria liberata."
+                                !csvDeleted || !arrowDeleted -> "GPX eliminato, ma non tutti i CSV associati sono stati eliminati."
+                                else -> "GPX, CSV GPS e telemetria freccia eliminati; memoria liberata."
                             }
                             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                             showSavedGpxRoutes()
@@ -2585,6 +2674,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     runOnUiThread { Toast.makeText(this, "GPX esportato. Ora puoi condividerlo dal file manager.", Toast.LENGTH_LONG).show() }
                 } catch (error: Exception) {
                     runOnUiThread { Toast.makeText(this, "Esportazione GPX fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
+                }
+            }
+            REQUEST_EXPORT_ARROW_TRACE -> thread(name = "export-arrow-trace") {
+                try {
+                    val csv = pendingArrowTelemetryCsv ?: throw IllegalStateException("Telemetria freccia non più disponibile.")
+                    contentResolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(csv) }
+                        ?: throw IllegalStateException("Impossibile scrivere il file selezionato.")
+                    runOnUiThread { Toast.makeText(this, "Telemetria freccia esportata.", Toast.LENGTH_LONG).show() }
+                } catch (error: Exception) {
+                    runOnUiThread { Toast.makeText(this, "Esportazione freccia fallita: ${error.message ?: "errore"}", Toast.LENGTH_LONG).show() }
                 }
             }
             REQUEST_EXPORT_GPS_TRACE -> thread(name = "export-gps-trace") {
@@ -6399,7 +6498,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     }
                 }
                 displayedMarkerLocation = Location(interpolated)
-                updateUserMarker(interpolated)
+                updateUserMarker(interpolated, fraction)
                 if (animation.animatedFraction >= 1f && gpsMarkerAnimator === animation) {
                     gpsMarkerAnimator = null
                 }
@@ -6409,13 +6508,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         animator.start()
     }
 
-    private fun updateUserMarker(location: Location) {
+    private fun updateUserMarker(location: Location, animationFraction: Float = -1f) {
         if (!mapStyleReady) return
         val point = Point.fromLngLat(location.longitude, location.latitude)
         val positionFeature = Feature.fromGeometry(point).apply {
             addNumberProperty("bearing", if (location.hasBearing()) location.bearing.toDouble() else 0.0)
         }
-        (map?.style?.getSource(SOURCE_USER) as? GeoJsonSource)?.setGeoJson(positionFeature)
+        val source = map?.style?.getSource(SOURCE_USER) as? GeoJsonSource ?: return
+        source.setGeoJson(positionFeature)
+        appendArrowTelemetrySample(location, animationFraction)
     }
 
     private fun updateMapForLocation(location: Location, forceCenter: Boolean, updateMarker: Boolean = true) {
