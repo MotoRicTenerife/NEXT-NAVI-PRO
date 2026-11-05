@@ -6428,7 +6428,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
         if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
             val oldBearing = map?.cameraPosition?.bearing ?: 0.0
-            val bearing = if (location.hasBearing() && location.speed >= 3f) location.bearing.toDouble() else oldBearing
+            val reliableCourse = location.hasBearing() && location.hasSpeed() && location.speed >= 3f &&
+                (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
+            val bearing = if (reliableCourse) location.bearing.toDouble() else oldBearing
             val camera = CameraPosition.Builder()
                 .target(LatLng(location.latitude, location.longitude))
                 .zoom(if (routeResult == null) 16.0 else 16.5)
