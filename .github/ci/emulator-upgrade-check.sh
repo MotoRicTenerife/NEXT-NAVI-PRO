@@ -59,7 +59,7 @@ printf '%s\n' "$out"
 dump="$( "${ADB[@]}" shell dumpsys package "$PKG" | tr -d '\r' )"
 printf '%s\n' "$dump" > "$OUT/package-after-upgrade.txt"
 echo "$dump" | grep -m1 -E 'versionCode=11|versionCode 11' ||
-  fail "Package manager did not report versionCode 10 after update."
+  fail "Package manager did not report versionCode 11 after update."
 
 "${ADB[@]}" shell am force-stop "$PKG" >/dev/null 2>&1 || true
 start="$( "${ADB[@]}" shell am start -W -n "$PKG/$ACT" 2>&1 | tr -d '\r' )"
