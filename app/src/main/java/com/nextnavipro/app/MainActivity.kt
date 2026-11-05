@@ -4853,19 +4853,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (activeRoute != null && prefetchedRouteLimits.isNotEmpty()) {
             val progress = findRouteProgressIndex(activeRoute, location)
             if (progress.second.isFinite() && progress.second < Float.MAX_VALUE) {
-                val eligible = prefetchedRouteLimits.asSequence()
-                    .filter { it.routeIndex <= progress.first && it.routeIndex in activeRoute.points.indices }
-                    .mapNotNull { sample ->
-                        val point = activeRoute.points[sample.routeIndex]
-                        val distance = FloatArray(1)
-                        Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, distance)
-                        if (distance[0] <= 180f) sample to distance[0] else null
-                    }
-                    .minByOrNull { it.second }
-                val cachedLimit = eligible?.first
+                val cachedLimit = RouteSpeedLimitCacheMatcher.findEligibleSample(
+                    routePoints = activeRoute.points,
+                    samples = prefetchedRouteLimits,
+                    progressIndex = progress.first,
+                    progressDistanceMeters = progress.second,
+                    accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
+                    bearingDegrees = location.bearing.takeIf { location.hasBearing() },
+                    speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
+                    bearingAccuracyDegrees = if (location.hasBearingAccuracy()) location.bearingAccuracyDegrees else null
+                )
                 if (cachedLimit?.speedLimitKmh != null) {
                     currentRoadMatch = RoadMatch(cachedLimit.road, cachedLimit.ref, cachedLimit.speedLimitKmh,
-                        null, (eligible?.second ?: 0f), location.bearing.takeIf { location.hasBearing() } ?: 0f)
+                        null, progress.second, location.bearing.takeIf { location.hasBearing() } ?: 0f)
                     currentSpeedLimit = cachedLimit.speedLimitKmh
                     speedLimitProvisional = false
                     speedLimitVerifiedFix = nowFix
@@ -6343,152 +6343,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
     }
 
-    /**
-     * OsmAnd's public guidance documents emphasize filtering poor-accuracy fixes and attaching
-     * tracks to roads. For our live arrow, use the active route as a *visual* map-match only when
-     * a nearby segment is plausible; keep currentLocation raw/smoothed for speed and guidance.
-     * This avoids inventing a position or snapping across to a parallel road.
-     */
-    private fun snapMarkerToActiveRoute(location: Location): Location {
-        val route = routeResult ?: return Location(location)
-        if (route.points.size < 2 || !location.hasAccuracy() || location.accuracy > 25f) {
-            return Location(location)
-        }
-
-        val metersPerLat = 111320.0
-        val metersPerLon = metersPerLat * cos(Math.toRadians(location.latitude))
-        var bestDistance = Double.MAX_VALUE
-        var bestLat = location.latitude
-        var bestLon = location.longitude
-        var bestBearing = Float.NaN
-
-        for (i in 0 until route.points.lastIndex) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val ax = (a.longitude - location.longitude) * metersPerLon
-            val ay = (a.latitude - location.latitude) * metersPerLat
-            val bx = (b.longitude - location.longitude) * metersPerLon
-            val by = (b.latitude - location.latitude) * metersPerLat
-            val dx = bx - ax
-            val dy = by - ay
-            val lengthSquared = dx * dx + dy * dy
-            if (lengthSquared < 0.25) continue
-            val fraction = ((-ax * dx + -ay * dy) / lengthSquared).coerceIn(0.0, 1.0)
-            val px = ax + dx * fraction
-            val py = ay + dy * fraction
-            val distance = sqrt(px * px + py * py)
-            if (distance >= bestDistance) continue
-
-            val segmentBearing = ((Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0).toFloat()
-            if (location.hasBearing() && location.hasSpeed() && location.speed >= 3f) {
-                val delta = abs(((location.bearing - segmentBearing + 540f) % 360f) - 180f)
-                if (delta > 55f) continue
-            }
-            bestDistance = distance
-            bestLat = location.latitude + py / metersPerLat
-            bestLon = location.longitude + px / metersPerLon
-            bestBearing = segmentBearing
-        }
-
-        // Tighten the allowed snap radius as the reported GPS accuracy improves.
-        val maxSnapMeters = minOf(25f, maxOf(10f, location.accuracy * 1.25f)).toDouble()
-        if (bestDistance > maxSnapMeters) return Location(location)
-        return Location(location).apply {
-            latitude = bestLat
-            longitude = bestLon
-            if (!bestBearing.isNaN() && hasSpeed() && speed >= 3f) {
-                bearing = bestBearing
-                setBearing(bearing)
-            }
-        }
-    }
-
-    /**
-     * OsmAnd predicts a short distance ahead along the active route using the time
-     * between fixes and average speed, then animates the marker to that prediction.
-     * We use a conservative 30% interpolation lead, only for the visual marker and
-     * only when a route is active; raw/smoothed GPS still drives guidance and alerts.
-     * Prediction is disabled close to a maneuver to avoid visually cutting a turn.
-     */
-    private fun predictMarkerAlongRoute(location: Location, movingTimeMs: Long, previousSpeedMps: Float): Location {
-        val route = routeResult ?: return Location(location)
-        if (route.points.size < 2 || movingTimeMs !in 101L..2000L ||
-            !location.hasSpeed() || location.speed < 2.0f) return Location(location)
-
-        var nearestIndex = 0
-        var nearestDistance = Float.MAX_VALUE
-        for (i in route.points.indices) {
-            val point = route.points[i]
-            val d = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
-            if (d[0] < nearestDistance) {
-                nearestDistance = d[0]
-                nearestIndex = i
-            }
-        }
-        // Do not predict across an imminent junction/turn.
-        val nextManeuver = route.maneuvers.firstOrNull { it.pointIndex > nearestIndex }
-        if (nextManeuver != null) {
-            var metersToManeuver = 0.0
-            for (i in nearestIndex until nextManeuver.pointIndex.coerceAtMost(route.points.lastIndex)) {
-                val a = route.points[i]
-                val b = route.points[i + 1]
-                val d = FloatArray(1)
-                Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
-                metersToManeuver += d[0]
-            }
-            if (metersToManeuver < 25.0) return Location(location)
-        }
-
-        val speedNow = if (location.hasSpeed()) location.speed else 0f
-        val previousSpeed = previousSpeedMps.takeIf { it.isFinite() && it >= 0f } ?: speedNow
-        var remainingMeters = ((previousSpeed + speedNow) / 2.0) *
-            (movingTimeMs / 1000.0) * 0.30
-        if (!remainingMeters.isFinite() || remainingMeters <= 0.0) return Location(location)
-        // Bound the visual lead; this is marker interpolation, not a claimed GPS fix.
-        remainingMeters = remainingMeters.coerceAtMost(8.0)
-
-        var start = NavPoint(location.latitude, location.longitude)
-        for (i in (nearestIndex + 1)..route.points.lastIndex) {
-            val end = route.points[i]
-            val endLocation = Location("route").apply {
-                latitude = end.latitude
-                longitude = end.longitude
-            }
-            val startLocation = Location("route").apply {
-                latitude = start.latitude
-                longitude = start.longitude
-            }
-            val segmentMeters = startLocation.distanceTo(endLocation).toDouble()
-            if (segmentMeters < 0.1) {
-                start = end
-                continue
-            }
-            if (remainingMeters <= segmentMeters) {
-                val fraction = (remainingMeters / segmentMeters).coerceIn(0.0, 1.0)
-                val predicted = Location(location).apply {
-                    latitude = start.latitude + (end.latitude - start.latitude) * fraction
-                    longitude = start.longitude + (end.longitude - start.longitude) * fraction
-                    bearing = startLocation.bearingTo(endLocation)
-                    setBearing(bearing)
-                }
-                return predicted
-            }
-            remainingMeters -= segmentMeters
-            start = end
-        }
-        return Location(location)
-    }
-
     private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
-        val snapped = snapMarkerToActiveRoute(target)
-        val markerTarget = predictMarkerAlongRoute(snapped, movingTimeMs, previousSpeedMps)
+        // The live vehicle marker must follow the accepted GPS fix, never the planned route.
+        // Route geometry is reserved for maneuver guidance and route-progress calculations.
+        val markerTarget = Location(target)
         if (!mapStyleReady) {
             displayedMarkerLocation = Location(markerTarget)
             return
         }
         val start = displayedMarkerLocation?.let { Location(it) }
-            ?: currentLocation?.let { snapMarkerToActiveRoute(it) }
+            ?: currentLocation?.let { Location(it) }
             ?: Location(markerTarget)
         val distance = start.distanceTo(markerTarget)
         gpsMarkerAnimator?.cancel()
