@@ -1,8 +1,6 @@
 package com.nextnavipro.app
 
-import android.location.Location
 import android.util.Log
-import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
