@@ -2376,7 +2376,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun recoverInterruptedPairedRecording() {
         val gpxCheckpoint = gpxRecordingCheckpointFile()
         val csvCheckpoint = File(gpsDiagnosticsDirectory(), "gps_trace_in_progress.csv")
-        if (!gpxCheckpoint.isFile && !csvCheckpoint.isFile) return
+        val arrowCheckpoint = arrowTelemetryCheckpointFile()
+        if (!gpxCheckpoint.isFile && !csvCheckpoint.isFile && !arrowCheckpoint.isFile) return
         val base = "Viaggio_interrotto_${System.currentTimeMillis()}"
         var recoveredAny = false
         try {
@@ -2393,8 +2394,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else { csvCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { csvCheckpoint.delete(); recoveredAny = true } }
             }
         } catch (_: Exception) { /* Keep original checkpoint for another recovery attempt. */ }
+        try {
+            if (arrowCheckpoint.isFile && arrowCheckpoint.length() > 0L) {
+                val target = File(gpsDiagnosticsDirectory(), "${base}_arrow.csv")
+                if (arrowCheckpoint.renameTo(target)) recoveredAny = true
+                else { arrowCheckpoint.copyTo(target, overwrite = false); if (target.length() > 0L) { arrowCheckpoint.delete(); recoveredAny = true } }
+            }
+        } catch (_: Exception) { /* Preserve the checkpoint for a later recovery attempt. */ }
         if (recoveredAny) {
-            android.util.Log.i("NEXT-NAVI-PRO", "Recovered interrupted GPX/CSV recording as $base")
+            android.util.Log.i("NEXT-NAVI-PRO", "Recovered interrupted GPX/CSV/arrow telemetry recording as $base")
         }
     }
 
