@@ -1827,8 +1827,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val allBytes = saved.sumOf { it.length() } + if (checkpoint.exists()) checkpoint.length() else 0L
         val pairedBytes = saved.filter { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }.sumOf { it.length() }
-        val active = if (recordingGpx && gpsDiagnosticRecording) "Registrazione GPX + CSV ATTIVA • ${gpsDiagnosticSamples.size} campioni"
-            else "Registrazione GPX + CSV ferma"
+        val active = if (recordingGpx && gpsDiagnosticRecording) "Registrazione GPX + GPS + freccia ATTIVA • ${gpsDiagnosticSamples.size} GPS / ${arrowTelemetrySamples.size} freccia"
+            else "Registrazione GPX + GPS + freccia ferma"
         val status = "$active\nCSV associati: ${saved.count { File(gpxDirectory(), it.nameWithoutExtension + ".gpx").isFile }} • ${String.format(Locale.getDefault(), "%.2f", pairedBytes / (1024.0 * 1024.0))} MB\nTutti i CSV: ${saved.size} • ${String.format(Locale.getDefault(), "%.2f", allBytes / (1024.0 * 1024.0))} MB" +
             if (orphaned.isNotEmpty()) "\nCSV senza GPX associato: ${orphaned.size} (eliminabili)" else ""
         val dialog = AlertDialog.Builder(this).setTitle("DEBUG • GPX / CSV GPS")
@@ -2170,13 +2170,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun showGpxMenu() {
         val recordingLabel = if (recordingGpx || gpsDiagnosticRecording)
-            "FERMA E SALVA registrazione GPX + CSV"
-        else "AVVIA registrazione GPX + CSV"
+            "FERMA E SALVA GPX + GPS + FRECCIA"
+        else "AVVIA registrazione GPX + GPS + FRECCIA"
         val choices = arrayOf(
             recordingLabel,
             "Importa GPX dal telefono",
             "Salva percorso attivo",
-            "GESTISCI VIAGGI: GPX + CSV • esporta / elimina",
+            "GESTISCI VIAGGI: GPX + GPS + FRECCIA",
             "Esporta GPX attivo…",
             "DEBUG: CSV GPS e memoria"
         )
@@ -2196,7 +2196,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (recordingGpx) return
         AlertDialog.Builder(this)
             .setTitle("Memorizzare il viaggio?")
-            .setMessage("Vuoi registrare il viaggio in GPX? Se confermi, verrà registrato anche il CSV GPS associato. Eliminando il GPX, verrà eliminato anche il suo CSV.")
+            .setMessage("Vuoi registrare il viaggio? Saranno salvati GPX, CSV GPS e telemetria della freccia. Potrai esportarli o eliminarli insieme.")
             .setPositiveButton("Sì, registra") { _, _ ->
                 recordingIndependentOfNavigation = false
                 startGpxRecording()
@@ -2511,7 +2511,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         Toast.makeText(this, "Questo GPX non ha un CSV GPS associato.", Toast.LENGTH_LONG).show()
                     4 -> if (pairedArrow.isFile) exportArrowTelemetry(pairedArrow) else Toast.makeText(this, "Telemetria freccia non disponibile.", Toast.LENGTH_LONG).show()
                     5 -> AlertDialog.Builder(this).setTitle("Eliminare solo il GPX?")
-                        .setMessage("Verrà eliminato ${file.name}. Il CSV associato, se presente, resterà nella memoria.")
+                        .setMessage("Verrà eliminato ${file.name}. I CSV GPS e freccia associati resteranno nella memoria.")
                         .setNegativeButton(appText("Annulla"), null)
                         .setPositiveButton("Elimina GPX") { _, _ ->
                             val deleted = file.delete()
@@ -2521,7 +2521,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     6 -> AlertDialog.Builder(this).setTitle("Eliminare GPX e dati diagnostici associati?")
                         .setMessage("Verranno eliminati definitivamente ${file.name}, il CSV GPS e la telemetria freccia associati, se presenti.")
                         .setNegativeButton(appText("Annulla"), null)
-                        .setPositiveButton("Elimina entrambi") { _, _ ->
+                        .setPositiveButton("Elimina tutto") { _, _ ->
                             val deleted = file.delete()
                             val csvDeleted = !pairedCsv.exists() || pairedCsv.delete()
                             val arrowDeleted = !pairedArrow.exists() || pairedArrow.delete()
