@@ -52,6 +52,22 @@ class RadarServiceTest {
         assertEquals("Controllo velocità media", cameras.single().kind)
         assertTrue(cameras.single().point.latitude in 28.0..29.0)
     }
+    @Test fun parsesRedLightCameraEnforcementSeparately() {
+        val json = """
+            {
+              "elements": [
+                {"type":"relation","id":92,"tags":{"type":"enforcement","enforcement":"traffic_signals","direction":"90"},
+                 "members":[{"type":"node","ref":50,"role":"device"}]},
+                {"type":"node","id":50,"lat":28.3,"lon":-16.9,"tags":{}}
+              ]
+            }
+        """.trimIndent()
+        val cameras = RadarService.parseOverpassResponse(json)
+        assertEquals(1, cameras.size)
+        assertEquals("Controllo semaforo", cameras.single().kind)
+        assertEquals("90", cameras.single().direction)
+    }
+
     @Test(expected = IllegalStateException::class)
     fun rejectsOverpassHttp200RemarkInsteadOfCachingItAsEmptyData() {
         RadarService.parseOverpassResponse(
