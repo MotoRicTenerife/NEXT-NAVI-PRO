@@ -122,7 +122,7 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: 41349308265
-      - name: Stage alpha09 and alpha10 APKs for upgrade validation
+      - name: Stage alpha09 and alpha11 APKs for upgrade validation
         run: |
           set -e
           OLD_APK="$(find old-apk -type f -name '*.apk' -print -quit)"
@@ -131,7 +131,7 @@ jobs:
           test -s "$NEW_APK"
           mkdir -p "$RUNNER_TEMP/next-navi-upgrade"
           cp "$OLD_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha09.apk"
-          cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha10.apk"
+          cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha11.apk"
           echo "OLD_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha09.apk" >> "$GITHUB_ENV"
           echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha10.apk" >> "$GITHUB_ENV"
           sha256sum "$RUNNER_TEMP/next-navi-upgrade/"*.apk
@@ -141,7 +141,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           test -c /dev/kvm && test -r /dev/kvm && test -w /dev/kvm
-      - name: Install alpha09 and upgrade to alpha10 in Android emulator
+      - name: Install alpha09 and upgrade to alpha11 in Android emulator
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env:
           OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
