@@ -2410,6 +2410,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        prefetchRouteRadars(routeResult!!, showBriefing = true)
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -5643,11 +5644,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
         lastRadarAlertId = candidates.first.osmId
         lastRadarAlertMs = now
+        val warning = when {
+            candidates.first.kind.contains("semaforo", ignoreCase = true) -> "Attenzione, controllo al semaforo tra circa "
+            candidates.first.kind.contains("media", ignoreCase = true) -> "Attenzione, controllo della velocità media tra circa "
+            else -> "Attenzione, possibile autovelox tra circa "
+        }
         if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak(
-            "Attenzione, possibile autovelox tra circa " + candidates.second.toInt() + " metri",
+            warning + candidates.second.toInt() + " metri",
             TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
         ) }
-        radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
+        radarText.text = "⚠ " + candidates.first.kind.uppercase(Locale.ITALY) + " • " + candidates.second.toInt() + " m"
         updateRadarStatusColor()
     }
 
@@ -6119,14 +6125,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateRadarLabel() {
         if (!::radarText.isInitialized) return
-        radarText.text = if (radarCameras.isEmpty()) {
+        val displayedRadarCount = if (routeResult != null && routeRadarReady) routeRadarCameras.size else radarCameras.size
+        radarText.text = if (displayedRadarCount == 0) {
             when {
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
                 radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
                 else -> "RADAR OSM • ricerca dati…"
             }
         } else {
-            "RADAR OSM: " + radarCameras.size + " • dati comunitari"
+            "RADAR OSM: " + displayedRadarCount + " • dati comunitari"
         }
         updateRadarStatusColor()
     }
