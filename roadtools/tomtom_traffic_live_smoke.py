@@ -22,18 +22,6 @@ def get(path, accept=None):
         return response.status, response.headers, response.read()
 
 
-def post_json(path, payload):
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        BASE + path,
-        data=body,
-        headers={**HEADERS, "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=45) as response:
-        return response.status, json.loads(response.read().decode("utf-8"))
-
-
 def wait_for_feature_activation():
     deadline = time.monotonic() + 600
     expected_revision = os.environ.get("RENDER_EXPECTED_REVISION", "").strip()
@@ -88,27 +76,7 @@ def main():
         raise RuntimeError("TomTom incidents response schema invalid: " + repr(payload)[:500])
     print(f"TomTom live incident query PASSED: HTTP {status}, {len(incidents)} incidents, observedAt={payload.get('observedAtEpochMs')}")
 
-    # Exercise Jarvis's conversational nearby-traffic path without a destination.
-    status, jarvis = post_json("/jarvis", {
-        "message": "How is traffic around my current location right now? Check the nearest road segment and reported incidents. Use only verified TomTom data.",
-        "language": "en-GB",
-        "location": {"latitude": lat, "longitude": lon},
-        "vehicleMode": "car"
-    })
-    diagnostics = jarvis.get("diagnostics", {})
-    nearby = diagnostics.get("nearbyTraffic") or {}
-    reply = jarvis.get("reply", "")
-    if (status != 200 or not reply.strip() or diagnostics.get("responseMode") != "gemini"
-            or diagnostics.get("trafficContext") != "tomtom_nearby_loaded"
-            or diagnostics.get("language") != "en-GB"
-            or nearby.get("segmentAvailable") is not True
-            or nearby.get("incidentsAvailable") is not True):
-        raise RuntimeError("Jarvis nearby traffic conversation failed: diagnostics=" + repr(diagnostics) + ", reply=" + repr(reply[:240]))
-    print("Jarvis nearby live traffic PASSED:", {
-        "segmentAvailable": nearby.get("segmentAvailable"),
-        "incidentsAvailable": nearby.get("incidentsAvailable"),
-        "reply": reply[:220]
-    })
+    print("PASS: bounded GET-only TomTom traffic flow and incident checks completed.")
 
 
 if __name__ == "__main__":

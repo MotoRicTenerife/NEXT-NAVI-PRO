@@ -65,6 +65,8 @@ import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.android.style.sources.TileSet
+import org.maplibre.android.style.sources.VectorSource
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback as FusedLocationCallback
 import com.google.android.gms.location.LocationRequest as FusedLocationRequest
@@ -105,6 +107,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         private const val SOURCE_SAVED_POIS = "next-saved-pois"
         private const val SOURCE_DESTINATION = "next-destination"
         private const val SOURCE_ROUTE = "next-active-route"
+        private const val SOURCE_TRAFFIC_FLOW = "next-live-traffic-flow"
         private const val SOURCE_RADARS = "next-speed-cameras"
         private const val SOURCE_MANUAL_SEGMENTS = "next-manual-speed-segments"
         private const val SOURCE_MANUAL_ARROWS = "next-manual-speed-arrows"
@@ -224,6 +227,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var announcedManeuverIndex = -1
     private var announcedStage = 0
     private var radarCameras: List<RadarCamera> = emptyList()
+    private var routeRadarCameras: List<RadarCamera> = emptyList()
+    private var routeRadarRequestId = 0L
+    private var routeRadarReady = false
     private var radarFetchFailed = false
     private var radarCacheCoversCurrentArea = false
     private var lastRadarAttemptMs = 0L
@@ -1131,6 +1137,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
+    private fun trafficTileTemplate(): String? {
+        // Keep the TomTom key on Render: Android requests cached vector tiles from our proxy.
+        val configured = BuildConfig.JARVIS_AI_ENDPOINT.trim()
+        if (!configured.startsWith("https://") || !configured.endsWith("/jarvis")) return null
+        return configured.removeSuffix("/jarvis").trimEnd('/') + "/traffic/flow/{z}/{x}/{y}"
+    }
+
     private fun applyMapStyle(readyMap: MapLibreMap) {
         mapStyleReady = false
         val satelliteStyle = """{"version":8,"name":"NEXT NAVI PRO Satellite","sources":{"satellite":{"type":"raster","tiles":["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],"tileSize":256,"maxzoom":19,"attribution":"Imagery © Esri, Maxar, Earthstar Geographics and the GIS community"}},"layers":[{"id":"satellite-imagery","type":"raster","source":"satellite","minzoom":0,"maxzoom":22}]}"""
@@ -1165,10 +1178,50 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             style.addImage("next-place-flag-icon", createPlaceFlagBitmap())
             style.addImage("next-manual-direction-icon", createGpsArrowBitmap())
             style.addSource(GeoJsonSource(SOURCE_ROUTE, """{"type":"FeatureCollection","features":[]}"""))
+            // Neutral route underlay: uncovered road segments must not look like free-flow traffic.
             style.addLayer(LineLayer("next-route-line", SOURCE_ROUTE).withProperties(
-                PropertyFactory.lineColor(if (negativeTheme) "#FFD400" else "#00D6C9"),
-                PropertyFactory.lineWidth(5f)
+                PropertyFactory.lineColor("#777777"),
+                PropertyFactory.lineWidth(7f),
+                PropertyFactory.lineOpacity(0.92f),
+                PropertyFactory.lineCap("round"),
+                PropertyFactory.lineJoin("round")
             ))
+            // TomTom Orbis v2 flow: relative_speed 0 = stopped, 1 = free-flow.
+            // Draw above the route and basemap so nearby roads are colored as well.
+            trafficTileTemplate()?.let { tileTemplate ->
+                val tileSet = TileSet("2.0.0", tileTemplate).apply {
+                    name = "NEXT NAVI PRO live traffic"
+                    attribution = "Traffic data © TomTom"
+                    minZoom = 6f
+                    maxZoom = 22f
+                }
+                style.addSource(VectorSource(SOURCE_TRAFFIC_FLOW, tileSet))
+                val trafficColor = Expression.step(
+                    Expression.get("relative_speed"),
+                    Expression.literal("#D50000"),
+                    Expression.stop(0.25f, "#D50000"),
+                    Expression.stop(0.45f, "#F57C00"),
+                    Expression.stop(0.65f, "#FBC02D"),
+                    Expression.stop(0.80f, "#2EAD54")
+                )
+                val trafficWidth = Expression.interpolate(
+                    Expression.linear(),
+                    Expression.zoom(),
+                    Expression.stop(6f, 1.2f),
+                    Expression.stop(11f, 2.2f),
+                    Expression.stop(16f, 4.0f),
+                    Expression.stop(20f, 5.5f)
+                )
+                style.addLayer(LineLayer("next-live-traffic-lines", SOURCE_TRAFFIC_FLOW)
+                    .withSourceLayer("Traffic flow")
+                    .withProperties(
+                        PropertyFactory.lineColor(trafficColor),
+                        PropertyFactory.lineWidth(trafficWidth),
+                        PropertyFactory.lineOpacity(0.96f),
+                        PropertyFactory.lineCap("round"),
+                        PropertyFactory.lineJoin("round")
+                    ))
+            }
             style.addSource(GeoJsonSource(SOURCE_MANUAL_SEGMENTS, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(LineLayer("next-manual-speed-segment-lines", SOURCE_MANUAL_SEGMENTS).withProperties(PropertyFactory.lineColor("#D500F9"), PropertyFactory.lineWidth(5f)))
             style.addSource(GeoJsonSource(SOURCE_MANUAL_ARROWS, """{"type":"FeatureCollection","features":[]}"""))
@@ -2407,6 +2460,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun activateGpxTrack(track: GpxTrack) {
         routeResult = RouteResult(track.points, track.distanceKm, 0, "Traccia GPX: segui la linea sulla mappa.", emptyList())
+        prefetchRouteRadars(routeResult!!, showBriefing = true)
         resetRouteProgress()
         destination = PlaceResult(track.name, track.points.last().let { NavPoint(it.latitude, it.longitude) }, "Destinazione da traccia GPX")
         if (::destinationInput.isInitialized) destinationInput.setText(track.name)
@@ -2451,6 +2505,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routeResult = result
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
+                    prefetchRouteRadars(result, showBriefing = true)
                     resetRouteProgress()
                     announcedManeuverIndex = -1
                     announcedStage = 0
@@ -4168,6 +4223,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     routeResult = result
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
+                    prefetchRouteRadars(result, showBriefing = true)
                     navigationArrived = false
                     arrivalClosestMeters = Float.MAX_VALUE
                     arrivalStopSinceMs = 0L
@@ -4237,6 +4293,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             stopAndSaveGpsDiagnosticRecording("percorso terminato")
         }
         routeResult = null
+        routeRadarRequestId++
+        routeRadarReady = false
+        routeRadarCameras = emptyList()
         prefetchedRouteLimits = emptyList()
         routePreviewResult = null
         routePreviewDestination = null
@@ -4596,7 +4655,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
         lastAcceptedFixElapsedMs = fixElapsedMs
         lastRawGpsLocation = Location(location)
-        val smoothed = smoothLocation(smoothedGpsLocation, location)
+        val smoothed = smoothLocation(smoothedGpsLocation, location, movingTimeMs)
         currentLocation = Location(smoothed)
         appendSpeedLimitTracePoint(smoothed)
         if (pendingJarvisWeather && location.hasAccuracy() && location.accuracy <= 100f) {
@@ -4636,35 +4695,25 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         return previous.distanceTo(incoming) > maximumPlausibleDistance
     }
 
-    private fun smoothLocation(previous: Location?, incoming: Location): Location {
-        // Adaptive low-pass filter: suppress stationary GPS wander, but rapidly accept
-        // genuine movement and course changes so the marker does not cut across a turn.
+    private fun smoothLocation(previous: Location?, incoming: Location, movingTimeMs: Long): Location {
         val result = Location(incoming)
-        if (previous != null && previous.hasAccuracy() && incoming.hasAccuracy()) {
-            val jump = previous.distanceTo(incoming)
-            if (jump < 35f) {
-                val accuracyAlpha = when {
-                    incoming.accuracy <= 5f -> 0.70f
-                    incoming.accuracy <= 10f -> 0.64f
-                    incoming.accuracy <= 20f -> 0.55f
-                    incoming.accuracy <= 35f -> 0.42f
-                    else -> 0.30f
-                }
-                val speed = if (incoming.hasSpeed()) incoming.speed else 0f
-                // Keep enough of the raw fix to avoid visible lag, but do not let
-                // one-second GNSS updates move the marker almost entirely in one jump.
-                var alpha = when {
-                    speed >= 8f -> (accuracyAlpha - 0.08f).coerceIn(0.48f, 0.68f)
-                    speed < 2.5f -> 0.14f
-                    else -> (accuracyAlpha - 0.06f).coerceIn(0.42f, 0.66f)
-                }
-                // A larger displacement can be real motion; respond faster without
-                // reverting to the previous near-raw filter.
-                if (jump > 12f) alpha = maxOf(alpha, 0.76f)
-                if (previous.hasBearing() && incoming.hasBearing() && speed >= 2.5f) {
-                    val courseDelta = abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
-                    if (courseDelta >= 30f) alpha = maxOf(alpha, 0.76f)
-                }
+        if (previous != null) {
+            val displacement = previous.distanceTo(incoming)
+            if (displacement < 35f) {
+                val courseDelta = if (previous.hasBearing() && incoming.hasBearing()) {
+                    abs(((incoming.bearing - previous.bearing + 540f) % 360f) - 180f)
+                } else null
+                val speed = incoming.speed.takeIf { incoming.hasSpeed() }
+                val accuracy = incoming.accuracy.takeIf { incoming.hasAccuracy() }
+                val deltaSeconds = (movingTimeMs.coerceAtLeast(0L) / 1000f)
+                    .takeIf { it > 0f } ?: 1f
+                val alpha = GpsSmoothingPolicy.alpha(
+                    deltaSeconds = deltaSeconds,
+                    displacementMeters = displacement,
+                    accuracyMeters = accuracy,
+                    speedMetersPerSecond = speed,
+                    courseDeltaDegrees = courseDelta
+                )
                 result.latitude = previous.latitude + (incoming.latitude - previous.latitude) * alpha
                 result.longitude = previous.longitude + (incoming.longitude - previous.longitude) * alpha
             }
@@ -5585,6 +5634,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             !location.hasSpeed() || location.speed < 4f) return
 
         val route = routeResult
+        val routeCameras = if (route != null && route.points.size >= 2 && routeRadarReady) routeRadarCameras else radarCameras
         val candidates = if (route != null && route.points.size >= 2) {
             var currentIndex = 0
             var currentDistance = Float.MAX_VALUE
@@ -5605,7 +5655,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
                 cumulative[i] = cumulative[i - 1] + d[0]
             }
-            radarCameras.mapNotNull { camera ->
+            routeCameras.mapNotNull { camera ->
                 var cameraIndex = -1
                 var crossTrackMeters = Float.MAX_VALUE
                 for (i in route.points.indices) {
@@ -5644,11 +5694,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
         lastRadarAlertId = candidates.first.osmId
         lastRadarAlertMs = now
+        val warning = when {
+            candidates.first.kind.contains("semaforo", ignoreCase = true) -> "Attenzione, controllo al semaforo tra circa "
+            candidates.first.kind.contains("media", ignoreCase = true) -> "Attenzione, controllo della velocità media tra circa "
+            else -> "Attenzione, possibile autovelox tra circa "
+        }
         if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak(
-            "Attenzione, possibile autovelox tra circa " + candidates.second.toInt() + " metri",
+            warning + candidates.second.toInt() + " metri",
             TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
         ) }
-        radarText.text = "⚠ AUTOVELOX • " + candidates.second.toInt() + " m"
+        radarText.text = "⚠ " + candidates.first.kind.uppercase(Locale.ITALY) + " • " + candidates.second.toInt() + " m"
         updateRadarStatusColor()
     }
 
@@ -5781,6 +5836,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
+                    prefetchRouteRadars(recalculated, showBriefing = false)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -6008,6 +6064,73 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         routeMetricsText.text = String.format(Locale.ITALY, "ARRIVO %s  •  %.1f km", arrival, remainingKm)
     }
 
+
+    /**
+     * Fetch enforcement devices along the complete active route, not just around the rider.
+     * Request generations prevent a slow response for an old route replacing a newer one.
+     */
+    private fun prefetchRouteRadars(route: RouteResult, showBriefing: Boolean) {
+        if (route.points.size < 2) return
+        val requestId = ++routeRadarRequestId
+        routeRadarReady = false
+        routeRadarCameras = emptyList()
+        drawRadars()
+        if (::radarText.isInitialized) {
+            radarText.text = "RADAR • analisi controlli lungo il percorso…"
+            updateRadarStatusColor()
+        }
+        thread(name = "route-radar-prefetch") {
+            try {
+                val fetched = RouteRadarService.fetchAlongRoute(route.points)
+                val matches = RouteRadarPlanner.match(fetched, route.points)
+                runOnUiThread {
+                    if (requestId != routeRadarRequestId || (routeResult !== route && routeResult != route)) return@runOnUiThread
+                    routeRadarCameras = matches.map { it.camera }
+                    routeRadarReady = true
+                    radarFetchFailed = false
+                    drawRadars()
+                    updateRadarLabel()
+                    if (showBriefing) showRouteRadarBriefing(matches)
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NEXT_NAVI_RADAR", "Route-wide radar prefetch failed", error)
+                runOnUiThread {
+                    if (requestId != routeRadarRequestId || (routeResult !== route && routeResult != route)) return@runOnUiThread
+                    routeRadarReady = false
+                    radarFetchFailed = true
+                    drawRadars()
+                    updateRadarLabel()
+                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Restano attivi gli avvisi locali.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun showRouteRadarBriefing(matches: List<RouteRadarMatch>) {
+        val speedCameras = matches.count { it.camera.kind.contains("velocità", ignoreCase = true) || it.camera.kind.contains("autovelox", ignoreCase = true) }
+        val trafficLights = matches.count { it.camera.kind.contains("semaforo", ignoreCase = true) }
+        val averageSpeed = matches.count { it.camera.kind.contains("media", ignoreCase = true) }
+        val lines = matches.take(12).mapIndexed { index, match ->
+            val distance = if (match.distanceFromStartMeters >= 1000.0)
+                String.format(Locale.ITALY, "%.1f km", match.distanceFromStartMeters / 1000.0)
+            else "${match.distanceFromStartMeters.toInt()} m"
+            "${index + 1}. ${match.camera.kind} • $distance"
+        }
+        val details = if (lines.isEmpty()) {
+            "Nessun dispositivo censito trovato lungo il tracciato."
+        } else lines.joinToString("\n") + if (matches.size > lines.size) "\n… e altri ${matches.size - lines.size}" else ""
+        val summary = "Controlli censiti: ${matches.size}\n" +
+            "Autovelox/velocità: $speedCameras\n" +
+            "Semafori controllati: $trafficLights\n" +
+            "Velocità media: $averageSpeed\n\n" +
+            details + "\n\nDati comunitari OpenStreetMap: la copertura non è completa e l'assenza di un dispositivo nell'elenco non garantisce che non sia presente."
+        AlertDialog.Builder(this)
+            .setTitle("Controlli lungo il percorso")
+            .setMessage(summary)
+            .setPositiveButton("Ho capito", null)
+            .show()
+    }
+
     private fun refreshRadarsIfNeeded(location: Location) {
         val center = NavPoint(location.latitude, location.longitude)
         radarCameras = RadarCache.loadNear(this, center)
@@ -6052,14 +6175,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateRadarLabel() {
         if (!::radarText.isInitialized) return
-        radarText.text = if (radarCameras.isEmpty()) {
+        val displayedRadarCount = if (routeResult != null && routeRadarReady) routeRadarCameras.size else radarCameras.size
+        radarText.text = if (displayedRadarCount == 0) {
             when {
+                routeResult != null && routeRadarReady -> "RADAR OSM • 0 controlli censiti sul percorso"
+                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi locali attivi"
+                routeResult != null -> "RADAR OSM • analisi del percorso…"
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
                 radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
                 else -> "RADAR OSM • ricerca dati…"
             }
         } else {
-            "RADAR OSM: " + radarCameras.size + " • dati comunitari"
+            "RADAR OSM: " + displayedRadarCount + " • dati comunitari"
         }
         updateRadarStatusColor()
     }
@@ -6067,7 +6194,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun drawRadars() {
         if (!mapStyleReady) return
         val source = map?.style?.getSource(SOURCE_RADARS) as? GeoJsonSource ?: return
-        val features = radarCameras.map { camera ->
+        val visibleCameras = if (routeResult != null && routeRadarReady) routeRadarCameras else radarCameras
+        val features = visibleCameras.map { camera ->
             Feature.fromGeometry(Point.fromLngLat(camera.point.longitude, camera.point.latitude))
         }
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features.toTypedArray()))
