@@ -1985,18 +1985,23 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun appendArrowTelemetrySample(rendered: Location, animationFraction: Float) {
-        if (!recordingGpx || !gpsDiagnosticRecording || arrowTelemetrySamples.size >= 120_000) return
+        if (!recordingGpx || arrowTelemetrySamples.size >= 120_000) return
         val raw = lastRawGpsLocation
         val filtered = currentLocation
         val camera = runCatching { map?.cameraPosition }.getOrNull()
         arrowTelemetrySamples.add(ArrowTraceSample(
             timestampEpochMs = System.currentTimeMillis(),
             elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos(),
+            gpsFixEpochMs = raw?.time?.takeIf { it > 0L },
+            gpsFixElapsedRealtimeNanos = raw?.elapsedRealtimeNanos?.takeIf { it > 0L },
             rawLatitude = raw?.latitude, rawLongitude = raw?.longitude,
+            rawBearingDegrees = raw?.bearing?.takeIf { raw.hasBearing() },
             filteredLatitude = filtered?.latitude, filteredLongitude = filtered?.longitude,
+            filteredBearingDegrees = filtered?.bearing?.takeIf { filtered.hasBearing() },
             renderedLatitude = rendered.latitude, renderedLongitude = rendered.longitude,
             renderedBearingDegrees = rendered.bearing.takeIf { rendered.hasBearing() },
             gpsAccuracyMeters = raw?.accuracy?.takeIf { raw.hasAccuracy() },
+            bearingAccuracyDegrees = raw?.bearingAccuracyDegrees?.takeIf { raw.hasBearingAccuracy() },
             gpsSpeedMetersPerSecond = raw?.speed?.takeIf { raw.hasSpeed() },
             animationFraction = animationFraction.takeIf { it.isFinite() && it >= 0f },
             cameraLatitude = camera?.target?.latitude, cameraLongitude = camera?.target?.longitude,
