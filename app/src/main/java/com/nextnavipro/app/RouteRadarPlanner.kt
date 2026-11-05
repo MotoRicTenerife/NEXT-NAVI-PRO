@@ -1,6 +1,5 @@
 package com.nextnavipro.app
 
-import android.location.Location
 import kotlin.math.*
 
 data class RouteRadarMatch(
@@ -98,10 +97,21 @@ object RouteRadarPlanner {
         return delta <= 60.0
     }
 
+    /**
+     * Great-circle distance in metres (Haversine). Kept pure Kotlin so route
+     * geometry behaves identically on Android and in local JVM unit tests.
+     */
     private fun distance(a: NavPoint, b: NavPoint): Double {
-        val result = FloatArray(1)
-        Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, result)
-        return result[0].toDouble()
+        val earthRadiusMeters = 6_371_008.8
+        val lat1 = Math.toRadians(a.latitude)
+        val lat2 = Math.toRadians(b.latitude)
+        val deltaLat = lat2 - lat1
+        val deltaLon = Math.toRadians(b.longitude - a.longitude)
+        val sinLat = sin(deltaLat / 2.0)
+        val sinLon = sin(deltaLon / 2.0)
+        val haversine = (sinLat * sinLat +
+            cos(lat1) * cos(lat2) * sinLon * sinLon).coerceIn(0.0, 1.0)
+        return 2.0 * earthRadiusMeters * asin(sqrt(haversine))
     }
 
     private fun interpolate(a: NavPoint, b: NavPoint, t: Double) =
