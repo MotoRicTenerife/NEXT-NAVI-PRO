@@ -5786,7 +5786,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 runOnUiThread {
                     isCalculatingRoute = false
                     routeResult = recalculated
-                    prefetchRouteRadars(recalculated, showBriefing = true)
+                    prefetchRouteRadars(recalculated, showBriefing = false)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
                     announcedManeuverIndex = -1
@@ -6128,6 +6128,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val displayedRadarCount = if (routeResult != null && routeRadarReady) routeRadarCameras.size else radarCameras.size
         radarText.text = if (displayedRadarCount == 0) {
             when {
+                routeResult != null && routeRadarReady -> "RADAR OSM • 0 controlli censiti sul percorso"
+                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi locali attivi"
+                routeResult != null -> "RADAR OSM • analisi del percorso…"
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
                 radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
                 else -> "RADAR OSM • ricerca dati…"
