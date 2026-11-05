@@ -24,8 +24,16 @@ class ArrowTraceDiagnosticsTest {
     }
 
     @Test fun appendBatchOmitsRepeatedHeader() {
-        val sample = ArrowTraceSample(1L, 2L, null, null, null, null, null, null,
-            null, null, 1.0, 2.0, null, null, null, null, null, null, null, null)
+        val sample = ArrowTraceSample(
+            timestampEpochMs = 1L, elapsedRealtimeNanos = 2L,
+            gpsFixEpochMs = null, gpsFixElapsedRealtimeNanos = null,
+            rawLatitude = null, rawLongitude = null, rawBearingDegrees = null,
+            filteredLatitude = null, filteredLongitude = null, filteredBearingDegrees = null,
+            renderedLatitude = 1.0, renderedLongitude = 2.0, renderedBearingDegrees = null,
+            gpsAccuracyMeters = null, bearingAccuracyDegrees = null, gpsSpeedMetersPerSecond = null,
+            animationFraction = null, cameraLatitude = null, cameraLongitude = null,
+            cameraBearingDegrees = null, cameraZoom = null
+        )
         val csv = ArrowTraceDiagnostics.toCsv(listOf(sample), includeHeader = false)
         assertTrue(!csv.startsWith("timestamp_epoch_ms"))
         assertTrue(csv.startsWith("1,2,"))
