@@ -133,7 +133,7 @@ jobs:
           cp "$OLD_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha09.apk"
           cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha11.apk"
           echo "OLD_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha09.apk" >> "$GITHUB_ENV"
-          echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha10.apk" >> "$GITHUB_ENV"
+          echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha11.apk" >> "$GITHUB_ENV"
           sha256sum "$RUNNER_TEMP/next-navi-upgrade/"*.apk
       - name: Enable KVM hardware acceleration
         run: |
@@ -145,7 +145,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env:
           OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
-          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha10.apk
+          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha11.apk
           DIAG_DIR: ci-upgrade-diagnostics
         with:
           api-level: 35
