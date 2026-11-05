@@ -20,6 +20,16 @@ class RouteRadarPlannerTest {
         assertTrue(RouteRadarPlanner.match(listOf(parallel), route).isEmpty())
     }
 
+    @Test fun rejectsNumericDirectionFacingOppositeToRoute() {
+        val opposite = RadarCamera(8, NavPoint(28.1000, -16.6950), "Autovelox OSM", "270")
+        assertTrue(RouteRadarPlanner.match(listOf(opposite), route).isEmpty())
+    }
+
+    @Test fun keepsNumericDirectionAlignedWithRoute() {
+        val aligned = RadarCamera(9, NavPoint(28.1000, -16.6950), "Autovelox OSM", "90")
+        assertEquals(1, RouteRadarPlanner.match(listOf(aligned), route).size)
+    }
+
     @Test fun keepsTrafficSignalEnforcementAsDistinctKind() {
         val signal = RadarCamera(4, NavPoint(28.1000, -16.6950), "Controllo semaforo", "")
         val match = RouteRadarPlanner.match(listOf(signal), route).single()
