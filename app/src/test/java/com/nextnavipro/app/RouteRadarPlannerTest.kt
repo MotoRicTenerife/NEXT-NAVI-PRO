@@ -36,6 +36,25 @@ class RouteRadarPlannerTest {
         assertEquals("Controllo semaforo", match.camera.kind)
     }
 
+    @Test fun computesCameraDistanceAheadUsingContinuousSegmentProjection() {
+        val rider = NavPoint(28.1000, -16.6980)
+        val camera = NavPoint(28.1000, -16.6920)
+        val ahead = RouteRadarPlanner.distanceAhead(rider, camera, route)
+        assertTrue(ahead != null && ahead in 590.0..610.0)
+    }
+
+    @Test fun rejectsCameraOnParallelCarriagewayEvenWhenItIsAhead() {
+        val rider = NavPoint(28.1000, -16.6980)
+        val parallelCamera = NavPoint(28.10035, -16.6920)
+        assertEquals(null, RouteRadarPlanner.distanceAhead(rider, parallelCamera, route))
+    }
+
+    @Test fun rejectsRiderOutsideActiveRouteCorridor() {
+        val riderOffRoute = NavPoint(28.1010, -16.6980)
+        val camera = NavPoint(28.1000, -16.6920)
+        assertEquals(null, RouteRadarPlanner.distanceAhead(riderOffRoute, camera, route))
+    }
+
     @Test fun routeSamplingIncludesEndpointsAndIsBounded() {
         val samples = RouteRadarPlanner.sample(route, 500.0)
         assertEquals(route.first(), samples.first())
