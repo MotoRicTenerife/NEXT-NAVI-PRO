@@ -214,3 +214,22 @@ Then:
 - cache by stable segment ID/direction and use bounded retry state in Android.
 
 Do not change the Render-connected branch as part of the Android radar fix. Make the backend work in a separate PR and validate against mocked TomTom responses first. A live provider smoke test must be GET-only unless the request budget and cost of the POST operation are explicitly approved.
+
+## Follow-up implementation block (2026-11-06)
+
+Changes now staged on PR #55, still draft and isolated from alpha13 / Render:
+
+1. **TomTom stationary startup retry** — when the first position lookup produces no usable limit, allow another attempt after 60 seconds, subject to the existing in-flight guard and provider backoff.
+2. **No-route radar safety gate** — keep OSM map markers, but suspend proximity voice alerts when no active route provides a defensible road context. This intentionally trades some alerts for fewer false alarms on parallel roads.
+3. **Active-route projection** — require route-wide radar prefetch to succeed, then project both rider and camera onto continuous route segments. Compare along-route distance instead of nearest sparse polyline vertices. This removes vertex quantization around bends and rejects positions outside the configured route corridors.
+4. **Unit coverage** — add tests for forward distance, a parallel-road camera outside the corridor, and a rider outside the active route corridor.
+
+### Remaining engineering gaps (not claimed as solved)
+
+- OSM enforcement relation `from`/`to` way members are still not retained as road identity in the parsed radar model.
+- Directionless OSM devices can still be ambiguous; geometric proximity is not lane-level proof.
+- The active-route 22 m camera corridor is a conservative geometric filter, not a substitute for road/way identity.
+- TomTom Snap-to-Roads response enrichment with projected point/road attributes remains pending.
+- No successful CI run has been confirmed for the current PR head; no APK from these changes is ready for installation.
+- Field validation is required on parallel carriageways, slip roads, junctions, bends, and in portrait/landscape.
+
