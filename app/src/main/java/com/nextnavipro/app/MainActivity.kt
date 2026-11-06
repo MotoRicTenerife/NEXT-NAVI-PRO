@@ -1547,6 +1547,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      */
     private fun updateCompassHeading(event: SensorEvent) {
         if (event.values.size < 3) return
+        // A valid GPS fix is needed to convert magnetic north to true north.
+        val location = currentLocation ?: return
         try {
             SensorManager.getRotationMatrixFromVector(headingRotationMatrix, event.values)
             val (axisX, axisY) = when (windowManager.defaultDisplay.rotation) {
@@ -1558,11 +1560,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (!SensorManager.remapCoordinateSystem(headingRotationMatrix, axisX, axisY, displayRotationMatrix)) return
             SensorManager.getOrientation(displayRotationMatrix, headingOrientation)
             val magnetic = DeviceHeadingFusion.normalize(Math.toDegrees(headingOrientation[0].toDouble()).toFloat())
-            val location = currentLocation
-            val declination = location?.let {
-                GeomagneticField(it.latitude.toFloat(), it.longitude.toFloat(),
-                    (if (it.hasAltitude()) it.altitude else 0.0).toFloat(), System.currentTimeMillis()).declination
-            } ?: 0f
+            val declination = GeomagneticField(location.latitude.toFloat(), location.longitude.toFloat(),
+                (if (location.hasAltitude()) location.altitude else 0.0).toFloat(), System.currentTimeMillis()).declination
             compassTrueHeadingDegrees = DeviceHeadingFusion.normalize(magnetic + declination)
             compassAccuracyLevel = event.accuracy
             lastCompassEventElapsedMs = SystemClock.elapsedRealtime()
