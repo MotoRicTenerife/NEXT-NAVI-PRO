@@ -5796,52 +5796,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!location.hasAccuracy() || location.accuracy > 18f ||
             !location.hasSpeed() || location.speed < 4f) return
 
-        val route = routeResult
-        val routeCameras = if (route != null && route.points.size >= 2 && routeRadarReady) routeRadarCameras else radarCameras
-        val candidates = if (route != null && route.points.size >= 2) {
-            var currentIndex = 0
-            var currentDistance = Float.MAX_VALUE
-            for (i in route.points.indices) {
-                val p = route.points[i]
-                val d = FloatArray(1)
-                Location.distanceBetween(location.latitude, location.longitude, p.latitude, p.longitude, d)
-                if (d[0] < currentDistance) {
-                    currentDistance = d[0]
-                    currentIndex = i
-                }
-            }
-            val cumulative = DoubleArray(route.points.size)
-            for (i in 1 until route.points.size) {
-                val a = route.points[i - 1]
-                val b = route.points[i]
-                val d = FloatArray(1)
-                Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
-                cumulative[i] = cumulative[i - 1] + d[0]
-            }
-            routeCameras.mapNotNull { camera ->
-                var cameraIndex = -1
-                var crossTrackMeters = Float.MAX_VALUE
-                for (i in route.points.indices) {
-                    val p = route.points[i]
-                    val d = FloatArray(1)
-                    Location.distanceBetween(camera.point.latitude, camera.point.longitude, p.latitude, p.longitude, d)
-                    if (d[0] < crossTrackMeters) {
-                        crossTrackMeters = d[0]
-                        cameraIndex = i
-                    }
-                }
-                if (cameraIndex < currentIndex || crossTrackMeters > 22f) return@mapNotNull null
-                val alongRouteMeters = cumulative[cameraIndex] - cumulative[currentIndex]
-                if (alongRouteMeters !in 0.0..650.0) return@mapNotNull null
-                camera to alongRouteMeters.toFloat()
-            }.minByOrNull { it.second }
-        } else {
-            // No active route means we do not yet have a defensible road/carriageway
-            // identity. A radial-distance + heading cone is unsafe on motorways:
-            // it can select a camera on a parallel/complanar road. Keep map markers
-            // visible, but suppress proximity voice alerts until road matching exists.
-            return
-        } ?: return
+        val route = routeResult ?: return
+        if (route.points.size < 2 || !routeRadarReady) return
+        // Only use cameras already projected onto the active route and direction-checked.
+        // Project both rider and camera onto route segments (not sparse vertices), then
+        // compare their along-route positions. This avoids vertex quantization at bends.
+        val candidates = routeRadarCameras.mapNotNull { camera ->
+            val aheadMeters = RouteRadarPlanner.distanceAhead(
+                NavPoint(location.latitude, location.longitude),
+                camera.point,
+                route.points,
+                riderCorridorMeters = maxOf(25.0, location.accuracy.toDouble() * 1.5),
+                cameraCorridorMeters = 22.0
+            ) ?: return@mapNotNull null
+            if (aheadMeters !in 0.0..650.0) return@mapNotNull null
+            camera to aheadMeters.toFloat()
+        }.minByOrNull { it.second } ?: return
 
         val now = System.currentTimeMillis()
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
