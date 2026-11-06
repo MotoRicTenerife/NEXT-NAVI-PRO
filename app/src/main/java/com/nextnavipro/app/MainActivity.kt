@@ -13,6 +13,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.GeomagneticField
+import android.view.Surface
 import android.graphics.Color
 import android.graphics.Typeface
 import android.text.SpannableString
@@ -145,7 +147,18 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var lightSensor: Sensor? = null
     private var ambientTemperatureSensor: Sensor? = null
+    private var rotationVectorSensor: Sensor? = null
     private var ambientTemperatureC: Float? = null
+    // Compass heading is expressed in true-north degrees and follows the current display axes.
+    private var compassTrueHeadingDegrees: Float? = null
+    private var compassAccuracyLevel = SensorManager.SENSOR_STATUS_UNRELIABLE
+    private var lastCompassEventElapsedMs = 0L
+    private var lastHeadingSource = "NONE"
+    private var lastRenderedHeadingDegrees: Float? = null
+    private var lastHeadingUpdateElapsedMs = 0L
+    private val headingRotationMatrix = FloatArray(9)
+    private val displayRotationMatrix = FloatArray(9)
+    private val headingOrientation = FloatArray(3)
     private lateinit var deviceStatusText: TextView
     private var themeMode: String = "negative"
     private var navigationMapMode = false
@@ -444,6 +457,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
         ambientTemperatureSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
+        rotationVectorSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         dashboardStarted = savedInstanceState?.getBoolean("dashboard_started") ?: false
         if (dashboardStarted) {
             buildDashboard(savedInstanceState)
@@ -488,6 +502,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun launchDashboard() {
         if (dashboardStarted) return
         dashboardStarted = true
+        if (activityResumed) registerNavigationHeadingSensor()
         if (activityResumed) setNavigationBrightnessEnabled(true)
         splashHandler.removeCallbacksAndMessages(null)
         buildDashboard(null)
@@ -1498,6 +1513,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.values.isEmpty()) return
+        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+            updateCompassHeading(event)
+            return
+        }
         if (event.sensor.type == Sensor.TYPE_AMBIENT_TEMPERATURE) {
             ambientTemperatureC = event.values[0].takeIf { it.isFinite() && it in -50f..80f }
             updateDeviceStatusText()
@@ -1511,7 +1530,46 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // No accuracy-specific action is needed for ambient temperature or light.
+        if (sensor?.type == Sensor.TYPE_ROTATION_VECTOR) compassAccuracyLevel = accuracy
+    }
+
+    /** Register only while the navigation dashboard is in the foreground. */
+    private fun registerNavigationHeadingSensor() {
+        val manager = sensorManager ?: return
+        val sensor = rotationVectorSensor ?: return
+        manager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
+    }
+
+    /**
+     * Rotation Vector is remapped into the current display coordinate system before azimuth
+     * extraction. This makes screen-up consistent in portrait and landscape without tying
+     * navigation heading to a hard-coded device orientation.
+     */
+    private fun updateCompassHeading(event: SensorEvent) {
+        if (event.values.size < 3) return
+        try {
+            SensorManager.getRotationMatrixFromVector(headingRotationMatrix, event.values)
+            val (axisX, axisY) = when (windowManager.defaultDisplay.rotation) {
+                Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
+                Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
+                Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
+                else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+            }
+            if (!SensorManager.remapCoordinateSystem(headingRotationMatrix, axisX, axisY, displayRotationMatrix)) return
+            SensorManager.getOrientation(displayRotationMatrix, headingOrientation)
+            val magnetic = DeviceHeadingFusion.normalize(Math.toDegrees(headingOrientation[0].toDouble()).toFloat())
+            val location = currentLocation
+            val declination = location?.let {
+                GeomagneticField(it.latitude.toFloat(), it.longitude.toFloat(),
+                    (if (it.hasAltitude()) it.altitude else 0.0).toFloat(), System.currentTimeMillis()).declination
+            } ?: 0f
+            compassTrueHeadingDegrees = DeviceHeadingFusion.normalize(magnetic + declination)
+            compassAccuracyLevel = event.accuracy
+            lastCompassEventElapsedMs = SystemClock.elapsedRealtime()
+            displayedMarkerLocation?.let { updateUserMarker(it) }
+        } catch (error: Exception) {
+            android.util.Log.w("NEXT_NAVI_HEADING", "Unable to calculate display-relative compass heading", error)
+        }
     }
 
     private fun updateDeviceStatusText() {
@@ -2004,6 +2062,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             bearingAccuracyDegrees = raw?.takeIf { it.hasBearingAccuracy() }?.bearingAccuracyDegrees,
             gpsSpeedMetersPerSecond = raw?.takeIf { it.hasSpeed() }?.speed,
             animationFraction = animationFraction.takeIf { it.isFinite() && it >= 0f },
+            compassHeadingDegrees = compassTrueHeadingDegrees.takeIf { lastCompassEventElapsedMs > 0L && SystemClock.elapsedRealtime() - lastCompassEventElapsedMs <= 1_500L },
+            compassAccuracyLevel = compassAccuracyLevel.takeIf { it != SensorManager.SENSOR_STATUS_UNRELIABLE },
+            headingSource = lastHeadingSource,
             cameraLatitude = camera?.target?.latitude, cameraLongitude = camera?.target?.longitude,
             cameraBearingDegrees = camera?.bearing, cameraZoom = camera?.zoom
         ))
@@ -6510,13 +6571,47 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
     private fun updateUserMarker(location: Location, animationFraction: Float = -1f) {
         if (!mapStyleReady) return
-        val point = Point.fromLngLat(location.longitude, location.latitude)
+        val rendered = Location(location)
+        val now = SystemClock.elapsedRealtime()
+        val compassFresh = lastCompassEventElapsedMs > 0L && now - lastCompassEventElapsedMs <= 1_500L
+        val decision = DeviceHeadingFusion.select(
+            gpsBearingDegrees = location.takeIf { it.hasBearing() }?.bearing,
+            speedMetersPerSecond = location.takeIf { it.hasSpeed() }?.speed,
+            gpsBearingAccuracyDegrees = location.takeIf { it.hasBearingAccuracy() }?.bearingAccuracyDegrees,
+            compassBearingDegrees = compassTrueHeadingDegrees.takeIf { compassFresh },
+            compassAccuracyLevel = compassAccuracyLevel
+        )
+        val targetHeading = decision.bearingDegrees
+        if (targetHeading != null) {
+            val elapsed = if (lastHeadingUpdateElapsedMs > 0L) (now - lastHeadingUpdateElapsedMs).coerceIn(1L, 1_000L) else 1_000L
+            val tauSeconds = if (decision.source == "COMPASS") 0.18f else 0.12f
+            val alpha = (1.0 - kotlin.math.exp(-elapsed / (tauSeconds * 1000.0))).toFloat().coerceIn(0.05f, 0.90f)
+            val smoothedHeading = lastRenderedHeadingDegrees?.let {
+                DeviceHeadingFusion.interpolate(it, targetHeading, alpha)
+            } ?: targetHeading
+            rendered.bearing = smoothedHeading
+            rendered.setBearing(smoothedHeading)
+            lastRenderedHeadingDegrees = smoothedHeading
+            lastHeadingUpdateElapsedMs = now
+            lastHeadingSource = decision.source
+        } else {
+            val heldHeading = lastRenderedHeadingDegrees ?: location.takeIf { it.hasBearing() }?.bearing
+            if (heldHeading != null) {
+                rendered.bearing = heldHeading
+                rendered.setBearing(heldHeading)
+            } else {
+                rendered.removeBearing()
+            }
+            lastHeadingSource = "HOLD"
+        }
+        displayedMarkerLocation = Location(rendered)
+        val point = Point.fromLngLat(rendered.longitude, rendered.latitude)
         val positionFeature = Feature.fromGeometry(point).apply {
-            addNumberProperty("bearing", if (location.hasBearing()) location.bearing.toDouble() else 0.0)
+            addNumberProperty("bearing", if (rendered.hasBearing()) rendered.bearing.toDouble() else 0.0)
         }
         val source = map?.style?.getSource(SOURCE_USER) as? GeoJsonSource ?: return
         source.setGeoJson(positionFeature)
-        appendArrowTelemetrySample(location, animationFraction)
+        appendArrowTelemetrySample(rendered, animationFraction)
     }
 
     private fun updateMapForLocation(location: Location, forceCenter: Boolean, updateMarker: Boolean = true) {
@@ -6616,6 +6711,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             if (themeMode == "auto") lightSensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
             ambientTemperatureSensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         }
+        if (dashboardStarted) registerNavigationHeadingSensor()
         updateDeviceStatusText()
         if (dashboardStarted) requestGps()
     }
