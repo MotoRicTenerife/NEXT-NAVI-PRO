@@ -256,6 +256,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var speedLimitLookupInFlight = false
     // One startup-only nearest-road candidate; it is never trusted for overspeed alerts.
     private var speedLimitInitialPositionLookupAttempted = false
+    private var lastSpeedLimitPositionLookupMs = 0L
     private var speedLimitProvisional = false
     // Where/when the currently displayed provider limit was verified, and the paid-provider backoff.
     private var speedLimitVerifiedFix: SpeedLimitFix? = null
@@ -4951,7 +4952,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Snap-to-Roads flow below remains unchanged and replaces it when a real trace exists.
         val stationary = !location.hasSpeed() || location.speed <= 1.5f
         if (stationary) {
-            if (!speedLimitInitialPositionLookupAttempted) {
+            if (!speedLimitInitialPositionLookupAttempted ||
+                (currentSpeedLimit == null && !speedLimitLookupInFlight &&
+                    System.currentTimeMillis() - lastSpeedLimitPositionLookupMs >= 60_000L)) {
                 if (!location.hasAccuracy() || location.accuracy > 35f) {
                     updateSpeedLimitDisplay()
                     return
@@ -4961,6 +4964,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return
                 }
                 speedLimitInitialPositionLookupAttempted = true
+                lastSpeedLimitPositionLookupMs = System.currentTimeMillis()
                 val initialLocation = Location(location)
                 val initialFix = speedLimitFix(initialLocation, System.currentTimeMillis())
                 speedLimitLookupInFlight = true
@@ -5832,21 +5836,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 camera to alongRouteMeters.toFloat()
             }.minByOrNull { it.second }
         } else {
-            // Without a route, require a close camera in the direction of travel
-            // instead of announcing every camera inside a 650 m circle.
-            if (!location.hasBearing() || location.speed < 6f) return
-            radarCameras.mapNotNull { camera ->
-                val target = Location("radar").apply {
-                    latitude = camera.point.latitude
-                    longitude = camera.point.longitude
-                }
-                val directMeters = location.distanceTo(target)
-                if (directMeters > 250f) return@mapNotNull null
-                val bearingToCamera = location.bearingTo(target)
-                val delta = abs(((bearingToCamera - location.bearing + 540f) % 360f) - 180f)
-                if (delta > 40f) return@mapNotNull null
-                camera to directMeters
-            }.minByOrNull { it.second }
+            // No active route means we do not yet have a defensible road/carriageway
+            // identity. A radial-distance + heading cone is unsafe on motorways:
+            // it can select a camera on a parallel/complanar road. Keep map markers
+            // visible, but suppress proximity voice alerts until road matching exists.
+            return
         } ?: return
 
         val now = System.currentTimeMillis()
