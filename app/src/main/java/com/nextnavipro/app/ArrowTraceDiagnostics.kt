@@ -11,11 +11,13 @@ internal data class ArrowTraceSample(
     val renderedBearingDegrees: Float?, val gpsAccuracyMeters: Float?, val bearingAccuracyDegrees: Float?,
     val gpsSpeedMetersPerSecond: Float?, val animationFraction: Float?,
     val cameraLatitude: Double?, val cameraLongitude: Double?,
-    val cameraBearingDegrees: Double?, val cameraZoom: Double?
+    val cameraBearingDegrees: Double?, val cameraZoom: Double?,
+    val compassHeadingDegrees: Float? = null, val compassAccuracyLevel: Int? = null,
+    val headingSource: String = "NONE"
 )
 
 internal object ArrowTraceDiagnostics {
-    private const val HEADER = "timestamp_epoch_ms,elapsed_realtime_ns,gps_fix_epoch_ms,gps_fix_elapsed_realtime_ns,raw_latitude,raw_longitude,raw_bearing_deg,filtered_latitude,filtered_longitude,filtered_bearing_deg,rendered_latitude,rendered_longitude,rendered_bearing_deg,gps_accuracy_m,gps_bearing_accuracy_deg,gps_speed_mps,animation_fraction,camera_latitude,camera_longitude,camera_bearing_deg,camera_zoom"
+    private const val HEADER = "timestamp_epoch_ms,elapsed_realtime_ns,gps_fix_epoch_ms,gps_fix_elapsed_realtime_ns,raw_latitude,raw_longitude,raw_bearing_deg,filtered_latitude,filtered_longitude,filtered_bearing_deg,rendered_latitude,rendered_longitude,rendered_bearing_deg,gps_accuracy_m,gps_bearing_accuracy_deg,gps_speed_mps,animation_fraction,camera_latitude,camera_longitude,camera_bearing_deg,camera_zoom,compass_true_heading_deg,compass_accuracy_level,heading_source"
     fun toCsv(samples: List<ArrowTraceSample>, includeHeader: Boolean = true): String = buildString {
         if (includeHeader) appendLine(HEADER)
         for (s in samples) {
@@ -32,7 +34,9 @@ internal object ArrowTraceDiagnostics {
             append(n(s.gpsSpeedMetersPerSecond?.toDouble(),2)).append(',')
             append(n(s.animationFraction?.toDouble(),4)).append(',')
             append(n(s.cameraLatitude,7)).append(',').append(n(s.cameraLongitude,7)).append(',')
-            append(n(s.cameraBearingDegrees,2)).append(',').appendLine(n(s.cameraZoom,3))
+            append(n(s.cameraBearingDegrees,2)).append(',').append(n(s.cameraZoom,3)).append(',')
+            append(n(s.compassHeadingDegrees?.toDouble(),1)).append(',')
+            append(s.compassAccuracyLevel?.toString() ?: "").append(',').appendLine(s.headingSource.replace(',', '_'))
         }
     }
     private fun n(value: Double?, decimals: Int): String =

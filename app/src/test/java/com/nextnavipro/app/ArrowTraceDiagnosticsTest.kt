@@ -13,7 +13,8 @@ class ArrowTraceDiagnosticsTest {
             renderedLatitude = 28.1002, renderedLongitude = -16.2002, renderedBearingDegrees = 91.5f,
             gpsAccuracyMeters = 3f, bearingAccuracyDegrees = 4f, gpsSpeedMetersPerSecond = 8f,
             animationFraction = 0.5f, cameraLatitude = 28.1, cameraLongitude = -16.2,
-            cameraBearingDegrees = 90.0, cameraZoom = 16.5
+            cameraBearingDegrees = 90.0, cameraZoom = 16.5,
+            compassHeadingDegrees = 92.5f, compassAccuracyLevel = 3, headingSource = "COMPASS"
         )
         val csv = ArrowTraceDiagnostics.toCsv(listOf(sample))
         assertTrue(csv.contains("raw_bearing_deg,filtered_latitude,filtered_longitude,filtered_bearing_deg"))
@@ -21,6 +22,8 @@ class ArrowTraceDiagnosticsTest {
         assertTrue(csv.contains("28.1002000,-16.2002000,91.5"))
         assertTrue(csv.contains("900,1900000"))
         assertTrue(csv.contains("4.0,8.00"))
+        assertTrue(csv.contains("compass_true_heading_deg,compass_accuracy_level,heading_source"))
+        assertTrue(csv.contains("92.5,3,COMPASS"))
     }
 
     @Test fun appendBatchOmitsRepeatedHeader() {
