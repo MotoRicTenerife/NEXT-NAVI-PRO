@@ -177,3 +177,40 @@ Alert policy:
 ## Safety and scope
 
 This is a design/audit document, not a claim that the code has been fixed or that an APK has passed validation. No production branch, Render service, environment variable, API key or deployed backend was changed during this audit. The next implementation must be a small, testable set of commits on this audit branch, followed by GitHub Actions CI and a controlled on-device field test.
+
+
+## Additional backend audit: Render / TomTom
+
+The active Render-connected backend branch `fix/jarvis-render-backend` was inspected read-only (`backend/jarvis-render/server.js`, `speedLimitPosition.js`).
+
+### Startup / stationary lookup
+
+- `POST /speed-limit-position` calls TomTom Reverse Geocoding with `returnSpeedLimit=true` and `radius=50`.
+- The Android client currently sends only latitude and longitude from `findLimitAtPosition()`; although the Render endpoint accepts an optional bearing, it is not sent by the client.
+- `parseTomTomPositionSpeedLimit()` reads only `addresses[0]`, extracts its speed limit and road name, and does not require a specific `matchType` or validate that the result is the intended carriageway.
+- This is a weak source for startup display on a motorway with parallel carriageways. It must remain provisional and should not be promoted to a confirmed limit without a moving trace/road-identity confirmation.
+
+### Moving trace lookup
+
+- `POST /speed-limit` uses TomTom Snap to Roads and sends each trace point's heading when available.
+- The current request asks for only `route.properties{id,speedLimits,address}`.
+- It does not request `projectedPoints.routeIndex/snapResult`, route geometry, `formOfWay`, `roadUse`, `laneInfo`, or `confidence`.
+- The backend then chooses the final returned route element as the current segment. This is weaker than using the provider's explicit projected-point-to-road-element association.
+- The route prefetch endpoint does request projected point mapping, but its returned client payload currently does not preserve all road-identity attributes.
+- TomTom's documented allowed `vehicleType` values are PassengerCar, Bus, Truck, Emergency and Taxi; Motorcycle is not listed. Do not send an unsupported motorcycle value. Keep PassengerCar for now and record this as a provider limitation.
+
+### Required backend improvement (separate, guarded PR)
+
+For `/speed-limit` and `/speed-limit-route`, request and parse:
+- `projectedPoints.properties.routeIndex` and `snapResult`;
+- route element `id`, geometry, `formOfWay`, `roadUse`, `laneInfo.numberOfLanes`, `confidence`;
+- explicit maximum speed limits and road address.
+
+Then:
+- associate the latest accepted GPS point to its explicit projected road element using `routeIndex`, not merely the last route element in the response;
+- return a stable road-segment ID and the match confidence to Android;
+- treat OffRoad, MaxDistanceExceeded, missing routeIndex, low confidence or ambiguous adjacent candidates as unknown;
+- keep the API key exclusively on Render and retain the existing admission guard, Retry-After handling and request budgets;
+- cache by stable segment ID/direction and use bounded retry state in Android.
+
+Do not change the Render-connected branch as part of the Android radar fix. Make the backend work in a separate PR and validate against mocked TomTom responses first. A live provider smoke test must be GET-only unless the request budget and cost of the POST operation are explicitly approved.
