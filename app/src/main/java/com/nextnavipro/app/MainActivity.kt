@@ -6223,7 +6223,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     radarFetchFailed = true
                     drawRadars()
                     updateRadarLabel()
-                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Restano attivi gli avvisi locali.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Avvisi vocali radar sospesi per sicurezza.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -6302,7 +6302,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         radarText.text = if (displayedRadarCount == 0) {
             when {
                 routeResult != null && routeRadarReady -> "RADAR OSM • 0 controlli censiti sul percorso"
-                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi locali attivi"
+                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi vocali sospesi"
                 routeResult != null -> "RADAR OSM • analisi del percorso…"
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
                 radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"
