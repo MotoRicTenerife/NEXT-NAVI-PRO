@@ -256,6 +256,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var speedLimitLookupInFlight = false
     // One startup-only nearest-road candidate; it is never trusted for overspeed alerts.
     private var speedLimitInitialPositionLookupAttempted = false
+    private var lastSpeedLimitPositionLookupMs = 0L
     private var speedLimitProvisional = false
     // Where/when the currently displayed provider limit was verified, and the paid-provider backoff.
     private var speedLimitVerifiedFix: SpeedLimitFix? = null
@@ -4951,7 +4952,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Snap-to-Roads flow below remains unchanged and replaces it when a real trace exists.
         val stationary = !location.hasSpeed() || location.speed <= 1.5f
         if (stationary) {
-            if (!speedLimitInitialPositionLookupAttempted) {
+            if (!speedLimitInitialPositionLookupAttempted ||
+                (currentSpeedLimit == null && !speedLimitLookupInFlight &&
+                    System.currentTimeMillis() - lastSpeedLimitPositionLookupMs >= 60_000L)) {
                 if (!location.hasAccuracy() || location.accuracy > 35f) {
                     updateSpeedLimitDisplay()
                     return
@@ -4961,6 +4964,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     return
                 }
                 speedLimitInitialPositionLookupAttempted = true
+                lastSpeedLimitPositionLookupMs = System.currentTimeMillis()
                 val initialLocation = Location(location)
                 val initialFix = speedLimitFix(initialLocation, System.currentTimeMillis())
                 speedLimitLookupInFlight = true
@@ -5792,62 +5796,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (!location.hasAccuracy() || location.accuracy > 18f ||
             !location.hasSpeed() || location.speed < 4f) return
 
-        val route = routeResult
-        val routeCameras = if (route != null && route.points.size >= 2 && routeRadarReady) routeRadarCameras else radarCameras
-        val candidates = if (route != null && route.points.size >= 2) {
-            var currentIndex = 0
-            var currentDistance = Float.MAX_VALUE
-            for (i in route.points.indices) {
-                val p = route.points[i]
-                val d = FloatArray(1)
-                Location.distanceBetween(location.latitude, location.longitude, p.latitude, p.longitude, d)
-                if (d[0] < currentDistance) {
-                    currentDistance = d[0]
-                    currentIndex = i
-                }
-            }
-            val cumulative = DoubleArray(route.points.size)
-            for (i in 1 until route.points.size) {
-                val a = route.points[i - 1]
-                val b = route.points[i]
-                val d = FloatArray(1)
-                Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, d)
-                cumulative[i] = cumulative[i - 1] + d[0]
-            }
-            routeCameras.mapNotNull { camera ->
-                var cameraIndex = -1
-                var crossTrackMeters = Float.MAX_VALUE
-                for (i in route.points.indices) {
-                    val p = route.points[i]
-                    val d = FloatArray(1)
-                    Location.distanceBetween(camera.point.latitude, camera.point.longitude, p.latitude, p.longitude, d)
-                    if (d[0] < crossTrackMeters) {
-                        crossTrackMeters = d[0]
-                        cameraIndex = i
-                    }
-                }
-                if (cameraIndex < currentIndex || crossTrackMeters > 22f) return@mapNotNull null
-                val alongRouteMeters = cumulative[cameraIndex] - cumulative[currentIndex]
-                if (alongRouteMeters !in 0.0..650.0) return@mapNotNull null
-                camera to alongRouteMeters.toFloat()
-            }.minByOrNull { it.second }
-        } else {
-            // Without a route, require a close camera in the direction of travel
-            // instead of announcing every camera inside a 650 m circle.
-            if (!location.hasBearing() || location.speed < 6f) return
-            radarCameras.mapNotNull { camera ->
-                val target = Location("radar").apply {
-                    latitude = camera.point.latitude
-                    longitude = camera.point.longitude
-                }
-                val directMeters = location.distanceTo(target)
-                if (directMeters > 250f) return@mapNotNull null
-                val bearingToCamera = location.bearingTo(target)
-                val delta = abs(((bearingToCamera - location.bearing + 540f) % 360f) - 180f)
-                if (delta > 40f) return@mapNotNull null
-                camera to directMeters
-            }.minByOrNull { it.second }
-        } ?: return
+        val route = routeResult ?: return
+        if (route.points.size < 2 || !routeRadarReady) return
+        // Only use cameras already projected onto the active route and direction-checked.
+        // Project both rider and camera onto route segments (not sparse vertices), then
+        // compare their along-route positions. This avoids vertex quantization at bends.
+        val candidates = routeRadarCameras.mapNotNull { camera ->
+            val aheadMeters = RouteRadarPlanner.distanceAhead(
+                NavPoint(location.latitude, location.longitude),
+                camera.point,
+                route.points,
+                riderCorridorMeters = maxOf(25.0, location.accuracy.toDouble() * 1.5),
+                cameraCorridorMeters = 22.0
+            ) ?: return@mapNotNull null
+            if (aheadMeters !in 0.0..650.0) return@mapNotNull null
+            camera to aheadMeters.toFloat()
+        }.minByOrNull { it.second } ?: return
 
         val now = System.currentTimeMillis()
         if (candidates.first.osmId == lastRadarAlertId && now - lastRadarAlertMs < 90_000L) return
@@ -6259,7 +6223,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     radarFetchFailed = true
                     drawRadars()
                     updateRadarLabel()
-                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Restano attivi gli avvisi locali.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Controlli sul percorso non verificabili: dati OSM non disponibili. Avvisi vocali radar sospesi per sicurezza.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -6338,7 +6302,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         radarText.text = if (displayedRadarCount == 0) {
             when {
                 routeResult != null && routeRadarReady -> "RADAR OSM • 0 controlli censiti sul percorso"
-                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi locali attivi"
+                routeResult != null && radarFetchFailed -> "RADAR OSM • percorso non verificabile, avvisi vocali sospesi"
                 routeResult != null -> "RADAR OSM • analisi del percorso…"
                 radarFetchFailed -> "RADAR OSM • server non disponibile, riprovo"
                 radarCacheCoversCurrentArea && RadarCache.lastUpdatedAt(this) > 0L -> "RADAR OSM • 0 radar OSM nell'area"

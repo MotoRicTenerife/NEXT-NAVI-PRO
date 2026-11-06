@@ -38,6 +38,47 @@ object RouteRadarPlanner {
         return matches.values.sortedBy { it.distanceFromStartMeters }
     }
 
+    /**
+     * Returns the camera's along-route distance ahead of the rider.
+     * Both positions are projected onto continuous route segments, so sparse route
+     * vertices do not introduce large distance jumps around bends.
+     *
+     * Null means either position is outside its allowed route corridor or the route
+     * is too short to establish a defensible match.
+     */
+    fun distanceAhead(
+        rider: NavPoint,
+        camera: NavPoint,
+        route: List<NavPoint>,
+        riderCorridorMeters: Double = 30.0,
+        cameraCorridorMeters: Double = 22.0
+    ): Double? {
+        if (route.size < 2) return null
+        val cumulative = DoubleArray(route.size)
+        for (i in 1 until route.size) {
+            cumulative[i] = cumulative[i - 1] + distance(route[i - 1], route[i])
+        }
+        fun locate(point: NavPoint): Pair<Double, Double> {
+            var bestCrossTrack = Double.POSITIVE_INFINITY
+            var bestAlong = 0.0
+            for (i in 0 until route.lastIndex) {
+                val segmentLength = distance(route[i], route[i + 1])
+                if (segmentLength <= 0.1) continue
+                val projection = project(point, route[i], route[i + 1])
+                if (projection.distanceMeters < bestCrossTrack) {
+                    bestCrossTrack = projection.distanceMeters
+                    bestAlong = cumulative[i] + segmentLength * projection.fraction
+                }
+            }
+            return bestAlong to bestCrossTrack
+        }
+        val riderPosition = locate(rider)
+        val cameraPosition = locate(camera)
+        if (riderPosition.second > riderCorridorMeters ||
+            cameraPosition.second > cameraCorridorMeters) return null
+        return cameraPosition.first - riderPosition.first
+    }
+
     /** Samples the route at a bounded interval; used to form small Overpass query batches. */
     fun sample(route: List<NavPoint>, intervalMeters: Double = 1800.0): List<NavPoint> {
         if (route.isEmpty()) return emptyList()
