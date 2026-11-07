@@ -84,6 +84,10 @@ internal class NavigationSpeechCoordinator(
         try { tts.stop() } catch (_: Exception) { }
     }
 
+    fun discardPendingByPrefix(prefix: String) = onMain {
+        pending.removeAll { it.key.startsWith(prefix) }
+    }
+
     fun clear() = onMain {
         generation++
         pending.clear()
