@@ -1260,9 +1260,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
                 PropertyFactory.iconImage("next-user-arrow-icon"),
                 PropertyFactory.iconSize(1.0f),
-                // The arrow bitmap's tip is at its top edge: anchor the GPS coordinate there,
-                // not at the bitmap center (which displaced the visible tip by ~40-60 m).
+                // The arrow bitmap's tip is 6 px below its top edge. Anchor at the top
+                // and offset the image upward so the GPS coordinate lands on the actual tip.
+                // The former center anchor displaced the visible tip by ~40-60 m at nav zoom.
                 PropertyFactory.iconAnchor("top"),
+                PropertyFactory.iconOffset(arrayOf(0f, -6f)),
                 PropertyFactory.iconRotate(Expression.get("bearing")),
                 PropertyFactory.iconRotationAlignment("map"),
                 PropertyFactory.iconAllowOverlap(true),
