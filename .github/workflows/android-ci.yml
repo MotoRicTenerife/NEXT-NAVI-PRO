@@ -107,14 +107,14 @@ jobs:
           RUN_PAID_JARVIS_SMOKE_TESTS: ${{ github.event_name == 'push' && 'true' || 'false' }}
         run: |
           HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          # Render deploys from backend/jarvis-render, not from unrelated Android/workflow commits.
-          # Always compare the live service with the latest backend-changing commit in this head.
-          export EXPECTED_RENDER_REVISION="$(git log -1 --format=%H "$HEAD_SHA" -- backend/jarvis-render/)"
+          # Render health reports the full repository commit deployed by the service,
+          # including merge commits. Comparing only the last backend-path commit is incorrect.
+          export EXPECTED_RENDER_REVISION="$HEAD_SHA"
           if [ -z "$EXPECTED_RENDER_REVISION" ]; then
-            echo "::error::Could not identify the latest backend commit for this revision."
+            echo "::error::Could not identify the commit expected on Render."
             exit 1
           fi
-          echo "Checking that Render serves the latest backend revision $EXPECTED_RENDER_REVISION."
+          echo "Checking that Render serves deployed commit $EXPECTED_RENDER_REVISION."
           python - <<'PY'
           import json, os, sys, time, urllib.error, urllib.parse, urllib.request
           endpoint = os.environ.get("JARVIS_ENDPOINT", "").strip()
