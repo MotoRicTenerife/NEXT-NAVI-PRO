@@ -4454,6 +4454,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun clearRoute() {
+        // A cancelled or completed route must never leave old turn prompts queued.
+        navigationSpeech?.discardPendingByPrefix("turn-")
         // A dashboard-started recording is a standalone trip log and must survive
         // arrival, route cancellation, or clearing a destination.
         if (!recordingIndependentOfNavigation) {
