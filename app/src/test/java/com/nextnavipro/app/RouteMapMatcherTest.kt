@@ -16,6 +16,30 @@ class RouteMapMatcherTest {
         assertTrue(match.fraction in 0.45..0.55)
     }
 
+    @Test fun trackerPreservesFractionalProgressAndExposesExactManeuverDistance() {
+        val route = listOf(NavPoint(28.0, -16.0), NavPoint(28.0, -15.999))
+        val tracker = RouteProgressTracker()
+        val routeLength = tracker.routeLengthMeters(route)
+        val fix = tracker.match(
+            points = route,
+            latitude = 28.00002,
+            longitude = -15.99975,
+            accuracyMeters = 5.0,
+            bearingDegrees = 90f,
+            speedMetersPerSecond = 8.0,
+            elapsedRealtimeMs = 1_000L
+        )
+        assertNotNull(fix)
+        val matched = fix!!
+        assertTrue("Projection should retain its fractional segment position", matched.fraction in 0.20..0.30)
+        assertTrue("Along-route progress should be measured from the projection, not the segment start",
+            matched.alongRouteMeters in (routeLength * 0.20)..(routeLength * 0.30))
+        val maneuverDistance = tracker.distanceAtPoint(route, 1)!! - matched.alongRouteMeters
+        assertTrue("Distance to the next maneuver must use the exact projected position",
+            maneuverDistance in (routeLength * 0.70)..(routeLength * 0.80))
+        assertEquals(routeLength, tracker.distanceAtPoint(route, 1)!!, 0.01)
+    }
+
     @Test fun rejectsInvalidAndTooShortGeometry() {
         assertNull(RouteMapMatcher.match(emptyList(), 0.0, 0.0))
         assertNull(RouteMapMatcher.match(listOf(NavPoint(0.0, 0.0)), 0.0, 0.0))
