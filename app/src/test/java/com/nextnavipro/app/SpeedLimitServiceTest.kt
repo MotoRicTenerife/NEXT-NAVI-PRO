@@ -35,6 +35,14 @@ class SpeedLimitServiceTest {
         assertEquals(90f, SpeedLimitService.headingAxisDifference(0f, 90f), 0.001f)
     }
 
+    @Test fun selectsDirectionalLimitsOnlyWhenHeadingIsClear() {
+        assertEquals(30, SpeedLimitService.selectLimit("50", "30", "70", 0f, 0f))
+        assertEquals(70, SpeedLimitService.selectLimit("50", "30", "70", 180f, 0f))
+        assertEquals(50, SpeedLimitService.selectLimit("50", "30", "70", 90f, 0f))
+        assertEquals(30, SpeedLimitService.selectLimit("", "30", "30", null, null))
+        assertNull(SpeedLimitService.selectLimit("", "30", "70", null, null))
+    }
+
     @Test fun rejectsImplausibleNumericValues() {
         assertNull(SpeedLimitService.parseLimit("0"))
         assertNull(SpeedLimitService.parseLimit("250"))

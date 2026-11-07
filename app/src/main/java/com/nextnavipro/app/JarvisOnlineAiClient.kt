@@ -14,8 +14,11 @@ import kotlin.concurrent.thread
  * 200 {"reply":"..."}
  */
 object JarvisOnlineAiClient {
+    data class LiveLocation(val latitude: Double, val longitude: Double)
+    data class Personality(val preset: String, val irony: Int, val warmth: Int, val energy: Int, val concision: Int)
+
     private const val CONNECT_TIMEOUT_MS = 4000
-    private const val READ_TIMEOUT_MS = 7000
+    private const val READ_TIMEOUT_MS = 50000
     private const val MAX_REPLY_CHARS = 800
 
     private val endpoint: String
@@ -24,7 +27,16 @@ object JarvisOnlineAiClient {
     fun isConfigured(): Boolean =
         endpoint.startsWith("https://", ignoreCase = true)
 
-    fun ask(message: String, callback: (Result<String>) -> Unit) {
+    fun ask(
+        message: String,
+        language: String = java.util.Locale.getDefault().toLanguageTag(),
+        assistantName: String = "Jarvis",
+        location: LiveLocation? = null,
+        history: List<JarvisMemoryStore.Message> = emptyList(),
+        summary: String = "",
+        personality: Personality = Personality("jarvis", 45, 80, 55, 75),
+        callback: (Result<String>) -> Unit
+    ) {
         val target = endpoint
         if (!target.startsWith("https://", ignoreCase = true)) {
             callback(Result.failure(IllegalStateException("AI online non configurata")))
@@ -49,8 +61,34 @@ object JarvisOnlineAiClient {
                 }
                 val payload = JSONObject()
                     .put("message", cleanMessage)
-                    .put("language", "it-IT")
+                    .put("language", language.ifBlank { java.util.Locale.getDefault().toLanguageTag() })
+                    .put("assistantName", assistantName.trim().take(30).ifBlank { "Jarvis" })
                     .put("app", "NEXT NAVI PRO")
+                    .put("history", org.json.JSONArray().apply {
+                        history.takeLast(10).forEach { entry ->
+                            val role = entry.role.takeIf { it == "user" || it == "assistant" } ?: return@forEach
+                            val content = entry.content.trim().take(600)
+                            if (content.isNotBlank()) put(JSONObject()
+                                .put("role", role)
+                                .put("content", content))
+                        }
+                    })
+                    .put("summary", summary.trim().take(2500))
+                    .put("personality", JSONObject()
+                        .put("preset", personality.preset.take(24))
+                        .put("irony", personality.irony.coerceIn(0, 100))
+                        .put("warmth", personality.warmth.coerceIn(0, 100))
+                        .put("energy", personality.energy.coerceIn(0, 100))
+                        .put("concision", personality.concision.coerceIn(0, 100)))
+                    .apply {
+                        if (location != null &&
+                            location.latitude.isFinite() && location.latitude in -90.0..90.0 &&
+                            location.longitude.isFinite() && location.longitude in -180.0..180.0) {
+                            put("location", JSONObject()
+                                .put("latitude", location.latitude)
+                                .put("longitude", location.longitude))
+                        }
+                    }
                     .toString()
                 connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
                 val status = connection.responseCode
