@@ -6137,19 +6137,20 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (route.maneuvers.isEmpty()) return
         // Select by cumulative distance, not by skipping two geometry vertices. A sparse
         // route can have 30-60 m between vertices, so index-based skipping delayed turns.
-        val nextPair = route.maneuvers.withIndex().firstOrNull { (_, maneuver) ->
-            val maneuverAlong = routeProgressTracker.distanceAtPoint(route.points, maneuver.pointIndex)
-            maneuverAlong != null && maneuverAlong >= match.alongRouteMeters - 8.0
-        }
-        if (nextPair == null) {
+        val nextManeuver = RouteManeuverProgress.next(
+            routePoints = route.points,
+            maneuvers = route.maneuvers,
+            currentAlongRouteMeters = match.alongRouteMeters,
+            progressTracker = routeProgressTracker
+        )
+        if (nextManeuver == null) {
             if (::maneuverIcon.isInitialized) maneuverIcon.text = ""
             if (::routeText.isInitialized) routeText.text = "PROSEGUI SUL PERCORSO"
             return
         }
-        val maneuverIndex = nextPair.index
-        val maneuver = nextPair.value
-        val maneuverAlong = routeProgressTracker.distanceAtPoint(route.points, maneuver.pointIndex) ?: match.alongRouteMeters
-        val distanceToTurn = (maneuverAlong - match.alongRouteMeters).coerceAtLeast(0.0)
+        val maneuverIndex = nextManeuver.index
+        val maneuver = route.maneuvers[maneuverIndex]
+        val distanceToTurn = nextManeuver.distanceMeters
         // Use the typed maneuver to catch a contradictory left/right word in the
         // server narration. The same corrected text drives both the display and voice.
         val instruction = ManeuverIconResolver.correctedInstruction(maneuver.type, maneuver.instruction)
