@@ -212,6 +212,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     @Volatile private var prefetchedRouteLimits: List<TomTomRouteLimitSample> = emptyList()
     private var routeProgressInitialized = false
     private var lastRouteProgressIndex = 0
+    private var lastRouteProgressAlongMeters = 0.0
     private var voiceGuide: TextToSpeech? = null
     private var voiceGuideReady = false
     private var speechRecognizer: SpeechRecognizer? = null
@@ -1259,6 +1260,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
                 PropertyFactory.iconImage("next-user-arrow-icon"),
                 PropertyFactory.iconSize(1.0f),
+                // The arrow bitmap's tip is at its top edge: anchor the GPS coordinate there,
+                // not at the bitmap center (which displaced the visible tip by ~40-60 m).
+                PropertyFactory.iconAnchor("top"),
                 PropertyFactory.iconRotate(Expression.get("bearing")),
                 PropertyFactory.iconRotationAlignment("map"),
                 PropertyFactory.iconAllowOverlap(true),
@@ -2112,7 +2116,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val route = routeResult
         val match = if (rejectionStatus == null && route != null && route.points.size >= 2)
             findRouteProgressIndex(route, location) else null
-        val validMatch = match?.takeIf { it.second.isFinite() && it.second < Float.MAX_VALUE }
+        val validMatch = match?.takeIf { it.crossTrackMeters.isFinite() && it.crossTrackMeters < Float.MAX_VALUE }
         gpsDiagnosticSamples.add(
             GpsTraceSample(
                 timestampEpochMs = location.time,
@@ -2135,8 +2139,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         else -> null
                     }
                 }.distinct().joinToString("/"),
-                routeSegmentIndex = validMatch?.first,
-                routeDistanceMeters = validMatch?.second,
+                routeSegmentIndex = validMatch?.segmentIndex,
+                routeDistanceMeters = validMatch?.crossTrackMeters,
                 matchStatus = rejectionStatus ?: when {
                     route == null -> "NO_ACTIVE_ROUTE"
                     validMatch == null -> "NO_CONFIDENT_MATCH"
@@ -5011,12 +5015,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val activeRoute = routeResult
         if (activeRoute != null && prefetchedRouteLimits.isNotEmpty()) {
             val progress = findRouteProgressIndex(activeRoute, location)
-            if (progress.second.isFinite() && progress.second < Float.MAX_VALUE) {
+            if (progress.crossTrackMeters.isFinite() && progress.crossTrackMeters < Float.MAX_VALUE) {
                 val cachedLimit = RouteSpeedLimitCacheMatcher.findEligibleSample(
                     routePoints = activeRoute.points,
                     samples = prefetchedRouteLimits,
-                    progressIndex = progress.first,
-                    progressDistanceMeters = progress.second,
+                    progressIndex = progress.segmentIndex,
+                    progressDistanceMeters = progress.crossTrackMeters,
                     accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
                     bearingDegrees = location.bearing.takeIf { location.hasBearing() },
                     speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() },
@@ -5024,7 +5028,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 )
                 if (cachedLimit?.speedLimitKmh != null) {
                     currentRoadMatch = RoadMatch(cachedLimit.road, cachedLimit.ref, cachedLimit.speedLimitKmh,
-                        null, progress.second, location.bearing.takeIf { location.hasBearing() } ?: 0f)
+                        null, progress.crossTrackMeters, location.bearing.takeIf { location.hasBearing() } ?: 0f)
                     currentSpeedLimit = cachedLimit.speedLimitKmh
                     speedLimitProvisional = false
                     speedLimitVerifiedFix = nowFix
@@ -5898,9 +5902,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val routeMatch = findRouteProgressIndex(route, location)
         // A failed/low-confidence match returns Float.MAX_VALUE while preserving the last index.
         // Never interpret that fallback index as proof that the rider reached the route end.
-        val routeMatchConfident = routeMatch.second.isFinite() && routeMatch.second < Float.MAX_VALUE
-        val nearRouteEnd = routeMatchConfident && route.points.size >= 2 &&
-            routeMatch.first >= (route.points.lastIndex * 0.85f).toInt()
+        val routeMatchConfident = routeMatch.crossTrackMeters.isFinite() && routeMatch.crossTrackMeters < Float.MAX_VALUE
+        val routeLengthMeters = routeProgressTracker.routeLengthMeters(route.points)
+        val nearRouteEnd = routeMatchConfident && routeLengthMeters > 0.0 &&
+            routeMatch.alongRouteMeters >= routeLengthMeters * 0.85
         val movingAwayAfterPassing = nearRouteEnd &&
             arrivalClosestMeters <= maxOf(70f, arrivalRadius) &&
             distanceToDestination - arrivalClosestMeters >= 35f &&
@@ -6027,6 +6032,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun resetRouteProgress() {
         routeProgressInitialized = false
         lastRouteProgressIndex = 0
+        lastRouteProgressAlongMeters = 0.0
         routeProgressTracker.reset()
     }
 
@@ -6035,8 +6041,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
      * window reduces jumps to a parallel carriageway or a distant section of a looping route.
      * Bearing is a soft tie-breaker only when the device reports meaningful forward motion.
      */
-    private fun findRouteProgressIndex(route: RouteResult, location: Location): Pair<Int, Float> {
-        if (route.points.size < 2) return 0 to Float.MAX_VALUE
+    private data class RouteProgressPosition(
+        val segmentIndex: Int,
+        val crossTrackMeters: Float,
+        val alongRouteMeters: Double
+    )
+
+    private fun findRouteProgressIndex(route: RouteResult, location: Location): RouteProgressPosition {
+        if (route.points.size < 2) return RouteProgressPosition(0, Float.MAX_VALUE, 0.0)
         val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 20.0
         val heading = location.bearing.takeIf {
             location.hasBearing() && location.hasSpeed() && location.speed >= 3.0f &&
@@ -6055,14 +6067,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             bearingDegrees = heading,
             speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
             elapsedRealtimeMs = elapsedMs
-        ) ?: return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
+        ) ?: return RouteProgressPosition(
+            if (routeProgressInitialized) lastRouteProgressIndex else 0,
+            Float.MAX_VALUE,
+            lastRouteProgressAlongMeters
+        )
         val confidenceLimit = minOf(30.0, maxOf(12.0, accuracy * 1.5))
         if (match.distanceMeters <= confidenceLimit) {
             lastRouteProgressIndex = if (routeProgressInitialized) maxOf(lastRouteProgressIndex, match.segmentIndex) else match.segmentIndex
+            lastRouteProgressAlongMeters = maxOf(lastRouteProgressAlongMeters, match.alongRouteMeters)
             routeProgressInitialized = true
-            return lastRouteProgressIndex to match.distanceMeters.toFloat()
+            return RouteProgressPosition(
+                lastRouteProgressIndex,
+                match.distanceMeters.toFloat(),
+                lastRouteProgressAlongMeters
+            )
         }
-        return (if (routeProgressInitialized) lastRouteProgressIndex else 0) to Float.MAX_VALUE
+        return RouteProgressPosition(
+            if (routeProgressInitialized) lastRouteProgressIndex else 0,
+            Float.MAX_VALUE,
+            lastRouteProgressAlongMeters
+        )
     }
 
     private fun updateRouteMetrics(location: Location?) {
@@ -6075,33 +6100,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
 
         val match = findRouteProgressIndex(route, here)
-        val nearestIndex = match.first
-        val nearestMeters = match.second
         val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
         val confidenceLimit = minOf(30f, maxOf(12f, reportedAccuracy * 1.5f))
-        if (nearestMeters > confidenceLimit) {
+        if (match.crossTrackMeters > confidenceLimit) {
             routeMetricsText.text = "GPS INSUFFICIENTE • percorso non agganciato"
             return
         }
-        var remainingMeters = nearestMeters.toDouble()
-        for (i in nearestIndex until route.points.lastIndex) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val segment = FloatArray(1)
-            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
-            remainingMeters += segment[0].toDouble()
-        }
-
-        var totalGeometryMeters = 0.0
-        for (i in 0 until route.points.lastIndex) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val segment = FloatArray(1)
-            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
-            totalGeometryMeters += segment[0].toDouble()
-        }
+        val totalGeometryMeters = routeProgressTracker.routeLengthMeters(route.points)
+        val remainingMeters = (totalGeometryMeters - match.alongRouteMeters).coerceAtLeast(0.0)
         val remainingKm = (remainingMeters / 1000.0).coerceAtLeast(0.0)
-        val totalKm = totalGeometryMeters / 1000.0
+        val totalKm = totalGeometryMeters
         val remainingSeconds = if (totalKm > 0.01) {
             (route.durationSeconds * (remainingKm / totalKm)).toLong().coerceAtLeast(0L)
         } else 0L
@@ -6117,33 +6125,31 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val here = location ?: return
         if (route.points.size < 2) return
         val match = findRouteProgressIndex(route, here)
-        val nearestIndex = match.first
-        val nearestMeters = match.second
         val reportedAccuracy = if (here.hasAccuracy()) here.accuracy else 20f
         val confidenceLimit = minOf(30f, maxOf(12f, reportedAccuracy * 1.5f))
-        updateRouteMetrics(route, nearestIndex)
-        if (nearestMeters > confidenceLimit) {
+        updateRouteMetrics(route, match.alongRouteMeters)
+        if (match.crossTrackMeters > confidenceLimit) {
             if (::routeText.isInitialized && route.maneuvers.isNotEmpty()) {
                 routeText.text = "POSIZIONE FUORI TRACCIA\nAttendo un aggancio affidabile alla strada"
             }
             return
         }
         if (route.maneuvers.isEmpty()) return
+        // Select by cumulative distance, not by skipping two geometry vertices. A sparse
+        // route can have 30-60 m between vertices, so index-based skipping delayed turns.
         val nextPair = route.maneuvers.withIndex().firstOrNull { (_, maneuver) ->
-            maneuver.pointIndex > nearestIndex + 2
-        } ?: route.maneuvers.withIndex().lastOrNull()
-        if (nextPair == null) return
+            val maneuverAlong = routeProgressTracker.distanceAtPoint(route.points, maneuver.pointIndex)
+            maneuverAlong != null && maneuverAlong >= match.alongRouteMeters - 8.0
+        }
+        if (nextPair == null) {
+            if (::maneuverIcon.isInitialized) maneuverIcon.text = ""
+            if (::routeText.isInitialized) routeText.text = "PROSEGUI SUL PERCORSO"
+            return
+        }
         val maneuverIndex = nextPair.index
         val maneuver = nextPair.value
-        var distanceToTurn = 0.0
-        val to = maneuver.pointIndex.coerceAtLeast(nearestIndex).coerceAtMost(route.points.lastIndex)
-        for (i in nearestIndex.coerceAtMost(to) until to) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val segment = FloatArray(1)
-            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
-            distanceToTurn += segment[0]
-        }
+        val maneuverAlong = routeProgressTracker.distanceAtPoint(route.points, maneuver.pointIndex) ?: match.alongRouteMeters
+        val distanceToTurn = (maneuverAlong - match.alongRouteMeters).coerceAtLeast(0.0)
         // Use the typed maneuver to catch a contradictory left/right word in the
         // server narration. The same corrected text drives both the display and voice.
         val instruction = ManeuverIconResolver.correctedInstruction(maneuver.type, maneuver.instruction)
@@ -6197,21 +6203,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
     }
 
-    private fun updateRouteMetrics(route: RouteResult, nearestIndex: Int) {
+    private fun updateRouteMetrics(route: RouteResult, alongRouteMeters: Double) {
         if (!::routeMetricsText.isInitialized) return
         if (route.distanceKm <= 0.0 || route.points.size < 2) {
             routeMetricsText.text = "— km  •  ARRIVO —"
             return
         }
-        var remainingMeters = 0.0
-        val start = nearestIndex.coerceIn(0, route.points.lastIndex)
-        for (i in start until route.points.lastIndex) {
-            val a = route.points[i]
-            val b = route.points[i + 1]
-            val segment = FloatArray(1)
-            Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, segment)
-            remainingMeters += segment[0]
-        }
+        val totalGeometryMeters = routeProgressTracker.routeLengthMeters(route.points)
+        val remainingMeters = (totalGeometryMeters - alongRouteMeters).coerceAtLeast(0.0)
         val remainingKm = (remainingMeters / 1000.0).coerceAtMost(route.distanceKm)
         if (route.durationSeconds <= 0) {
             routeMetricsText.text = String.format(Locale.ITALY, "TRACCIA GPX  •  %.1f km", remainingKm)
