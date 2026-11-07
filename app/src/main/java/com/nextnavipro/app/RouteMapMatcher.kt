@@ -59,7 +59,7 @@ internal object RouteMapMatcher {
  * and ETA both request a match for the same Android Location.
  */
 internal class RouteProgressTracker {
-    data class Match(val segmentIndex: Int, val distanceMeters: Double, val alongRouteMeters: Double)
+    data class Match(val segmentIndex: Int, val distanceMeters: Double, val alongRouteMeters: Double, val fraction: Double)
 
     private var cachedPoints: List<NavPoint>? = null
     private var cumulativeMeters = DoubleArray(0)
@@ -81,6 +81,55 @@ internal class RouteProgressTracker {
         lastResult = null
     }
 
+    /** Total route length in meters, using the same geometry as live matching. */
+    fun routeLengthMeters(points: List<NavPoint>): Double {
+        if (points.size < 2) return 0.0
+        prepareRoute(points)
+        return cumulativeMeters.lastOrNull() ?: 0.0
+    }
+
+    /** Cumulative distance at a route vertex. Out-of-range indices are safely clamped. */
+    fun distanceAtPoint(points: List<NavPoint>, pointIndex: Int): Double? {
+        if (points.size < 2) return null
+        prepareRoute(points)
+        return cumulativeMeters[pointIndex.coerceIn(0, points.lastIndex)]
+    }
+
+    private fun prepareRoute(points: List<NavPoint>) {
+        if (cachedPoints === points) return
+        cachedPoints = points
+        cumulativeMeters = DoubleArray(points.size)
+        for (i in 1 until points.size) {
+            cumulativeMeters[i] = cumulativeMeters[i - 1] +
+                GpxRouteService.distanceMeters(points[i - 1], points[i])
+        }
+        lastAlongMeters = null
+        lastElapsedMs = 0L
+        lastResult = null
+    }
+
+    private fun segmentAtDistance(distanceMeters: Double): Pair<Int, Double> {
+        val lastSegment = (cumulativeMeters.lastIndex - 1).coerceAtLeast(0)
+        var low = 0
+        var high = lastSegment
+        var found = 0
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            if (cumulativeMeters[middle] <= distanceMeters) {
+                found = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        val index = found.coerceIn(0, lastSegment)
+        val length = cumulativeMeters[index + 1] - cumulativeMeters[index]
+        val fraction = if (length > 0.001) {
+            ((distanceMeters - cumulativeMeters[index]) / length).coerceIn(0.0, 1.0)
+        } else 0.0
+        return index to fraction
+    }
+
     fun match(
         points: List<NavPoint>,
         latitude: Double,
@@ -93,17 +142,7 @@ internal class RouteProgressTracker {
         if (points.size < 2 || !latitude.isFinite() || !longitude.isFinite() ||
             latitude !in -90.0..90.0 || longitude !in -180.0..180.0 ||
             !accuracyMeters.isFinite() || accuracyMeters < 0.0) return null
-        if (cachedPoints !== points) {
-            cachedPoints = points
-            cumulativeMeters = DoubleArray(points.size)
-            for (i in 1 until points.size) {
-                cumulativeMeters[i] = cumulativeMeters[i - 1] +
-                    GpxRouteService.distanceMeters(points[i - 1], points[i])
-            }
-            lastAlongMeters = null
-            lastElapsedMs = 0L
-            lastResult = null
-        }
+        prepareRoute(points)
         if (elapsedRealtimeMs == lastElapsedMs && latitude == lastLatitude && longitude == lastLongitude &&
             bearingDegrees == lastBearing && lastResult != null) return lastResult
 
@@ -157,11 +196,16 @@ internal class RouteProgressTracker {
             val score = emissionCost + headingCost + transitionCost
             if (score < selectedScore) {
                 selectedScore = score
-                selected = Match(candidate.segmentIndex, candidate.distanceMeters, along)
+                selected = Match(candidate.segmentIndex, candidate.distanceMeters, along, candidate.fraction)
             }
         }
-        val result = selected ?: return null
-        lastAlongMeters = maxOf(previousAlong ?: result.alongRouteMeters, result.alongRouteMeters)
+        val candidate = selected ?: return null
+        // Route progress is monotonic: tolerate small GPS wander without moving the
+        // guidance cursor backwards. Recompute the segment/fraction at the retained distance.
+        val effectiveAlong = maxOf(previousAlong ?: candidate.alongRouteMeters, candidate.alongRouteMeters)
+        val (effectiveSegment, effectiveFraction) = segmentAtDistance(effectiveAlong)
+        val result = Match(effectiveSegment, candidate.distanceMeters, effectiveAlong, effectiveFraction)
+        lastAlongMeters = effectiveAlong
         lastElapsedMs = elapsedRealtimeMs
         lastLatitude = latitude
         lastLongitude = longitude
