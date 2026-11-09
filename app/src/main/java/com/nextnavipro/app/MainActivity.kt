@@ -320,6 +320,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var navigationArrived = false
     private var lastRawGpsLocation: Location? = null
     private var lastAcceptedFixElapsedMs = 0L
+    private var lastRenderedMarkerFixElapsedMs = 0L
     private var smoothedGpsLocation: Location? = null
     private var lastWeatherUpdateMs = 0L
     private var lastWeatherLocation: Location? = null
@@ -4734,7 +4735,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             }
             val callback = fusedLocationCallback ?: object : FusedLocationCallback() {
                 override fun onLocationResult(result: FusedLocationResult) {
-                    result.lastLocation?.let { onLocationChanged(it) }
+                    // FusedLocationProvider may batch multiple fixes. Process every sample in
+                    // timestamp order for filtering/recording, but render and run expensive
+                    // navigation work only once for the newest accepted fix.
+                    val samples = result.locations
+                    if (samples.isEmpty()) return
+                    if (samples.size == 1) {
+                        onLocationChanged(samples[0])
+                    } else {
+                        samples.dropLast(1).forEach { processLocationFix(it, renderMarker = false, updateNavigation = false) }
+                        processLocationFix(samples.last(), renderMarker = true, updateNavigation = true)
+                    }
                 }
             }.also { fusedLocationCallback = it }
             // Fused GNSS/network/sensor positioning; OsmAnd uses the same provider family
@@ -4795,6 +4806,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     override fun onLocationChanged(location: Location) {
+        processLocationFix(location, renderMarker = true, updateNavigation = true)
+    }
+
+    private fun processLocationFix(location: Location, renderMarker: Boolean, updateNavigation: Boolean) {
         // elapsedRealtimeNanos is monotonic and avoids wall-clock changes making a fresh fix look stale.
         val ageMs = if (location.elapsedRealtimeNanos > 0L) {
             ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
@@ -4817,8 +4832,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val previousSpeedForPrediction = previousRaw?.takeIf { it.hasSpeed() }?.speed ?: location.speed
         val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
-        val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceIn(0L, 2000L) else 0L
+        val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceAtLeast(0L).coerceAtMost(10_000L) else 0L
+        val markerMovingTimeMs = if (lastRenderedMarkerFixElapsedMs > 0L)
+            (fixElapsedMs - lastRenderedMarkerFixElapsedMs).coerceAtLeast(0L) else 0L
         lastAcceptedFixElapsedMs = fixElapsedMs
+        if (renderMarker) lastRenderedMarkerFixElapsedMs = fixElapsedMs
         lastRawGpsLocation = Location(location)
         val smoothed = smoothLocation(smoothedGpsLocation, location, movingTimeMs)
         currentLocation = Location(smoothed)
@@ -4827,15 +4845,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             pendingJarvisWeather = false
             answerJarvisWeather()
         }
+        appendGpsDiagnosticSample(location)
+        appendGpxRecordingPoint(smoothed)
+
+        // Intermediate batched fixes still feed the filter and paired recordings. Avoid
+        // restarting the marker animator or running network/radar/route work for each one.
+        if (!updateNavigation) return
+
         val speed = if (location.hasSpeed()) location.speed * 3.6f else 0f
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
-        animateGpsMarkerTo(smoothed, movingTimeMs, previousSpeedForPrediction)
-        updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
+        if (renderMarker) {
+            animateGpsMarkerTo(smoothed, markerMovingTimeMs, previousSpeedForPrediction)
+            updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
+        }
         updateTurnGuidance(smoothed)
         updateRouteMetrics(smoothed)
-        appendGpsDiagnosticSample(location)
-        appendGpxRecordingPoint(smoothed)
         refreshRadarsIfNeeded(smoothed)
         refreshWeatherIfNeeded(smoothed)
         refreshSpeedLimitIfNeeded(smoothed)
@@ -6538,10 +6563,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // Animate across nearly the whole interval between accepted fixes. The previous
         // distance/speed duration often ended early, leaving the marker visibly paused before
         // the next fix arrived (especially at low speeds or after smoothing).
-        val durationMs = if (movingTimeMs in 180L..2_000L) {
-            movingTimeMs.coerceIn(220L, 1_100L)
-        } else {
-            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
+        // Match the animation to the real elapsed time between rendered GPS fixes.
+        // The previous 1,100 ms ceiling made the marker finish early on slower GPS
+        // delivery, then sit still until the next fix arrived.
+        val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs)
+        if (durationMs == null) {
+            displayedMarkerLocation = Location(markerTarget)
+            updateUserMarker(markerTarget)
+            return
         }
         val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
         val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
