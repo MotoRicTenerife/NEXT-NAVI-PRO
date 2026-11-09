@@ -4821,6 +4821,11 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS INSUFFICIENTE"
             return
         }
+        val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
+        if (lastAcceptedFixElapsedMs > 0L && fixElapsedMs <= lastAcceptedFixElapsedMs) {
+            appendGpsDiagnosticSample(location, "REJECTED_OUT_OF_ORDER")
+            return
+        }
         val previousRaw = lastRawGpsLocation
         if (previousRaw != null && isImplausibleGpsJump(previousRaw, location)) {
             // Keep rejected fixes in opt-in diagnostics so real traces reveal the failures too.
@@ -4830,8 +4835,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             gpsText.text = "GPS SALTO SCARTATO"
             return
         }
-        val previousSpeedForPrediction = previousRaw?.takeIf { it.hasSpeed() }?.speed ?: location.speed
-        val fixElapsedMs = if (location.elapsedRealtimeNanos > 0L) location.elapsedRealtimeNanos / 1_000_000L else SystemClock.elapsedRealtime()
         val movingTimeMs = if (lastAcceptedFixElapsedMs > 0L) (fixElapsedMs - lastAcceptedFixElapsedMs).coerceAtLeast(0L).coerceAtMost(10_000L) else 0L
         val markerMovingTimeMs = if (lastRenderedMarkerFixElapsedMs > 0L)
             (fixElapsedMs - lastRenderedMarkerFixElapsedMs).coerceAtLeast(0L) else 0L
@@ -4856,7 +4859,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
         if (renderMarker) {
-            animateGpsMarkerTo(smoothed, markerMovingTimeMs, previousSpeedForPrediction)
+            animateGpsMarkerTo(smoothed, markerMovingTimeMs)
             updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         }
         updateTurnGuidance(smoothed)
@@ -6529,7 +6532,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         source.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(features))
     }
 
-    private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long, previousSpeedMps: Float) {
+    private fun animateGpsMarkerTo(target: Location, movingTimeMs: Long) {
         // The live vehicle marker must follow the accepted GPS fix, never the planned route.
         // Route geometry is reserved for maneuver guidance and route-progress calculations.
         val markerTarget = Location(target)
@@ -6559,7 +6562,6 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateUserMarker(markerTarget)
             return
         }
-        val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
         // Animate across nearly the whole interval between accepted fixes. The previous
         // distance/speed duration often ended early, leaving the marker visibly paused before
         // the next fix arrived (especially at low speeds or after smoothing).
