@@ -252,6 +252,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var radarCacheCoversCurrentArea = false
     private var lastRadarAttemptMs = 0L
     private var lastCameraLocation: Location? = null
+    private var lastCameraAnimationElapsedMs = 0L
     private var lastSpeedLimitQueryLocation: Location? = null
     private var lastSpeedLimitQueryMs = 0L
     private var speedLimitLookupInFlight = false
@@ -6654,7 +6655,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val previous = lastCameraLocation
         val movedEnough = previous == null || previous.distanceTo(location) >= 2f
-        if ((forceCenter || movedEnough) && (followGps || forceCenter)) {
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        // GPS fixes can arrive every 250 ms. Restarting a 350 ms camera animation for
+        // every fix continually cancels the previous animation and makes the map itself
+        // look jerky even when the vehicle marker is interpolated smoothly. Pace camera
+        // tracking independently from marker rendering.
+        val cameraUpdateDue = forceCenter || lastCameraAnimationElapsedMs == 0L ||
+            nowElapsedMs - lastCameraAnimationElapsedMs >= 450L
+        if ((forceCenter || movedEnough && cameraUpdateDue) && (followGps || forceCenter)) {
             val oldBearing = map?.cameraPosition?.bearing ?: 0.0
             val reliableCourse = location.hasBearing() && location.hasSpeed() && location.speed >= 3f &&
                 (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees <= 35f)
@@ -6664,8 +6672,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
+            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), if (forceCenter) 350 else 450)
             lastCameraLocation = Location(location)
+            lastCameraAnimationElapsedMs = nowElapsedMs
         }
     }
 
