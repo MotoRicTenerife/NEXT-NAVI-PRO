@@ -58,7 +58,7 @@ printf '%s\n' "$out"
 
 dump="$( "${ADB[@]}" shell dumpsys package "$PKG" | tr -d '\r' )"
 printf '%s\n' "$dump" > "$OUT/package-after-upgrade.txt"
-echo "$dump" | grep -m1 -E 'versionCode=12|versionCode 13' ||
+echo "$dump" | grep -m1 -E 'versionCode=13|versionCode 13' ||
   fail "Package manager did not report versionCode 13 after update."
 
 "${ADB[@]}" shell am force-stop "$PKG" >/dev/null 2>&1 || true
