@@ -18,6 +18,6 @@ class GpsArrowVisualSpecTest {
     }
 
     @Test fun iconScaleRemainsConstantAcrossMapZoom() {
-        assertEquals(1.0f, GpsArrowVisualSpec.ICON_SIZE)
+        assertEquals(1.0f, GpsArrowVisualSpec.ICON_SIZE, 0f)
     }
 }
