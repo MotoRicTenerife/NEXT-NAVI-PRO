@@ -1243,7 +1243,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             style.addSource(GeoJsonSource(SOURCE_USER, """{"type":"FeatureCollection","features":[]}"""))
             style.addLayer(SymbolLayer("next-user-arrow", SOURCE_USER).withProperties(
                 PropertyFactory.iconImage("next-user-arrow-icon"),
-                PropertyFactory.iconSize(1.0f),
+                PropertyFactory.iconSize(GpsArrowVisualSpec.ICON_SIZE),
                 PropertyFactory.iconRotate(Expression.get("bearing")),
                 PropertyFactory.iconRotationAlignment("map"),
                 PropertyFactory.iconAllowOverlap(true),
@@ -6301,21 +6301,50 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun createGpsArrowBitmap(): Bitmap {
-        // Native bitmap avoids missing glyphs/fonts in vector map styles.
-        val size = 96
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        // Draw in dp and rasterize at the device density. MapLibre registers the bitmap
+        // using the map pixel ratio, so the marker remains a stable on-screen size.
+        val density = resources.displayMetrics.density.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val widthPx = GpsArrowVisualSpec.pixels(GpsArrowVisualSpec.WIDTH_DP, density)
+        val heightPx = GpsArrowVisualSpec.pixels(GpsArrowVisualSpec.HEIGHT_DP, density)
+        val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 12f; strokeJoin = Paint.Join.ROUND }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 212, 0); style = Paint.Style.FILL }
-        val path = Path().apply {
-            moveTo(size * 0.5f, size * 0.06f)
-            lineTo(size * 0.86f, size * 0.91f)
-            lineTo(size * 0.5f, size * 0.70f)
-            lineTo(size * 0.14f, size * 0.91f)
+        canvas.scale(density, density)
+
+        val arrow = Path().apply {
+            moveTo(48f, 5f)
+            lineTo(88f, 96f)
+            lineTo(48f, 77f)
+            lineTo(8f, 96f)
             close()
         }
-        canvas.drawPath(path, shadow)
-        canvas.drawPath(path, fill)
+        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+            setShadowLayer(5f, 0f, 3f, Color.argb(145, 0, 0, 0))
+        }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(0, 207, 196)
+            style = Paint.Style.FILL
+        }
+        val innerStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+        val outerStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(5, 20, 35)
+            style = Paint.Style.STROKE
+            strokeWidth = 10f
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        canvas.drawPath(arrow, shadow)
+        canvas.drawPath(arrow, fill)
+        canvas.drawPath(arrow, innerStroke)
+        canvas.drawPath(arrow, outerStroke)
         return bitmap
     }
 
