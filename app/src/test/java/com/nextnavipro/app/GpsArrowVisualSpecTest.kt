@@ -14,7 +14,7 @@ class GpsArrowVisualSpecTest {
 
     @Test fun invalidDensityFallsBackSafely() {
         assertEquals(96, GpsArrowVisualSpec.pixels(GpsArrowVisualSpec.WIDTH_DP, Float.NaN))
-        assertEquals(1, GpsArrowVisualSpec.pixels(0f, 3.5f))
+        assertEquals(4, GpsArrowVisualSpec.pixels(0f, 3.5f))
     }
 
     @Test fun iconScaleRemainsConstantAcrossMapZoom() {
