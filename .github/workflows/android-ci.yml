@@ -114,6 +114,19 @@ jobs:
           assert flow > route, "Traffic flow must render above the route underlay"
           print("TomTom flow source, proxy URL, speed styling and layer order verified.")
           PY
+      - name: Verify density-independent GPS arrow rendering
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("app/src/main/java/com/nextnavipro/app/MainActivity.kt").read_text()
+          spec = Path("app/src/main/java/com/nextnavipro/app/GpsArrowVisualSpec.kt").read_text()
+          arrow = source.split("private fun createGpsArrowBitmap()", 1)[1].split("private fun createPlaceFlagBitmap()", 1)[0]
+          assert "bitmap.density = resources.displayMetrics.densityDpi" in arrow, "MapLibre bitmap density must match device density"
+          assert "canvas.scale(density, density)" in arrow, "Arrow artwork must be rasterized from dp coordinates"
+          assert "PropertyFactory.iconSize(GpsArrowVisualSpec.ICON_SIZE)" in source, "Arrow size must use the fixed style scale"
+          assert "const val ICON_SIZE = 1.0f" in spec, "Arrow scale must remain constant across zoom levels"
+          print("GPS arrow density, dp rasterization and fixed map scale verified.")
+          PY
       - name: Download the exact previously supplied alpha09 APK for upgrade validation
         uses: actions/download-artifact@v5
         with:
