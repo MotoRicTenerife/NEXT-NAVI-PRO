@@ -6307,6 +6307,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val widthPx = GpsArrowVisualSpec.pixels(GpsArrowVisualSpec.WIDTH_DP, density)
         val heightPx = GpsArrowVisualSpec.pixels(GpsArrowVisualSpec.HEIGHT_DP, density)
         val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+        // MapLibre derives the style image pixel ratio from Bitmap.density.
+        bitmap.density = resources.displayMetrics.densityDpi
         val canvas = Canvas(bitmap)
         canvas.scale(density, density)
 
