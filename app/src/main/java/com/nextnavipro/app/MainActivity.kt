@@ -6343,8 +6343,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
 
         canvas.drawPath(arrow, shadow)
         canvas.drawPath(arrow, fill)
-        canvas.drawPath(arrow, innerStroke)
         canvas.drawPath(arrow, outerStroke)
+        canvas.drawPath(arrow, innerStroke)
         return bitmap
     }
 
