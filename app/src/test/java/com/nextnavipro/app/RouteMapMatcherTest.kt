@@ -16,6 +16,20 @@ class RouteMapMatcherTest {
         assertTrue(match.fraction in 0.45..0.55)
     }
 
+    @Test fun routeProgressTrackerExposesCachedChainageAtManeuverIndex() {
+        val route = listOf(
+            NavPoint(0.0, 0.0),
+            NavPoint(0.0, 0.001),
+            NavPoint(0.0, 0.002)
+        )
+        val tracker = RouteProgressTracker()
+        val first = tracker.alongRouteDistance(route, 1)
+        val second = tracker.alongRouteDistance(route, 2)
+        assertTrue(first in 110.0..112.5)
+        assertTrue(second in 220.0..223.0)
+        assertEquals(0.0, tracker.alongRouteDistance(route, -1), 0.0)
+    }
+
     @Test fun rejectsInvalidAndTooShortGeometry() {
         assertNull(RouteMapMatcher.match(emptyList(), 0.0, 0.0))
         assertNull(RouteMapMatcher.match(listOf(NavPoint(0.0, 0.0)), 0.0, 0.0))

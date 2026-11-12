@@ -5,6 +5,19 @@ import java.util.Locale
 
 /** Deterministic intent classification for live weather questions. */
 object JarvisIntentClassifier {
+    fun isTrafficQuestion(transcript: String): Boolean {
+        val normalized = Normalizer.normalize(transcript.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9 ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (normalized.isBlank()) return false
+        return Regex("\\b(traffico|trafico|traffic|atasco|incidente|incidentes|retencion|retenciones|congestion|coda|code|colas|jam)\\b")
+            .containsMatchIn(normalized) ||
+            normalized.contains("come e il traffico") ||
+            normalized.contains("c e traffico")
+    }
+
     fun isWeatherQuestion(transcript: String): Boolean {
         val normalized = Normalizer.normalize(transcript.lowercase(Locale.ROOT), Normalizer.Form.NFD)
             .replace(Regex("\\p{Mn}+"), "")

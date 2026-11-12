@@ -53,4 +53,62 @@ class NavigationServicesTest {
     fun gpxTraceRequestRejectsInvalidCoordinates() {
         NavigationServices.buildTraceRequest(listOf(NavPoint(28.0, -16.0), NavPoint(Double.NaN, -16.0)), motorcycle = false)
     }
+    @Test
+    fun routeRequestCanAskForBoundedAlternatives() {
+        val origin = NavPoint(28.0, -16.0)
+        val destination = NavPoint(28.1, -16.1)
+        val request = NavigationServices.buildRouteRequest(origin, destination, motorcycle = true, alternatives = 2)
+        assertEquals(2, request.getInt("alternates"))
+        assertEquals("motorcycle", request.getString("costing"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun routeRequestRejectsUnboundedAlternatives() {
+        NavigationServices.buildRouteRequest(
+            NavPoint(28.0, -16.0), NavPoint(28.1, -16.1),
+            motorcycle = true, alternatives = 4
+        )
+    }
+
+    @Test
+    fun routeRequestUsesThroughWaypointWithoutChangingMotorcycleCosting() {
+        val request = NavigationServices.buildRouteRequest(
+            NavPoint(28.0, -16.0),
+            NavPoint(28.1, -16.1),
+            motorcycle = true,
+            viaPoints = listOf(NavPoint(28.05, -16.05))
+        )
+        val locations = request.getJSONArray("locations")
+        assertEquals(3, locations.length())
+        assertEquals("through", locations.getJSONObject(1).getString("type"))
+        assertEquals("motorcycle", request.getString("costing"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun routeRequestRejectsInvalidThroughWaypoint() {
+        NavigationServices.buildRouteRequest(
+            NavPoint(28.0, -16.0),
+            NavPoint(28.1, -16.1),
+            motorcycle = true,
+            viaPoints = listOf(NavPoint(Double.NaN, -16.05))
+        )
+    }
+
+    @Test
+    fun routeResponseParsesPrimaryAndAlternateTrips() {
+        val trip = """{"legs":[{"shape":"_izlhA~rlgdF_{geC~ywl@","summary":{"length":12.5,"time":600},"maneuvers":[{"begin_shape_index":0,"instruction":"Prosegui","type":1,"street_names":["TF-1"]}]}],"summary":{"length":12.5,"time":600}}"""
+        val alternate = """{"legs":[{"shape":"_izlhA~rlgdF_{geC~ywl@","summary":{"length":13.0,"time":720},"maneuvers":[{"begin_shape_index":0,"instruction":"Svolta a destra","type":10,"street_names":["TF-82"]}]}],"summary":{"length":13.0,"time":720}}"""
+        val root = org.json.JSONObject()
+            .put("trip", org.json.JSONObject(trip))
+            .put("alternates", org.json.JSONArray().put(
+                org.json.JSONObject().put("trip", org.json.JSONObject(alternate))
+            ).put(org.json.JSONObject().put("unexpected", true)))
+        val options = NavigationServices.parseRouteOptions(root)
+        assertEquals(12.5, options.primary.distanceKm, 0.001)
+        assertEquals(600, options.primary.durationSeconds)
+        assertEquals(1, options.alternatives.size)
+        assertEquals(13.0, options.alternatives.single().distanceKm, 0.001)
+        assertEquals(720, options.alternatives.single().durationSeconds)
+    }
+
 }

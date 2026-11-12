@@ -35,6 +35,7 @@ object JarvisOnlineAiClient {
         history: List<JarvisMemoryStore.Message> = emptyList(),
         summary: String = "",
         personality: Personality = Personality("jarvis", 45, 80, 55, 75),
+        tripContext: JSONObject? = null,
         callback: (Result<String>) -> Unit
     ) {
         val target = endpoint
@@ -88,6 +89,7 @@ object JarvisOnlineAiClient {
                                 .put("latitude", location.latitude)
                                 .put("longitude", location.longitude))
                         }
+                        if (tripContext != null) put("tripContext", JSONObject(tripContext.toString()))
                     }
                     .toString()
                 connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
