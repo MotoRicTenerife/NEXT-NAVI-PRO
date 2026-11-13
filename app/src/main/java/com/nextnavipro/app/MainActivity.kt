@@ -6355,14 +6355,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return Location(location)
         }
 
+        // Reuse the temporally constrained route progress match. Searching the whole
+        // route lets a nearby parallel carriageway or a loop segment steal the visual marker.
+        val maxSnapMeters = RouteSnapPolicy.maxSnapDistance(location.accuracy)
+        val (progressIndex, progressDistance) = findRouteProgressIndex(route, location)
+        if (!progressDistance.isFinite() || progressDistance > maxSnapMeters) return Location(location)
+
         val metersPerLat = 111320.0
         val metersPerLon = metersPerLat * cos(Math.toRadians(location.latitude))
         var bestDistance = Double.MAX_VALUE
         var bestLat = location.latitude
         var bestLon = location.longitude
         var bestBearing = Float.NaN
+        val firstSegment = (progressIndex - 1).coerceAtLeast(0)
+        val lastSegment = (progressIndex + 2).coerceAtMost(route.points.lastIndex - 1)
 
-        for (i in 0 until route.points.lastIndex) {
+        for (i in firstSegment..lastSegment) {
             val a = route.points[i]
             val b = route.points[i + 1]
             val ax = (a.longitude - location.longitude) * metersPerLon
@@ -6382,7 +6390,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val segmentBearing = ((Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0).toFloat()
             if (location.hasBearing() && location.hasSpeed() && location.speed >= 3f) {
                 val delta = abs(((location.bearing - segmentBearing + 540f) % 360f) - 180f)
-                if (delta > 55f) continue
+                if (!RouteSnapPolicy.isHeadingCompatible(delta)) continue
             }
             bestDistance = distance
             bestLat = location.latitude + py / metersPerLat
@@ -6390,8 +6398,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             bestBearing = segmentBearing
         }
 
-        // Tighten the allowed snap radius as the reported GPS accuracy improves.
-        val maxSnapMeters = minOf(25f, maxOf(10f, location.accuracy * 1.25f)).toDouble()
+        // If the local, direction-consistent segment is not a close match, keep the
+        // measured GPS position instead of forcing the arrow onto a neighbouring road.
         if (bestDistance > maxSnapMeters) return Location(location)
         return Location(location).apply {
             latitude = bestLat
