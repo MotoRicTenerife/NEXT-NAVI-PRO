@@ -6355,14 +6355,22 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return Location(location)
         }
 
+        // Reuse the temporally constrained route progress match. Searching the whole
+        // route lets a nearby parallel carriageway or a loop segment steal the visual marker.
+        val maxSnapMeters = RouteSnapPolicy.maxSnapDistance(location.accuracy)
+        val (progressIndex, progressDistance) = findRouteProgressIndex(route, location)
+        if (!RouteSnapPolicy.isConfidentMatch(progressDistance, location.accuracy)) return Location(location)
+
         val metersPerLat = 111320.0
         val metersPerLon = metersPerLat * cos(Math.toRadians(location.latitude))
         var bestDistance = Double.MAX_VALUE
         var bestLat = location.latitude
         var bestLon = location.longitude
         var bestBearing = Float.NaN
+        val firstSegment = (progressIndex - 1).coerceAtLeast(0)
+        val lastSegment = (progressIndex + 2).coerceAtMost(route.points.lastIndex - 1)
 
-        for (i in 0 until route.points.lastIndex) {
+        for (i in firstSegment..lastSegment) {
             val a = route.points[i]
             val b = route.points[i + 1]
             val ax = (a.longitude - location.longitude) * metersPerLon
@@ -6382,7 +6390,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             val segmentBearing = ((Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0).toFloat()
             if (location.hasBearing() && location.hasSpeed() && location.speed >= 3f) {
                 val delta = abs(((location.bearing - segmentBearing + 540f) % 360f) - 180f)
-                if (delta > 55f) continue
+                if (!RouteSnapPolicy.isHeadingCompatible(delta)) continue
             }
             bestDistance = distance
             bestLat = location.latitude + py / metersPerLat
@@ -6390,8 +6398,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             bestBearing = segmentBearing
         }
 
-        // Tighten the allowed snap radius as the reported GPS accuracy improves.
-        val maxSnapMeters = minOf(25f, maxOf(10f, location.accuracy * 1.25f)).toDouble()
+        // If the local, direction-consistent segment is not a close match, keep the
+        // measured GPS position instead of forcing the arrow onto a neighbouring road.
         if (bestDistance > maxSnapMeters) return Location(location)
         return Location(location).apply {
             latitude = bestLat
@@ -6415,17 +6423,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (route.points.size < 2 || movingTimeMs !in 101L..2000L ||
             !location.hasSpeed() || location.speed < 2.0f) return Location(location)
 
-        var nearestIndex = 0
-        var nearestDistance = Float.MAX_VALUE
-        for (i in route.points.indices) {
-            val point = route.points[i]
-            val d = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
-            if (d[0] < nearestDistance) {
-                nearestDistance = d[0]
-                nearestIndex = i
-            }
-        }
+        // Route prediction is allowed only after the temporal matcher confirms that
+        // this fix is genuinely on the active route. Otherwise keep the GPS course/position:
+        // projecting an off-route fix onto the planned route makes the arrow point the wrong way.
+        val (matchedIndex, matchedDistance) = findRouteProgressIndex(route, location)
+        val accuracyForSnap = if (location.hasAccuracy()) location.accuracy else 3f
+        if (!RouteSnapPolicy.isConfidentMatch(matchedDistance, accuracyForSnap)) return Location(location)
+        val nearestIndex = matchedIndex.coerceIn(0, route.points.lastIndex - 1)
+
         // Do not predict across an imminent junction/turn.
         val nextManeuver = route.maneuvers.firstOrNull { it.pointIndex > nearestIndex }
         if (nextManeuver != null) {
@@ -6498,14 +6503,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
-        // Animate across nearly the whole interval between accepted fixes. The previous
-        // distance/speed duration often ended early, leaving the marker visibly paused before
-        // the next fix arrived (especially at low speeds or after smoothing).
-        val durationMs = if (movingTimeMs in 180L..2_000L) {
-            movingTimeMs.coerceIn(220L, 1_100L)
-        } else {
-            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
-        }
+        // Keep the visual interpolation shorter than the normal 250 ms GNSS cadence.
+        // Long animations were repeatedly cancelled by the next fix and accumulated a visible
+        // trail behind the real position. The incoming GPS filter already provides continuity.
+        val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs, distance, speed)
         val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
         val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
         val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
@@ -6558,7 +6559,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
+            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 180)
             lastCameraLocation = Location(location)
         }
     }

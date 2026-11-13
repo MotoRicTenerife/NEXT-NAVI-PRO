@@ -36,6 +36,18 @@ class GpsSmoothingPolicyTest {
     }
 
     @Test
+    fun roadSpeedUsesHighIncomingFixWeightToLimitVisualLag() {
+        val alpha = GpsSmoothingPolicy.alpha(0.25f, 6f, 3f, 27f, 4f)
+        assertTrue(alpha >= 0.82f)
+    }
+
+    @Test
+    fun stationaryNoiseSuppressionIsPreserved() {
+        val alpha = GpsSmoothingPolicy.alpha(0.25f, 2f, 5f, 0.2f, null)
+        assertTrue(alpha <= 0.22f)
+    }
+
+    @Test
     fun invalidTimingAndMeasurementsRemainBounded() {
         val alpha = GpsSmoothingPolicy.alpha(Float.NaN, Float.NaN, Float.NaN, Float.NaN, Float.NaN)
         assertTrue(alpha in 0.12f..0.95f)
