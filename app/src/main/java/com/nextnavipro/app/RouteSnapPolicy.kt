@@ -7,6 +7,10 @@ internal object RouteSnapPolicy {
         return minOf(8.0, maxOf(3.0, accuracy.toDouble()))
     }
 
+    fun isConfidentMatch(distanceMeters: Float, accuracyMeters: Float): Boolean =
+        distanceMeters.isFinite() && distanceMeters >= 0f &&
+            distanceMeters.toDouble() <= maxSnapDistance(accuracyMeters)
+
     fun isHeadingCompatible(deltaDegrees: Float): Boolean =
         deltaDegrees.isFinite() && deltaDegrees <= 30f
 }
