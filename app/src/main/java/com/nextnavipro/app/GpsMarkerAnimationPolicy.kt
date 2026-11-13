@@ -1,18 +1,18 @@
 package com.nextnavipro.app
 
 /**
- * Keeps marker animation aligned with the measured interval between accepted GPS fixes.
- *
- * A short floor avoids zero-length animations when providers deliver very fast updates.
- * A long-gap ceiling deliberately snaps to the latest accepted fix instead of drawing
- * a misleading multi-second interpolation after GPS has gone stale.
+ * Keeps marker interpolation shorter than normal GPS delivery intervals.
+ * The GPS filter provides continuity; a long UI animation would become a second
+ * low-pass filter and leave the rendered arrow behind the accepted fix.
  */
 internal object GpsMarkerAnimationPolicy {
-    private const val MIN_ANIMATION_MS = 120L
-    private const val MAX_ANIMATION_MS = 2_500L
+    private const val MIN_ANIMATION_MS = 100L
+    private const val MAX_ANIMATION_MS = 220L
+    private const val MAX_FIX_GAP_MS = 2_500L
 
     fun durationMillis(elapsedBetweenFixesMs: Long): Long? {
-        if (elapsedBetweenFixesMs <= 0L || elapsedBetweenFixesMs > MAX_ANIMATION_MS) return null
-        return elapsedBetweenFixesMs.coerceAtLeast(MIN_ANIMATION_MS)
+        if (elapsedBetweenFixesMs <= 0L || elapsedBetweenFixesMs > MAX_FIX_GAP_MS) return null
+        return (elapsedBetweenFixesMs * 0.8f).toLong()
+            .coerceIn(MIN_ANIMATION_MS, MAX_ANIMATION_MS)
     }
 }
