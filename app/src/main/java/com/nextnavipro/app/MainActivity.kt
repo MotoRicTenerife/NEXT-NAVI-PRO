@@ -6427,10 +6427,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // this fix is genuinely on the active route. Otherwise keep the GPS course/position:
         // projecting an off-route fix onto the planned route makes the arrow point the wrong way.
         val (matchedIndex, matchedDistance) = findRouteProgressIndex(route, location)
-        val snapLimit = RouteSnapPolicy.maxSnapDistance(
-            if (location.hasAccuracy()) location.accuracy else 3f
-        )
-        if (!RouteSnapPolicy.isConfidentMatch(matchedDistance, if (location.hasAccuracy()) location.accuracy else 3f)) return Location(location)
+        val accuracyForSnap = if (location.hasAccuracy()) location.accuracy else 3f
+        if (!RouteSnapPolicy.isConfidentMatch(matchedDistance, accuracyForSnap)) return Location(location)
         val nearestIndex = matchedIndex.coerceIn(0, route.points.lastIndex - 1)
 
         // Do not predict across an imminent junction/turn.
