@@ -16,6 +16,12 @@ class RouteSnapPolicyTest {
         assertEquals(3.0, RouteSnapPolicy.maxSnapDistance(Float.NaN), 0.001)
     }
 
+    @Test fun offRouteOrInvalidMatchNeverQualifiesForSnappingOrPrediction() {
+        assertTrue(RouteSnapPolicy.isConfidentMatch(4f, 5f))
+        assertFalse(RouteSnapPolicy.isConfidentMatch(9f, 5f))
+        assertFalse(RouteSnapPolicy.isConfidentMatch(Float.NaN, 5f))
+    }
+
     @Test fun headingMustAgreeWithinThirtyDegrees() {
         assertTrue(RouteSnapPolicy.isHeadingCompatible(25f))
         assertFalse(RouteSnapPolicy.isHeadingCompatible(31f))
