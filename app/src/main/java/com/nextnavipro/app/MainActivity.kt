@@ -6498,14 +6498,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         val speed = if (markerTarget.hasSpeed()) markerTarget.speed else 0f
-        // Animate across nearly the whole interval between accepted fixes. The previous
-        // distance/speed duration often ended early, leaving the marker visibly paused before
-        // the next fix arrived (especially at low speeds or after smoothing).
-        val durationMs = if (movingTimeMs in 180L..2_000L) {
-            movingTimeMs.coerceIn(220L, 1_100L)
-        } else {
-            ((distance / maxOf(speed, 5f)) * 1000f).toLong().coerceIn(220L, 900L)
-        }
+        // Keep the visual interpolation shorter than the normal 250 ms GNSS cadence.
+        // Long animations were repeatedly cancelled by the next fix and accumulated a visible
+        // trail behind the real position. The incoming GPS filter already provides continuity.
+        val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs, distance, speed)
         val startBearing = if (start.hasBearing()) start.bearing else markerTarget.bearing
         val targetBearing = if (markerTarget.hasBearing()) markerTarget.bearing else startBearing
         val bearingDelta = ((targetBearing - startBearing + 540f) % 360f) - 180f
@@ -6558,7 +6554,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 .zoom(if (routeResult == null) 16.0 else 16.5)
                 .bearing(bearing)
                 .build()
-            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 350)
+            map?.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 180)
             lastCameraLocation = Location(location)
         }
     }
