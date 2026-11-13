@@ -6423,17 +6423,16 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (route.points.size < 2 || movingTimeMs !in 101L..2000L ||
             !location.hasSpeed() || location.speed < 2.0f) return Location(location)
 
-        var nearestIndex = 0
-        var nearestDistance = Float.MAX_VALUE
-        for (i in route.points.indices) {
-            val point = route.points[i]
-            val d = FloatArray(1)
-            Location.distanceBetween(location.latitude, location.longitude, point.latitude, point.longitude, d)
-            if (d[0] < nearestDistance) {
-                nearestDistance = d[0]
-                nearestIndex = i
-            }
-        }
+        // Route prediction is allowed only after the temporal matcher confirms that
+        // this fix is genuinely on the active route. Otherwise keep the GPS course/position:
+        // projecting an off-route fix onto the planned route makes the arrow point the wrong way.
+        val (matchedIndex, matchedDistance) = findRouteProgressIndex(route, location)
+        val snapLimit = RouteSnapPolicy.maxSnapDistance(
+            if (location.hasAccuracy()) location.accuracy else 3f
+        )
+        if (!matchedDistance.isFinite() || matchedDistance > snapLimit) return Location(location)
+        val nearestIndex = matchedIndex.coerceIn(0, route.points.lastIndex - 1)
+
         // Do not predict across an imminent junction/turn.
         val nextManeuver = route.maneuvers.firstOrNull { it.pointIndex > nearestIndex }
         if (nextManeuver != null) {
