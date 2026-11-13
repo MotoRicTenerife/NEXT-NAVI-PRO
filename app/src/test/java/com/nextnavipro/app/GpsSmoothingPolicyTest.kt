@@ -10,7 +10,19 @@ class GpsSmoothingPolicyTest {
         val moving = GpsSmoothingPolicy.alpha(1f, 8f, 8f, 12f, 5f)
         assertTrue(stationary <= 0.22f)
         assertTrue(moving > stationary)
-        assertTrue(moving >= 0.78f)
+        assertTrue(moving >= 0.82f)
+    }
+
+    @Test
+    fun roadSpeedUsesHighIncomingFixWeightAtNormalGpsCadence() {
+        val alpha = GpsSmoothingPolicy.alpha(0.25f, 6f, 3f, 27f, 4f)
+        assertTrue(alpha >= 0.82f)
+    }
+
+    @Test
+    fun stationaryNoiseSuppressionIsPreserved() {
+        val alpha = GpsSmoothingPolicy.alpha(0.25f, 2f, 5f, 0.2f, null)
+        assertTrue(alpha <= 0.22f)
     }
 
     @Test
@@ -25,14 +37,14 @@ class GpsSmoothingPolicyTest {
     fun sharpCourseChangeRaisesResponse() {
         val straight = GpsSmoothingPolicy.alpha(0.8f, 5f, 6f, 7f, 5f)
         val turn = GpsSmoothingPolicy.alpha(0.8f, 5f, 6f, 7f, 65f)
-        assertTrue(turn >= 0.78f)
+        assertTrue(turn >= 0.88f)
         assertTrue(turn > straight)
     }
 
     @Test
     fun largeDisplacementIsNotOverSmoothed() {
         val alpha = GpsSmoothingPolicy.alpha(1f, 18f, 20f, 1f, null)
-        assertTrue(alpha >= 0.78f)
+        assertTrue(alpha >= 0.88f)
     }
 
     @Test
