@@ -6359,7 +6359,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // route lets a nearby parallel carriageway or a loop segment steal the visual marker.
         val maxSnapMeters = RouteSnapPolicy.maxSnapDistance(location.accuracy)
         val (progressIndex, progressDistance) = findRouteProgressIndex(route, location)
-        if (!progressDistance.isFinite() || progressDistance > maxSnapMeters) return Location(location)
+        if (!RouteSnapPolicy.isConfidentMatch(progressDistance, location.accuracy)) return Location(location)
 
         val metersPerLat = 111320.0
         val metersPerLon = metersPerLat * cos(Math.toRadians(location.latitude))
@@ -6430,7 +6430,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val snapLimit = RouteSnapPolicy.maxSnapDistance(
             if (location.hasAccuracy()) location.accuracy else 3f
         )
-        if (!matchedDistance.isFinite() || matchedDistance > snapLimit) return Location(location)
+        if (!RouteSnapPolicy.isConfidentMatch(matchedDistance, if (location.hasAccuracy()) location.accuracy else 3f)) return Location(location)
         val nearestIndex = matchedIndex.coerceIn(0, route.points.lastIndex - 1)
 
         // Do not predict across an imminent junction/turn.
