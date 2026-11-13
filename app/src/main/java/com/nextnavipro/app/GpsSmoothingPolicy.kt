@@ -22,13 +22,15 @@ internal object GpsSmoothingPolicy {
         val speed = speedMetersPerSecond?.takeIf { it.isFinite() && it >= 0f }
         val courseDelta = courseDeltaDegrees?.takeIf { it.isFinite() } ?: 0f
 
-        // Faster response at riding speed; slower response when nearly stationary.
+        // Keep stronger low-pass filtering while stationary, but substantially reduce
+        // accumulated lag at road speed. At 250 ms GNSS cadence, the former 0.38 s
+        // time constant retained too much of the previous position on every fix.
         var timeConstant = when {
             speed == null -> 0.75f
             speed < 0.8f -> 1.4f
             speed < 2.5f -> 0.85f
             speed < 8f -> 0.55f
-            else -> 0.38f
+            else -> 0.18f
         }
         if (accuracy > 20f) timeConstant *= 1.15f
 
@@ -41,10 +43,16 @@ internal object GpsSmoothingPolicy {
             result = minOf(result, 0.22f)
         }
 
+        // At riding speed, do not allow the low-pass filter to create a persistent
+        // visual trail. Keep this floor below the explicit turn/jump response below.
+        if (speed != null && speed >= 8f) {
+            result = maxOf(result, 0.82f)
+        }
+
         // A clear displacement or course change is stronger evidence of real movement
         // than the low-pass prior: respond promptly instead of cutting a corner.
         if (distance > 12f || (speed != null && speed >= 2.5f && courseDelta >= 30f)) {
-            result = maxOf(result, 0.78f)
+            result = maxOf(result, 0.88f)
         }
 
         return result.coerceIn(0.12f, 0.95f)
