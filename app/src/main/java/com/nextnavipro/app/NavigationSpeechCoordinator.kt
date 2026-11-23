@@ -32,7 +32,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
             override fun onStart(utteranceId: String?) {
                 main.post {
                     val now = SystemClock.elapsedRealtime()
-                    if (utteranceId == jarvisSpeechId) {
+                    if (utteranceId != null && utteranceId == jarvisSpeechId) {
                         jarvisSpeechStartedAtMs = now
                         Log.i(TAG, "event=jarvis_tts_start id=$utteranceId elapsed_ms=$now")
                         return@post
@@ -147,17 +147,6 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         pump()
     }
 
-    /** Jarvis voice output is an intentional user-driven interruption. */
-    fun interruptForJarvis() = onMain {
-        generation++
-        Log.i(TAG, "event=jarvis_interrupt pending=${pending.size} elapsed_ms=${SystemClock.elapsedRealtime()}")
-        pending.clear()
-        activeId = null
-        activeEvent = null
-        activeStartedAtMs = 0L
-        try { tts.stop() } catch (_: Exception) { }
-    }
-
     fun discardPendingByPrefix(prefix: String) = onMain {
         val before = pending.size
         pending.removeAll { it.key.startsWith(prefix) }
@@ -167,6 +156,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
 
     fun clear() = onMain {
         generation++
+        pausedForJarvis = false
         pending.clear()
         activeId = null
         activeEvent = null
