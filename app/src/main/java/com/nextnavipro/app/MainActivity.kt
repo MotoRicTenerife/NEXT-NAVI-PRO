@@ -2672,6 +2672,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                         routeButton.isEnabled = true
                         routeButton.text = appText("ANNULLA PERCORSO GPX")
                     }
+                    navigationSpeech?.discardPendingByPrefix("turn-")
                     routeResult = result
                     prefetchedRouteLimits = emptyList()
                     prefetchRouteSpeedLimits(result)
@@ -6065,6 +6066,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 )
                 runOnUiThread {
                     isCalculatingRoute = false
+                    navigationSpeech?.discardPendingByPrefix("turn-")
                     routeResult = recalculated
                     prefetchRouteRadars(recalculated, showBriefing = false)
                     resetRouteProgress()
