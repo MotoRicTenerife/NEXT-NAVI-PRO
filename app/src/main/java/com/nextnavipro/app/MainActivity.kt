@@ -5792,6 +5792,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 if (firstWarning || repeatDue) {
                     speedingVoiceActive = true
                     lastSpeedingVoiceMs = nowElapsed
+                    android.util.Log.i(
+                        "NEXT_NAVI_SPEECH",
+                        "overspeed_decision speed_kmh=$speedKmh limit_kmh=$limit first=$firstWarning at=$nowElapsed"
+                    )
                     if (voiceGuideReady) {
                         voiceGuide?.setSpeechRate(0.96f)
                         navigationSpeech?.enqueue(
