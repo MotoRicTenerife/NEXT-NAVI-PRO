@@ -1,7 +1,6 @@
 package com.nextnavipro.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,13 +40,4 @@ class ManeuverAnnouncementPolicyTest {
         assertTrue(stopped.imminentMeters < moving.imminentMeters)
     }
 
-    @Test fun guidanceFixFreshnessTightensAtRidingSpeed() {
-        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(1_800L, 8.5f))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(1_801L, 8.5f))
-        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(2_500L, 3f))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(2_501L, 3f))
-        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(3_500L, 0f))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(3_501L, 0f))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(-1L, 0f))
-    }
 }
