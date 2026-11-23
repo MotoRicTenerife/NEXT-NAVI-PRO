@@ -1848,6 +1848,17 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private fun speedForLimitAlertsKmh(): Int? {
         val location = currentLocation ?: return null
         if (!location.hasSpeed() || !location.hasAccuracy() || location.accuracy > 35f) return null
+        val fixAgeMs = if (location.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+        } else {
+            (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        }
+        if (!ManeuverAnnouncementPolicy.isFixFresh(fixAgeMs)) {
+            if (currentSpeedLimit != null && !speedLimitProvisional) {
+                android.util.Log.d("NEXT_NAVI_GUIDANCE", "event=overspeed_stale_speed_fix fix_age_ms=$fixAgeMs")
+            }
+            return null
+        }
         val gpsKmh = (location.speed * 3.6f).roundToInt()
         return if (alertSpeedSource != "gps") {
             (gpsKmh + motorcycleSpeedOffsetKmh).coerceAtLeast(0)
