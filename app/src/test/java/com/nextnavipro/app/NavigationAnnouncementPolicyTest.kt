@@ -1,6 +1,7 @@
 package com.nextnavipro.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationAnnouncementPolicyTest {
@@ -24,8 +25,8 @@ class NavigationAnnouncementPolicyTest {
         val roundabout = NavigationAnnouncementPolicy.thresholds(50f / 3.6f, true)
         assertEquals(361.1f, roundabout.advanceMeters, 0.5f)
         assertEquals(97.2f, roundabout.confirmationMeters, 0.5f)
-        assert(roundabout.advanceMeters > normal.advanceMeters)
-        assert(roundabout.confirmationMeters > normal.confirmationMeters)
+        assertTrue(roundabout.advanceMeters > normal.advanceMeters)
+        assertTrue(roundabout.confirmationMeters > normal.confirmationMeters)
     }
 
     @Test fun invalidSpeedAndExtremeSpeedAreBounded() {
