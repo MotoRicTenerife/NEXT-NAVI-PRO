@@ -200,7 +200,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     }
 
     private fun onMain(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post { block() }
     }
 
     companion object {
