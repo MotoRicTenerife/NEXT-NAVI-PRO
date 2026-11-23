@@ -27,7 +27,7 @@ class ManeuverAnnouncementPolicyTest {
 
     @Test fun stagesAdvanceAsTheTurnApproaches() {
         val x = ManeuverAnnouncementPolicy.thresholds(50f / 3.6f, 5f, false)
-        assertEquals(0, ManeuverAnnouncementPolicy.stage(x.advanceMeters + 1.0, x))
+        assertEquals(0, ManeuverAnnouncementPolicy.stage(x.advanceMeters.toDouble() + 1.0, x))
         assertEquals(1, ManeuverAnnouncementPolicy.stage(x.advanceMeters.toDouble(), x))
         assertEquals(2, ManeuverAnnouncementPolicy.stage(x.prepareMeters.toDouble(), x))
         assertEquals(3, ManeuverAnnouncementPolicy.stage(x.imminentMeters.toDouble(), x))
@@ -41,9 +41,13 @@ class ManeuverAnnouncementPolicyTest {
         assertTrue(stopped.imminentMeters < moving.imminentMeters)
     }
 
-    @Test fun guidanceFixOlderThanThreeAndAHalfSecondsIsRejected() {
-        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(3_500L))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(3_501L))
-        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(-1L))
+    @Test fun guidanceFixFreshnessTightensAtRidingSpeed() {
+        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(1_800L, 8.5f))
+        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(1_801L, 8.5f))
+        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(2_500L, 3f))
+        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(2_501L, 3f))
+        assertTrue(ManeuverAnnouncementPolicy.isFixFresh(3_500L, 0f))
+        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(3_501L, 0f))
+        assertFalse(ManeuverAnnouncementPolicy.isFixFresh(-1L, 0f))
     }
 }
