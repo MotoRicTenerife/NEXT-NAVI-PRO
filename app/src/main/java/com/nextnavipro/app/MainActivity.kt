@@ -3322,8 +3322,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun onJarvisButtonPressed() {
-        // A press is an interruption command: stop any current TTS immediately,
-        // discard queued speech and invalidate an in-flight online answer before listening.
+        // Invalidate an in-flight answer. If microphone permission is available,
+        // navigation speech is paused for the listening session below.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
         if (jarvisListening) {
@@ -6276,7 +6276,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val eventId = "turn-$maneuverIndex-stage-$stage"
                 android.util.Log.i(
                     "NEXT_NAVI_GUIDANCE",
-                    "event=maneuver_decision id=$eventId fix_age_ms=$guidanceFixAgeMs accuracy_m=$reportedAccuracy " +
+                    "event=maneuver_decision id=$eventId elapsed_ms=${SystemClock.elapsedRealtime()} " +
+                        "fix_age_ms=$guidanceFixAgeMs accuracy_m=$reportedAccuracy " +
                         "speed_kmh=${(speedMps * 3.6f).toInt()} distance_m=${distanceToTurn.toInt()} " +
                         "advance_m=${thresholds.advanceMeters.toInt()} prepare_m=${thresholds.prepareMeters.toInt()} " +
                         "imminent_m=${thresholds.imminentMeters.toInt()} roundabout=$roundabout"
