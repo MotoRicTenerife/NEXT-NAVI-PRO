@@ -4405,7 +4405,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
-                    if (voiceGuideReady) navigationSpeech?.enqueue("navigation-start", "Avvio la navigazione", NavigationSpeechCoordinator.PRIORITY_START, 8_000L)
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); navigationSpeech?.enqueue("navigation-start", "Avvio la navigazione", NavigationSpeechCoordinator.PRIORITY_START, 8_000L) }
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
@@ -5786,6 +5786,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     speedingVoiceActive = true
                     lastSpeedingVoiceMs = nowElapsed
                     if (voiceGuideReady) {
+                        voiceGuide?.setSpeechRate(0.96f)
                         navigationSpeech?.enqueue(
                             key = "speed-limit-overspeed",
                             text = if (firstWarning) "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari."
@@ -5899,6 +5900,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             else -> "Attenzione, possibile autovelox tra circa "
         }
         if (voiceGuideReady) {
+            voiceGuide?.setSpeechRate(0.96f)
             navigationSpeech?.enqueue(
                 key = "radar-${candidates.first.osmId}",
                 text = warning + candidates.second.toInt() + " metri",
@@ -5961,6 +5963,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         clearRoute()
         routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
         if (voiceGuideReady) {
+            voiceGuide?.setSpeechRate(0.96f)
             navigationSpeech?.enqueue("navigation-arrived", "Sei arrivato a destinazione.", NavigationSpeechCoordinator.PRIORITY_ARRIVAL, 30_000L)
         }
         Toast.makeText(this, "Sei arrivato a destinazione", Toast.LENGTH_LONG).show()
@@ -6052,7 +6055,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) navigationSpeech?.enqueue("reroute", "Percorso ricalcolato", NavigationSpeechCoordinator.PRIORITY_REROUTE, 8_000L)
+                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); navigationSpeech?.enqueue("reroute", "Percorso ricalcolato", NavigationSpeechCoordinator.PRIORITY_REROUTE, 8_000L) }
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -6238,6 +6241,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 else -> ""
             }
             if (spoken.isNotBlank()) {
+                voiceGuide?.setSpeechRate(0.96f)
                 announcedStage = stage
                 android.util.Log.i("NEXT_NAVI_SPEECH", "turn_decision maneuver=$maneuverIndex stage=$stage distance_m=${distanceToTurn.toInt()} speed_mps=${String.format(Locale.US, "%.2f", speedMps)} fix_age_ms=$fixAgeMs roundabout=$roundabout at=${SystemClock.elapsedRealtime()}")
                 navigationSpeech?.enqueue(
