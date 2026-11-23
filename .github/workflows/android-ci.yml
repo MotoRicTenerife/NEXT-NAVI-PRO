@@ -114,6 +114,7 @@ jobs:
           assert flow > route, "Traffic flow must render above the route underlay"
           print("TomTom flow source, proxy URL, speed styling and layer order verified.")
           PY
+      # Historical APK retrieval is optional; it must never block publishing the newly built APK.
       - name: Download the exact previously supplied alpha09 APK for upgrade validation
         id: alpha09
         continue-on-error: true
