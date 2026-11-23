@@ -6734,8 +6734,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 Toast.makeText(this, "Concedi la localizzazione per usare GPS e navigazione.", Toast.LENGTH_LONG).show()
             }
         } else if (requestCode == PERMISSION_AUDIO) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startJarvisListening()
-            else {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                navigationSpeech?.interruptForJarvis()
+                startJarvisListening()
+            } else {
                 if (::jarvisStatusText.isInitialized) jarvisStatusText.text = "Microfono non autorizzato"
                 Toast.makeText(this, "Consenti il microfono per usare Jarvis. Nessun ascolto in background.", Toast.LENGTH_LONG).show()
             }
