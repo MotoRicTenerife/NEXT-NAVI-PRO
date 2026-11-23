@@ -22,6 +22,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     private var activeEvent: NavigationSpeechEvent? = null
     private var activeStartedAtMs = 0L
     private var generation = 0L
+    private var pausedForJarvis = false
     private var closed = false
 
     init {
@@ -91,7 +92,28 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         pump()
     }
 
-    /** Called only after an explicit rider action to open Jarvis or play a Jarvis voice preview. */
+    /** Pause navigation speech while the microphone is actively listening. */
+    fun pauseForJarvis() = onMain {
+        pausedForJarvis = true
+        generation++
+        Log.i(TAG, "event=jarvis_listening_start pending=${pending.size} elapsed_ms=${SystemClock.elapsedRealtime()}")
+        pending.clear()
+        activeId = null
+        activeEvent = null
+        activeStartedAtMs = 0L
+        try { tts.stop() } catch (_: Exception) { }
+    }
+
+    /** Resume queued navigation after listening or after a Jarvis reply has been submitted. */
+    fun resumeAfterJarvis() = onMain {
+        if (pausedForJarvis) {
+            pausedForJarvis = false
+            Log.i(TAG, "event=jarvis_listening_end elapsed_ms=${SystemClock.elapsedRealtime()}")
+        }
+        pump()
+    }
+
+    /** Jarvis voice output is an intentional user-driven interruption. */
     fun interruptForJarvis() = onMain {
         generation++
         Log.i(TAG, "event=jarvis_interrupt pending=${pending.size} elapsed_ms=${SystemClock.elapsedRealtime()}")
@@ -120,6 +142,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
 
     fun close() = onMain {
         closed = true
+        pausedForJarvis = true
         pending.clear()
         activeId = null
         activeEvent = null
@@ -145,7 +168,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     }
 
     private fun pump() {
-        if (closed || activeId != null) return
+        if (closed || pausedForJarvis || activeId != null) return
         val now = SystemClock.elapsedRealtime()
         val (next, remaining) = NavigationSpeechQueuePolicy.takeNext(pending, now)
         pending.clear()
