@@ -3317,6 +3317,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
         voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+        navigationSpeech?.resumeAfterJarvis()
     }
 
     private fun onJarvisButtonPressed() {
@@ -3324,8 +3325,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // discard queued speech and invalidate an in-flight online answer before listening.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
-        navigationSpeech?.interruptForJarvis() ?: run { try { voiceGuide?.stop() } catch (_: Exception) { } }
         if (jarvisListening) {
+            navigationSpeech?.resumeAfterJarvis()
             speechRecognizer?.cancel()
             jarvisListening = false
             jarvisButton.text = jarvisButtonIdleLabel()
@@ -3336,6 +3337,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), PERMISSION_AUDIO)
             return
         }
+        navigationSpeech?.pauseForJarvis()
         startJarvisListening()
     }
 
@@ -3362,6 +3364,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     override fun onError(error: Int) {
                         runOnUiThread {
                             jarvisListening = false
+                            navigationSpeech?.resumeAfterJarvis()
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             if (::jarvisStatusText.isInitialized) {
                                 jarvisStatusText.text = when (error) {
@@ -3385,6 +3388,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                                 jarvisStatusText.text = appText("Hai detto: ") + transcript
                                 handleJarvisCommand(transcript)
                             }
+                            navigationSpeech?.resumeAfterJarvis()
                         }
                     }
                     override fun onPartialResults(partialResults: Bundle?) = Unit
