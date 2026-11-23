@@ -27,6 +27,8 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     private val maxPending = 5
     private var activeId: String? = null
     private var activeStartedAtMs = 0L
+    private var jarvisUtteranceId: String? = null
+    private var pausedForJarvis = false
     private var generation = 0L
     private var closed = false
 
@@ -64,13 +66,33 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         pump()
     }
 
+    /** Pause navigation while the rider is listening to Jarvis. */
     fun interruptForJarvis() = onMain {
         generation++
+        pausedForJarvis = true
+        jarvisUtteranceId = null
         pending.clear()
         activeId = null
         activeStartedAtMs = 0L
         try { tts.stop() } catch (_: Exception) { }
-        Log.i(TAG, "tts_interrupted_by_jarvis at=${SystemClock.elapsedRealtime()}")
+        Log.i(TAG, "tts_paused_for_jarvis at=${SystemClock.elapsedRealtime()}")
+    }
+
+    /** Register a Jarvis reply so navigation resumes only after that reply completes. */
+    fun beginJarvisSpeech(utteranceId: String) = onMain {
+        generation++
+        pausedForJarvis = true
+        pending.clear()
+        activeId = null
+        activeStartedAtMs = 0L
+        jarvisUtteranceId = utteranceId
+        try { tts.stop() } catch (_: Exception) { }
+    }
+
+    fun resumeAfterJarvis() = onMain {
+        jarvisUtteranceId = null
+        pausedForJarvis = false
+        pump()
     }
 
     fun discardPendingByPrefix(prefix: String) = onMain {
@@ -89,7 +111,15 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
 
     private fun complete(utteranceId: String?, outcome: String) {
         main.post {
-            if (utteranceId == null || utteranceId != activeId) return@post
+            if (utteranceId == null) return@post
+            if (utteranceId == jarvisUtteranceId) {
+                Log.i(TAG, "jarvis_tts_end id=$utteranceId outcome=$outcome at=${SystemClock.elapsedRealtime()}")
+                jarvisUtteranceId = null
+                pausedForJarvis = false
+                pump()
+                return@post
+            }
+            if (utteranceId != activeId) return@post
             val now = SystemClock.elapsedRealtime()
             val started = activeStartedAtMs
             Log.i(TAG, "tts_end id=$utteranceId outcome=$outcome at=$now duration_ms=${if (started > 0L) now - started else -1L}")
@@ -100,7 +130,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     }
 
     private fun pump() {
-        if (closed || activeId != null) return
+        if (closed || pausedForJarvis || activeId != null) return
         val now = SystemClock.elapsedRealtime()
         discardExpired(now)
         val next = pending.poll() ?: return
