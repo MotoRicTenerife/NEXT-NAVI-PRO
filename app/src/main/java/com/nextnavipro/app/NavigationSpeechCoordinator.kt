@@ -55,7 +55,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         if (closed || text.isBlank()) return@onMain
         val now = SystemClock.elapsedRealtime()
         discardExpired(now)
-        if (activeId?.startsWith("$key#") == true) return@onMain
+        // A later stage for the same maneuver may queue behind the current complete phrase.
         pending.removeAll { it.key == key }
         pending.add(Item(key, text, priority, now + maxAgeMs.coerceAtLeast(1L), sequence.incrementAndGet()))
         while (pending.size > maxPending) {
