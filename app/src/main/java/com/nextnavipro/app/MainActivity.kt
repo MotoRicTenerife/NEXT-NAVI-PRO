@@ -1853,7 +1853,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
         }
-        if (!ManeuverAnnouncementPolicy.isFixFresh(fixAgeMs, location.speed)) {
+        if (!NavigationFixFreshnessPolicy.isFresh(fixAgeMs, location.speed)) {
             if (currentSpeedLimit != null && !speedLimitProvisional) {
                 android.util.Log.d("NEXT_NAVI_GUIDANCE", "event=overspeed_stale_speed_fix fix_age_ms=$fixAgeMs")
             }
@@ -6201,7 +6201,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             (System.currentTimeMillis() - here.time).coerceAtLeast(0L)
         }
         val guidanceSpeedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        if (!ManeuverAnnouncementPolicy.isFixFresh(guidanceFixAgeMs, guidanceSpeedMps)) {
+        if (!NavigationFixFreshnessPolicy.isFresh(guidanceFixAgeMs, guidanceSpeedMps)) {
             android.util.Log.w(
                 "NEXT_NAVI_GUIDANCE",
                 "event=stale_guidance_fix fix_age_ms=$guidanceFixAgeMs accuracy_m=${if (here.hasAccuracy()) here.accuracy else -1f}"
