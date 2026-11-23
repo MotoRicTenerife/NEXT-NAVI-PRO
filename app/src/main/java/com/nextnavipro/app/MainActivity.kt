@@ -1853,7 +1853,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
         }
-        if (!ManeuverAnnouncementPolicy.isFixFresh(fixAgeMs)) {
+        if (!ManeuverAnnouncementPolicy.isFixFresh(fixAgeMs, location.speed)) {
             if (currentSpeedLimit != null && !speedLimitProvisional) {
                 android.util.Log.d("NEXT_NAVI_GUIDANCE", "event=overspeed_stale_speed_fix fix_age_ms=$fixAgeMs")
             }
@@ -6200,7 +6200,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         } else {
             (System.currentTimeMillis() - here.time).coerceAtLeast(0L)
         }
-        if (!ManeuverAnnouncementPolicy.isFixFresh(guidanceFixAgeMs)) {
+        val guidanceSpeedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
+        if (!ManeuverAnnouncementPolicy.isFixFresh(guidanceFixAgeMs, guidanceSpeedMps)) {
             android.util.Log.w(
                 "NEXT_NAVI_GUIDANCE",
                 "event=stale_guidance_fix fix_age_ms=$guidanceFixAgeMs accuracy_m=${if (here.hasAccuracy()) here.accuracy else -1f}"
@@ -6257,7 +6258,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
             routeText.textSize = 18f
         }
-        val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
+        val speedMps = guidanceSpeedMps
         val thresholds = ManeuverAnnouncementPolicy.thresholds(speedMps, reportedAccuracy, roundabout)
         val stage = ManeuverAnnouncementPolicy.stage(distanceToTurn, thresholds)
         if (maneuverIndex != announcedManeuverIndex) {
