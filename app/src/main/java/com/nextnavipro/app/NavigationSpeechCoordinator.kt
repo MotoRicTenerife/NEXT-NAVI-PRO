@@ -57,12 +57,13 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         discardExpired(now)
         // A later stage for the same maneuver may queue behind the current complete phrase.
         pending.removeAll { it.key == key }
-        pending.add(Item(key, text, priority, now + maxAgeMs.coerceAtLeast(1L), sequence.incrementAndGet()))
+        val itemSequence = sequence.incrementAndGet()
+        pending.add(Item(key, text, priority, now + maxAgeMs.coerceAtLeast(1L), itemSequence))
         while (pending.size > maxPending) {
             val lowest = pending.minWithOrNull(compareBy<Item> { it.priority }.thenByDescending { it.sequence }) ?: break
             pending.remove(lowest)
         }
-        Log.i(TAG, "tts_enqueue key=$key priority=$priority pending=${pending.size} at=$now")
+        Log.i(TAG, "tts_enqueue id=$key#$itemSequence priority=$priority pending=${pending.size} at=$now")
         pump()
     }
 
