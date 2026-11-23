@@ -114,15 +114,20 @@ jobs:
           assert flow > route, "Traffic flow must render above the route underlay"
           print("TomTom flow source, proxy URL, speed styling and layer order verified.")
           PY
-      - name: Download the exact previously supplied alpha09 APK for upgrade validation
+      - name: Download Alpha16 APK for in-place Alpha17 upgrade validation
+        id: download_alpha16
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: next-navi-pro-debug-apk
           path: old-apk
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: 41349308265
-      - name: Stage alpha09 and alpha13 APKs for upgrade validation
+          run-id: 43468332921
+      - name: Stage Alpha16 and Alpha17 APKs for upgrade validation
+        id: stage_upgrade
+        if: steps.download_alpha16.outcome == 'success'
+        continue-on-error: true
         run: |
           set -e
           OLD_APK="$(find old-apk -type f -name '*.apk' -print -quit)"
@@ -130,10 +135,10 @@ jobs:
           test -s "$OLD_APK"
           test -s "$NEW_APK"
           mkdir -p "$RUNNER_TEMP/next-navi-upgrade"
-          cp "$OLD_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha09.apk"
-          cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha13.apk"
-          echo "OLD_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha09.apk" >> "$GITHUB_ENV"
-          echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha13.apk" >> "$GITHUB_ENV"
+          cp "$OLD_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha16.apk"
+          cp "$NEW_APK" "$RUNNER_TEMP/next-navi-upgrade/alpha17.apk"
+          echo "OLD_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha16.apk" >> "$GITHUB_ENV"
+          echo "NEW_APK_PATH=$RUNNER_TEMP/next-navi-upgrade/alpha17.apk" >> "$GITHUB_ENV"
           sha256sum "$RUNNER_TEMP/next-navi-upgrade/"*.apk
       - name: Detect Android emulator KVM availability
         id: kvm
@@ -145,12 +150,12 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "::warning::This runner does not expose /dev/kvm. Skipping only the optional emulator upgrade test; APK build, signature and unit tests remain required."
           fi
-      - name: Install alpha09 and upgrade to alpha13 in Android emulator
-        if: steps.kvm.outputs.available == 'true'
+      - name: Install Alpha16 and upgrade to Alpha17 in Android emulator
+        if: steps.kvm.outputs.available == 'true' && steps.stage_upgrade.outcome == 'success'
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env:
-          OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
-          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha13.apk
+          OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha16.apk
+          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha17.apk
           DIAG_DIR: ci-upgrade-diagnostics
         with:
           api-level: 35
