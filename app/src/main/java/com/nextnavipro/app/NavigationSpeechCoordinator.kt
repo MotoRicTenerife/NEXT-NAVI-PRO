@@ -206,7 +206,7 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     companion object {
         private const val TAG = "NEXT_NAVI_TTS"
         const val PRIORITY_GUIDANCE = 60
-        const val PRIORITY_REROUTE = 40
+        const val PRIORITY_REROUTE = 70
         const val PRIORITY_START = 20
         const val PRIORITY_RADAR = 80
         const val PRIORITY_ARRIVAL = 90
