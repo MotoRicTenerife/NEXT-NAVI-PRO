@@ -115,6 +115,8 @@ jobs:
           print("TomTom flow source, proxy URL, speed styling and layer order verified.")
           PY
       - name: Download the exact previously supplied alpha09 APK for upgrade validation
+        id: alpha09
+        continue-on-error: true
         uses: actions/download-artifact@v5
         with:
           name: next-navi-pro-debug-apk
@@ -123,6 +125,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: 41349308265
       - name: Stage alpha09 and alpha13 APKs for upgrade validation
+        if: steps.alpha09.outcome == 'success'
         run: |
           set -e
           OLD_APK="$(find old-apk -type f -name '*.apk' -print -quit)"
@@ -146,7 +149,7 @@ jobs:
             echo "::warning::This runner does not expose /dev/kvm. Skipping only the optional emulator upgrade test; APK build, signature and unit tests remain required."
           fi
       - name: Install alpha09 and upgrade to alpha13 in Android emulator
-        if: steps.kvm.outputs.available == 'true'
+        if: steps.kvm.outputs.available == 'true' && steps.alpha09.outcome == 'success'
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env:
           OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
