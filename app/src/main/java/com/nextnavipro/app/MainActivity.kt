@@ -215,6 +215,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     private var lastRouteProgressAlongMeters = 0.0
     private var voiceGuide: TextToSpeech? = null
     private var voiceGuideReady = false
+    private var navigationSpeech: NavigationSpeechCoordinator? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var jarvisButton: Button
     private lateinit var jarvisStatusText: TextView
@@ -428,6 +429,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 val languageStatus = voiceGuide?.setLanguage(preferredJarvisTtsLocale()) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 voiceGuideReady = languageStatus >= TextToSpeech.LANG_AVAILABLE
                 if (voiceGuideReady) {
+                    navigationSpeech = voiceGuide?.let { NavigationSpeechCoordinator(it) }
                     applyJarvisVoicePreference()
                     // Navigation announcements keep a steady, safety-oriented pace.
                     voiceGuide?.setSpeechRate(0.96f)
@@ -3299,6 +3301,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
+        navigationSpeech?.interruptForJarvis()
         voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
     }
 
@@ -3307,7 +3310,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // discard queued speech and invalidate an in-flight online answer before listening.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
-        try { voiceGuide?.stop() } catch (_: Exception) { }
+        navigationSpeech?.interruptForJarvis() ?: run { try { voiceGuide?.stop() } catch (_: Exception) { } }
         if (jarvisListening) {
             speechRecognizer?.cancel()
             jarvisListening = false
@@ -4402,7 +4405,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     RouteInsightCache.save(this, target.name, target.point, origin, result)
                     resetRouteProgress()
                     updateRouteMetrics(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Avvio la navigazione", TextToSpeech.QUEUE_FLUSH, null, "navigation-start") }
+                    if (voiceGuideReady) navigationSpeech?.enqueue("navigation-start", "Avvio la navigazione", NavigationSpeechCoordinator.PRIORITY_START, 8_000L)
                     announcedManeuverIndex = -1
                     announcedStage = 0
                     drawRoute(result, true)
@@ -4453,6 +4456,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
     }
 
     private fun clearRoute() {
+        navigationSpeech?.discardPendingByPrefix("turn-")
         // A dashboard-started recording is a standalone trip log and must survive
         // arrival, route cancellation, or clearing a destination.
         if (!recordingIndependentOfNavigation) {
@@ -5782,11 +5786,12 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     speedingVoiceActive = true
                     lastSpeedingVoiceMs = nowElapsed
                     if (voiceGuideReady) {
-                        voiceGuide?.setSpeechRate(0.96f)
-                        voiceGuide?.speak(
-                            if (firstWarning) "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari."
-                            else "Attenzione, sei ancora sopra il limite di $limit chilometri orari.",
-                            TextToSpeech.QUEUE_FLUSH, null, "speed-limit-overspeed"
+                        navigationSpeech?.enqueue(
+                            key = "speed-limit-overspeed",
+                            text = if (firstWarning) "Attenzione. Limite di velocità $limit chilometri orari. Stai viaggiando a $speedKmh chilometri orari."
+                                else "Attenzione, sei ancora sopra il limite di $limit chilometri orari.",
+                            priority = NavigationSpeechCoordinator.PRIORITY_OVERSPEED,
+                            maxAgeMs = 20_000L
                         )
                     }
                 }
@@ -5893,10 +5898,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             candidates.first.kind.contains("media", ignoreCase = true) -> "Attenzione, controllo della velocità media tra circa "
             else -> "Attenzione, possibile autovelox tra circa "
         }
-        if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak(
-            warning + candidates.second.toInt() + " metri",
-            TextToSpeech.QUEUE_ADD, null, "radar-" + candidates.first.osmId
-        ) }
+        if (voiceGuideReady) {
+            navigationSpeech?.enqueue(
+                key = "radar-${candidates.first.osmId}",
+                text = warning + candidates.second.toInt() + " metri",
+                priority = NavigationSpeechCoordinator.PRIORITY_RADAR,
+                maxAgeMs = 10_000L
+            )
+        }
         radarText.text = "⚠ " + candidates.first.kind.uppercase(Locale.ITALY) + " • " + candidates.second.toInt() + " m"
         updateRadarStatusColor()
     }
@@ -5952,7 +5961,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         clearRoute()
         routeText.text = appText("SEI ARRIVATO A DESTINAZIONE")
         if (voiceGuideReady) {
-            voiceGuide?.speak("Sei arrivato a destinazione.", TextToSpeech.QUEUE_FLUSH, null, "navigation-arrived")
+            navigationSpeech?.enqueue("navigation-arrived", "Sei arrivato a destinazione.", NavigationSpeechCoordinator.PRIORITY_ARRIVAL, 30_000L)
         }
         Toast.makeText(this, "Sei arrivato a destinazione", Toast.LENGTH_LONG).show()
         return true
@@ -6043,7 +6052,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     } ?: recalculated.firstInstruction
                     if (::routeText.isInitialized) routeText.text = "PERCORSO RICALCOLATO\n" + firstInstruction
                     updateTurnGuidance(currentLocation)
-                    if (voiceGuideReady) { voiceGuide?.setSpeechRate(0.96f); voiceGuide?.speak("Percorso ricalcolato", TextToSpeech.QUEUE_FLUSH, null, "reroute") }
+                    if (voiceGuideReady) navigationSpeech?.enqueue("reroute", "Percorso ricalcolato", NavigationSpeechCoordinator.PRIORITY_REROUTE, 8_000L)
                 }
             } catch (_: Exception) {
                 runOnUiThread {
@@ -6160,6 +6169,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val confidenceLimit = minOf(30f, maxOf(12f, reportedAccuracy * 1.5f))
         updateRouteMetrics(route, match.alongRouteMeters)
         if (match.crossTrackMeters > confidenceLimit) {
+            navigationSpeech?.discardPendingByPrefix("turn-")
             if (::routeText.isInitialized && route.maneuvers.isNotEmpty()) {
                 routeText.text = "POSIZIONE FUORI TRACCIA\nAttendo un aggancio affidabile alla strada"
             }
@@ -6206,32 +6216,39 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             routeText.textSize = 18f
         }
         val speedMps = if (here.hasSpeed()) here.speed.coerceAtLeast(0f) else 0f
-        val earlyThreshold = (speedMps * 18f).coerceIn(150f, 500f)
-        val mediumThreshold = (speedMps * 7f).coerceIn(60f, 180f)
+        val thresholds = NavigationAnnouncementPolicy.thresholds(speedMps, roundabout)
+        val fixAgeMs = if (here.elapsedRealtimeNanos > 0L) {
+            ((SystemClock.elapsedRealtimeNanos() - here.elapsedRealtimeNanos).coerceAtLeast(0L) / 1_000_000L)
+        } else -1L
+        val fixFreshForVoice = fixAgeMs < 0L || fixAgeMs <= 3_500L
         val stage = when {
-            distanceToTurn <= 10.0 -> 4
-            distanceToTurn <= 50.0 -> 3
-            distanceToTurn <= mediumThreshold -> 2
-            distanceToTurn <= earlyThreshold -> 1
+            distanceToTurn <= thresholds.confirmationMeters -> 2
+            distanceToTurn <= thresholds.advanceMeters -> 1
             else -> 0
         }
         if (maneuverIndex != announcedManeuverIndex) {
+            navigationSpeech?.discardPendingByPrefix("turn-")
             announcedManeuverIndex = maneuverIndex
             announcedStage = 0
         }
-        if (stage > announcedStage) {
-            announcedStage = stage
+        if (stage > announcedStage && fixFreshForVoice && voiceGuideReady && navigationSpeech != null) {
             val spoken = when (stage) {
-                1 -> "Tra poco, " + instruction
-                2 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
-                3 -> "Tra cinquanta metri, " + instruction
-                4 -> instruction
+                1 -> "Tra circa " + distanceToTurn.toInt() + " metri, " + instruction
+                2 -> "Ora, " + instruction
                 else -> ""
             }
-            if (spoken.isNotBlank() && voiceGuideReady) {
-                voiceGuide?.setSpeechRate(0.96f)
-                voiceGuide?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "turn-" + maneuverIndex + "-stage-" + stage)
+            if (spoken.isNotBlank()) {
+                announcedStage = stage
+                android.util.Log.i("NEXT_NAVI_SPEECH", "turn_decision maneuver=$maneuverIndex stage=$stage distance_m=${distanceToTurn.toInt()} speed_mps=${String.format(Locale.US, "%.2f", speedMps)} fix_age_ms=$fixAgeMs roundabout=$roundabout at=${SystemClock.elapsedRealtime()}")
+                navigationSpeech?.enqueue(
+                    key = "turn-$maneuverIndex",
+                    text = spoken,
+                    priority = NavigationSpeechCoordinator.PRIORITY_GUIDANCE,
+                    maxAgeMs = 12_000L
+                )
             }
+        } else if (stage > announcedStage && !fixFreshForVoice) {
+            android.util.Log.w("NEXT_NAVI_SPEECH", "turn_deferred_stale_fix maneuver=$maneuverIndex fix_age_ms=$fixAgeMs")
         }
     }
 
@@ -6827,6 +6844,8 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         gpsMarkerAnimator = null
         mapView?.onDestroy()
         mapView = null
+        navigationSpeech?.close()
+        navigationSpeech = null
         voiceGuide?.stop()
         voiceGuide?.shutdown()
         voiceGuide = null
