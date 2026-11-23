@@ -21,6 +21,8 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
     private var activeId: String? = null
     private var activeEvent: NavigationSpeechEvent? = null
     private var activeStartedAtMs = 0L
+    private var jarvisSpeechId: String? = null
+    private var jarvisSpeechStartedAtMs = 0L
     private var generation = 0L
     private var pausedForJarvis = false
     private var closed = false
@@ -29,8 +31,13 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 main.post {
-                    if (utteranceId != activeId) return@post
                     val now = SystemClock.elapsedRealtime()
+                    if (utteranceId == jarvisSpeechId) {
+                        jarvisSpeechStartedAtMs = now
+                        Log.i(TAG, "event=jarvis_tts_start id=$utteranceId elapsed_ms=$now")
+                        return@post
+                    }
+                    if (utteranceId != activeId) return@post
                     activeStartedAtMs = now
                     val event = activeEvent ?: return@post
                     Log.i(TAG, "event=tts_start id=${event.eventId} key=${event.key} " +
@@ -101,11 +108,38 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         activeId = null
         activeEvent = null
         activeStartedAtMs = 0L
+        jarvisSpeechId = null
+        jarvisSpeechStartedAtMs = 0L
         try { tts.stop() } catch (_: Exception) { }
     }
 
-    /** Resume queued navigation after listening or after a Jarvis reply has been submitted. */
+    /** Register a Jarvis utterance so navigation stays paused until its real TTS completion callback. */
+    fun beginJarvisSpeech(utteranceId: String) = onMain {
+        generation++
+        pending.clear()
+        activeId = null
+        activeEvent = null
+        activeStartedAtMs = 0L
+        pausedForJarvis = true
+        jarvisSpeechId = utteranceId
+        jarvisSpeechStartedAtMs = 0L
+        Log.i(TAG, "event=jarvis_speech_enqueue id=$utteranceId elapsed_ms=${SystemClock.elapsedRealtime()}")
+        try { tts.stop() } catch (_: Exception) { }
+    }
+
+    fun cancelJarvisSpeech(utteranceId: String) = onMain {
+        if (jarvisSpeechId == utteranceId) {
+            Log.w(TAG, "event=jarvis_speech_cancel id=$utteranceId")
+            jarvisSpeechId = null
+            jarvisSpeechStartedAtMs = 0L
+            pausedForJarvis = false
+            pump()
+        }
+    }
+
+    /** Resume only after microphone capture; never unpause while Jarvis audio is still playing. */
     fun resumeAfterJarvis() = onMain {
+        if (jarvisSpeechId != null) return@onMain
         if (pausedForJarvis) {
             pausedForJarvis = false
             Log.i(TAG, "event=jarvis_listening_end elapsed_ms=${SystemClock.elapsedRealtime()}")
@@ -137,6 +171,8 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         activeId = null
         activeEvent = null
         activeStartedAtMs = 0L
+        jarvisSpeechId = null
+        jarvisSpeechStartedAtMs = 0L
         try { tts.stop() } catch (_: Exception) { }
     }
 
@@ -147,13 +183,25 @@ internal class NavigationSpeechCoordinator(private val tts: TextToSpeech) {
         activeId = null
         activeEvent = null
         activeStartedAtMs = 0L
+        jarvisSpeechId = null
+        jarvisSpeechStartedAtMs = 0L
         try { tts.setOnUtteranceProgressListener(null) } catch (_: Exception) { }
     }
 
     private fun complete(utteranceId: String?, outcome: String) {
         main.post {
-            if (utteranceId == null || utteranceId != activeId) return@post
+            if (utteranceId == null) return@post
             val now = SystemClock.elapsedRealtime()
+            if (utteranceId == jarvisSpeechId) {
+                val playbackMs = if (jarvisSpeechStartedAtMs > 0L) (now - jarvisSpeechStartedAtMs).coerceAtLeast(0L) else 0L
+                Log.i(TAG, "event=jarvis_tts_$outcome id=$utteranceId playback_ms=$playbackMs elapsed_ms=$now")
+                jarvisSpeechId = null
+                jarvisSpeechStartedAtMs = 0L
+                pausedForJarvis = false
+                pump()
+                return@post
+            }
+            if (utteranceId != activeId) return@post
             val event = activeEvent
             val playbackMs = if (activeStartedAtMs > 0L) (now - activeStartedAtMs).coerceAtLeast(0L) else 0L
             if (event != null) {
