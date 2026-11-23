@@ -9,7 +9,16 @@ internal data class ManeuverAnnouncementThresholds(
 internal object ManeuverAnnouncementPolicy {
     const val MAX_GUIDANCE_FIX_AGE_MS = 3_500L
 
-    fun isFixFresh(ageMillis: Long): Boolean = ageMillis in 0L..MAX_GUIDANCE_FIX_AGE_MS
+    fun isFixFresh(ageMillis: Long, speedMetersPerSecond: Float = 0f): Boolean {
+        if (ageMillis < 0L) return false
+        val speed = speedMetersPerSecond.takeIf { it.isFinite() && it >= 0f } ?: 0f
+        val maxAge = when {
+            speed >= 8f -> 1_800L
+            speed >= 2.5f -> 2_500L
+            else -> MAX_GUIDANCE_FIX_AGE_MS
+        }
+        return ageMillis <= maxAge
+    }
 
     fun thresholds(speedMetersPerSecond: Float, accuracyMeters: Float?, isRoundabout: Boolean): ManeuverAnnouncementThresholds {
         val speed = speedMetersPerSecond.takeIf { it.isFinite() && it >= 0f } ?: 0f
