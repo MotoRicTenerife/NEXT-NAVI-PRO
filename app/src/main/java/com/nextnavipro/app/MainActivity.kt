@@ -3297,12 +3297,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
             pendingJarvisSpeech = message
+            navigationSpeech?.resumeAfterJarvis()
             return
         }
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
-        navigationSpeech?.interruptForJarvis()
-        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
+        val utteranceId = "jarvis-" + SystemClock.elapsedRealtime()
+        navigationSpeech?.beginJarvisSpeech(utteranceId)
+        val result = voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result == null || result == TextToSpeech.ERROR) navigationSpeech?.resumeAfterJarvis()
     }
 
     private fun onJarvisButtonPressed() {
@@ -3310,10 +3313,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // discard queued speech and invalidate an in-flight online answer before listening.
         jarvisResponseGeneration++
         pendingJarvisSpeech = null
-        navigationSpeech?.interruptForJarvis() ?: run { try { voiceGuide?.stop() } catch (_: Exception) { } }
         if (jarvisListening) {
             speechRecognizer?.cancel()
             jarvisListening = false
+            navigationSpeech?.resumeAfterJarvis()
             jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Ascolto annullato")
             return
@@ -3322,6 +3325,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), PERMISSION_AUDIO)
             return
         }
+        navigationSpeech?.interruptForJarvis()
         startJarvisListening()
     }
 
@@ -3348,6 +3352,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     override fun onError(error: Int) {
                         runOnUiThread {
                             jarvisListening = false
+                            navigationSpeech?.resumeAfterJarvis()
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             if (::jarvisStatusText.isInitialized) {
                                 jarvisStatusText.text = when (error) {
@@ -3362,6 +3367,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     override fun onResults(results: Bundle?) {
                         runOnUiThread {
                             jarvisListening = false
+                            navigationSpeech?.resumeAfterJarvis()
                             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
                             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                                 ?.firstOrNull().orEmpty().trim()
@@ -3393,6 +3399,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             speechRecognizer?.startListening(intent)
         } catch (_: Exception) {
             jarvisListening = false
+            navigationSpeech?.resumeAfterJarvis()
             jarvisButton.text = jarvisButtonIdleLabel()
             jarvisStatusText.text = appText("Impossibile avviare il microfono")
             speakJarvis(appText("Non riesco ad avviare il microfono. Puoi riprovare."))
@@ -6783,6 +6790,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (jarvisListening) {
             try { speechRecognizer?.cancel() } catch (_: Exception) { }
             jarvisListening = false
+            navigationSpeech?.resumeAfterJarvis()
             if (::jarvisButton.isInitialized) jarvisButton.text = jarvisButtonIdleLabel()
             if (::jarvisStatusText.isInitialized) jarvisStatusText.text = appText("Premi il microfono e parla")
         }
