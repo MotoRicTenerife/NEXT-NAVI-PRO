@@ -3115,11 +3115,14 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     selected == "discreet" -> "Sono qui. Dimmi."
                     else -> "Ciao! Sono qui, pronto ad aiutarti."
                 }
-                voiceGuide?.setSpeechRate(((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f)
+                val previewRate = ((seekBars["jarvis_voice_rate"]?.progress ?: 26) + 70) / 100f
+                voiceGuide?.setSpeechRate(previewRate)
                 voiceGuide?.setPitch(((seekBars["jarvis_voice_pitch"]?.progress ?: 30) + 70) / 100f)
                 if (voiceGuideReady) {
-                    navigationSpeech?.interruptForJarvis()
-                    voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, "jarvis-personality-preview")
+                    val utteranceId = "jarvis-personality-preview-" + SystemClock.elapsedRealtime()
+                    navigationSpeech?.beginJarvisSpeech(utteranceId)
+                    val result = voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                    if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
                 }
             }
         }
@@ -3312,13 +3315,15 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         if (remember) jarvisMemory.addMessage("assistant", message)
         if (!voiceGuideReady) {
             pendingJarvisSpeech = message
+            navigationSpeech?.resumeAfterJarvis()
             return
         }
-        navigationSpeech?.interruptForJarvis()
         val voiceRate = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f
         voiceGuide?.setSpeechRate(voiceRate)
-        voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis-" + System.currentTimeMillis())
-        navigationSpeech?.resumeAfterJarvis()
+        val utteranceId = "jarvis-" + SystemClock.elapsedRealtime()
+        navigationSpeech?.beginJarvisSpeech(utteranceId)
+        val result = voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
     }
 
     private fun onJarvisButtonPressed() {
@@ -3760,8 +3765,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             return
         }
         voiceGuide?.setSpeechRate(getSharedPreferences(PREFS, MODE_PRIVATE).getInt("jarvis_voice_rate", 96).coerceIn(70, 120) / 100f)
-        navigationSpeech?.interruptForJarvis()
-        voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, "voice-test")
+        val utteranceId = "voice-test-" + SystemClock.elapsedRealtime()
+        navigationSpeech?.beginJarvisSpeech(utteranceId)
+        val result = voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
     }
 
     private fun applyTheme() {
