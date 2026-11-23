@@ -40,7 +40,7 @@ state="$( "${ADB[@]}" get-state 2>&1 | tr -d '\r' )"
 echo "Installing original Alpha16 APK (versionCode 16) from run 43468332921."
 if ! out="$( "${ADB[@]}" install --no-streaming -t "$OLD_APK" 2>&1 )"; then
   printf '%s\n' "$out"
-  fail "Fresh alpha09 installation failed before upgrade test."
+  fail "Fresh Alpha16 installation failed before upgrade test."
 fi
 printf '%s\n' "$out"
 "${ADB[@]}" shell dumpsys package "$PKG" | grep -m1 -E 'versionCode=16|versionCode 16' || true
@@ -51,7 +51,7 @@ if ! out="$( "${ADB[@]}" install --no-streaming -r -t "$NEW_APK" 2>&1 )"; then
   "${ADB[@]}" logcat -b all -d -v threadtime |
     grep -Ei 'PackageManager|PackageInstaller|installd|system_server|INSTALL_FAILED|Failure|signature|version downgrade|parse error' |
     tail -n 300 || true
-  fail "In-place alpha09 -> alpha13 update failed. PackageManager's exact error is above."
+  fail "In-place Alpha16 -> Alpha17 update failed. PackageManager's exact error is above."
 fi
 printf '%s\n' "$out"
 [[ "$out" == *"Success"* ]] || fail "ADB did not report successful in-place update."
@@ -66,7 +66,7 @@ start="$( "${ADB[@]}" shell am start -W -n "$PKG/$ACT" 2>&1 | tr -d '\r' )"
 printf '%s\n' "$start"
 [[ "$start" == *"Status: ok"* ]] || fail "MainActivity did not start after the update."
 pid1="$( "${ADB[@]}" shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true )"
-[ -n "$pid1" ] || fail "App process did not start after alpha13 upgrade."
+[ -n "$pid1" ] || fail "App process did not start after Alpha17 upgrade."
 sleep 10
 pid2="$( "${ADB[@]}" shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true )"
 [ -n "$pid2" ] || fail "App process exited within 10 seconds after upgrade."
