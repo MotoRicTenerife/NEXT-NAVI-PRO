@@ -154,8 +154,8 @@ jobs:
         if: steps.kvm.outputs.available == 'true' && steps.stage_upgrade.outcome == 'success'
         uses: reactivecircus/android-emulator-runner@v2.38.0
         env:
-          OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha09.apk
-          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha13.apk
+          OLD_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha16.apk
+          NEW_APK_PATH: ${{ runner.temp }}/next-navi-upgrade/alpha17.apk
           DIAG_DIR: ci-upgrade-diagnostics
         with:
           api-level: 35
