@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs the exact alpha09 APK previously supplied to the user, then performs
-# an in-place update to alpha13. Captures PackageManager's real failure reason.
+# Installs the exact Alpha16 APK previously supplied to the user, then performs
+# an in-place update to Alpha17. Captures PackageManager's real failure reason.
 set -Eeuo pipefail
 
 PKG="com.nextnavipro.app.debug"
@@ -32,20 +32,20 @@ fail() {
   exit 1
 }
 
-[ -s "$OLD_APK" ] || fail "The alpha09 APK from GitHub Actions run 1184 is missing."
-[ -s "$NEW_APK" ] || fail "The alpha13 APK built by this workflow is missing."
+[ -s "$OLD_APK" ] || fail "The Alpha16 APK from GitHub Actions run 43468332921 is missing."
+[ -s "$NEW_APK" ] || fail "The Alpha17 APK built by this workflow is missing."
 state="$( "${ADB[@]}" get-state 2>&1 | tr -d '\r' )"
 [ "$state" = "device" ] || fail "Emulator ADB state is '$state', not device."
 
-echo "Installing original alpha09 APK (versionCode 8) from run 1184."
+echo "Installing original Alpha16 APK (versionCode 16) from run 43468332921."
 if ! out="$( "${ADB[@]}" install --no-streaming -t "$OLD_APK" 2>&1 )"; then
   printf '%s\n' "$out"
   fail "Fresh alpha09 installation failed before upgrade test."
 fi
 printf '%s\n' "$out"
-"${ADB[@]}" shell dumpsys package "$PKG" | grep -m1 -E 'versionCode=8|versionCode 8' || true
+"${ADB[@]}" shell dumpsys package "$PKG" | grep -m1 -E 'versionCode=16|versionCode 16' || true
 
-echo "Updating the installed alpha09 in place to alpha13 (versionCode 13)."
+echo "Updating the installed Alpha16 in place to Alpha17 (versionCode 17)."
 if ! out="$( "${ADB[@]}" install --no-streaming -r -t "$NEW_APK" 2>&1 )"; then
   printf '%s\n' "$out"
   "${ADB[@]}" logcat -b all -d -v threadtime |
@@ -58,8 +58,8 @@ printf '%s\n' "$out"
 
 dump="$( "${ADB[@]}" shell dumpsys package "$PKG" | tr -d '\r' )"
 printf '%s\n' "$dump" > "$OUT/package-after-upgrade.txt"
-echo "$dump" | grep -m1 -E 'versionCode=13|versionCode 13' ||
-  fail "Package manager did not report versionCode 13 after update."
+echo "$dump" | grep -m1 -E 'versionCode=17|versionCode 17' ||
+  fail "Package manager did not report versionCode 17 after update."
 
 "${ADB[@]}" shell am force-stop "$PKG" >/dev/null 2>&1 || true
 start="$( "${ADB[@]}" shell am start -W -n "$PKG/$ACT" 2>&1 | tr -d '\r' )"
@@ -70,4 +70,4 @@ pid1="$( "${ADB[@]}" shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true )"
 sleep 10
 pid2="$( "${ADB[@]}" shell pidof "$PKG" 2>/dev/null | tr -d '\r' || true )"
 [ -n "$pid2" ] || fail "App process exited within 10 seconds after upgrade."
-echo "PASS: alpha09 (versionCode 8) installed, updated in place to alpha13 (versionCode 13), and launched."
+echo "PASS: Alpha16 (versionCode 16) installed, updated in place to Alpha17 (versionCode 17), and launched."
