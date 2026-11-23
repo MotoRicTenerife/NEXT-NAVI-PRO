@@ -3122,7 +3122,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                     val utteranceId = "jarvis-personality-preview-" + SystemClock.elapsedRealtime()
                     navigationSpeech?.beginJarvisSpeech(utteranceId)
                     val result = voiceGuide?.speak(line, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-                    if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
+                    if (result == null || result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
                 }
             }
         }
@@ -3323,7 +3323,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val utteranceId = "jarvis-" + SystemClock.elapsedRealtime()
         navigationSpeech?.beginJarvisSpeech(utteranceId)
         val result = voiceGuide?.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
+        if (result == null || result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
     }
 
     private fun onJarvisButtonPressed() {
@@ -3768,7 +3768,7 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val utteranceId = "voice-test-" + SystemClock.elapsedRealtime()
         navigationSpeech?.beginJarvisSpeech(utteranceId)
         val result = voiceGuide?.speak(localizedVoiceTestPhrase(), TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        if (result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
+        if (result == null || result == TextToSpeech.ERROR) navigationSpeech?.cancelJarvisSpeech(utteranceId)
     }
 
     private fun applyTheme() {
