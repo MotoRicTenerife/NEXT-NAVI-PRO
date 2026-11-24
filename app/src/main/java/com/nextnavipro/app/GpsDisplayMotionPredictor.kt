@@ -1,18 +1,17 @@
 package com.nextnavipro.app
 
-import android.location.Location
 import kotlin.math.PI
 import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.sqrt
+
+/** Coordinates projected for the map arrow only; never use as a navigation fix. */
+internal data class GpsDisplayPoint(val latitude: Double, val longitude: Double)
 
 /**
  * Bounded dead-reckoning used only by the map arrow.
- *
- * Navigation, road matching, speed limits, radar checks and trip logs must continue
- * to consume the accepted/filtered GPS fix, never this predicted display coordinate.
+ * Route matching, speed limits, radar checks, guidance and trip logs keep using measured fixes.
  */
 internal object GpsDisplayMotionPredictor {
     private const val EARTH_RADIUS_METERS = 6_371_000.0
@@ -20,16 +19,21 @@ internal object GpsDisplayMotionPredictor {
     private const val MAX_PREDICTION_MS = 650L
 
     fun predict(
-        measured: Location,
+        latitude: Double,
+        longitude: Double,
+        speedMetersPerSecond: Float?,
+        bearingDegrees: Float?,
+        accuracyMeters: Float?,
+        bearingAccuracyDegrees: Float?,
         fixAgeMs: Long,
         courseDeltaDegrees: Float? = null
-    ): Location {
-        val result = Location(measured)
-        if (!measured.hasSpeed() || !measured.hasBearing() || !measured.hasAccuracy()) return result
-        if (fixAgeMs !in 0L..MAX_FIX_AGE_MS || measured.accuracy > 20f) return result
-        if (!measured.speed.isFinite() || measured.speed < 2.5f) return result
-        if (!measured.bearing.isFinite()) return result
-        if (measured.hasBearingAccuracy() && measured.bearingAccuracyDegrees > 35f) return result
+    ): GpsDisplayPoint? {
+        val speed = speedMetersPerSecond?.takeIf { it.isFinite() && it >= 2.5f } ?: return null
+        val bearing = bearingDegrees?.takeIf { it.isFinite() } ?: return null
+        val accuracy = accuracyMeters?.takeIf { it.isFinite() && it > 0f } ?: return null
+        if (!latitude.isFinite() || !longitude.isFinite() || accuracy > 20f) return null
+        if (bearingAccuracyDegrees != null && (!bearingAccuracyDegrees.isFinite() || bearingAccuracyDegrees > 35f)) return null
+        if (fixAgeMs !in 0L..MAX_FIX_AGE_MS) return null
 
         val turnDelta = courseDeltaDegrees?.takeIf { it.isFinite() } ?: 0f
         val turnFactor = when {
@@ -37,17 +41,16 @@ internal object GpsDisplayMotionPredictor {
             turnDelta >= 20f -> 0.55f
             else -> 1f
         }
-        val leadMs = if (measured.speed >= 8f) 220L else 120L
+        val leadMs = if (speed >= 8f) 220L else 120L
         val horizonMs = (fixAgeMs + (leadMs * turnFactor).toLong())
             .coerceAtMost(MAX_PREDICTION_MS)
-        if (horizonMs < 40L) return result
+        if (horizonMs < 40L) return null
 
-        val distanceMeters = measured.speed.toDouble() * horizonMs / 1_000.0
-        val bearingRadians = measured.bearing * PI / 180.0
-        val latitude1 = measured.latitude * PI / 180.0
-        val longitude1 = measured.longitude * PI / 180.0
+        val distanceMeters = speed.toDouble() * horizonMs / 1_000.0
+        val bearingRadians = bearing * PI / 180.0
+        val latitude1 = latitude * PI / 180.0
+        val longitude1 = longitude * PI / 180.0
         val angularDistance = distanceMeters / EARTH_RADIUS_METERS
-
         val latitude2 = asin(
             sin(latitude1) * cos(angularDistance) +
                 cos(latitude1) * sin(angularDistance) * cos(bearingRadians)
@@ -56,8 +59,9 @@ internal object GpsDisplayMotionPredictor {
             sin(bearingRadians) * sin(angularDistance) * cos(latitude1),
             cos(angularDistance) - sin(latitude1) * sin(latitude2)
         )
-        result.latitude = latitude2 * 180.0 / PI
-        result.longitude = ((longitude2 * 180.0 / PI + 540.0) % 360.0) - 180.0
-        return result
+        return GpsDisplayPoint(
+            latitude2 * 180.0 / PI,
+            ((longitude2 * 180.0 / PI + 540.0) % 360.0) - 180.0
+        )
     }
 }
