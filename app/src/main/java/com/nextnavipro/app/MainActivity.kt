@@ -4871,7 +4871,28 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         updateSpeedDisplay(if (location.hasSpeed()) speed.toInt() else null)
         updateGpsStatus(location)
         if (renderMarker) {
-            animateGpsMarkerTo(smoothed, markerMovingTimeMs)
+            // Predict only the arrow's display coordinate. All navigation decisions below
+            // continue to use the measured/filtered location and cannot inherit dead-reckoning error.
+            val previousBearing = previousRaw?.takeIf { it.hasBearing() }?.bearing
+            val currentBearing = location.takeIf { it.hasBearing() }?.bearing
+            val courseDelta = if (previousBearing != null && currentBearing != null) {
+                kotlin.math.abs(((currentBearing - previousBearing + 540f) % 360f) - 180f)
+            } else null
+            val displayLocation = Location(smoothed)
+            GpsDisplayMotionPredictor.predict(
+                latitude = smoothed.latitude,
+                longitude = smoothed.longitude,
+                speedMetersPerSecond = smoothed.takeIf { it.hasSpeed() }?.speed,
+                bearingDegrees = smoothed.takeIf { it.hasBearing() }?.bearing,
+                accuracyMeters = smoothed.takeIf { it.hasAccuracy() }?.accuracy,
+                bearingAccuracyDegrees = smoothed.takeIf { it.hasBearingAccuracy() }?.bearingAccuracyDegrees,
+                fixAgeMs = ageMs,
+                courseDeltaDegrees = courseDelta
+            )?.let { predicted ->
+                displayLocation.latitude = predicted.latitude
+                displayLocation.longitude = predicted.longitude
+            }
+            animateGpsMarkerTo(displayLocation, markerMovingTimeMs)
             updateMapForLocation(smoothed, lastCameraLocation == null, updateMarker = false)
         }
         updateTurnGuidance(smoothed)
