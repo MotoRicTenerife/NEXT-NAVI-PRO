@@ -1,58 +1,53 @@
 package com.nextnavipro.app
 
-import android.location.Location
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.hypot
 
 class GpsDisplayMotionPredictorTest {
-    private fun fix(speed: Float = 25f, bearing: Float = 90f, accuracy: Float = 4f): Location =
-        Location("test").apply {
-            latitude = 28.0
-            longitude = -16.0
-            this.speed = speed
-            this.bearing = bearing
-            this.accuracy = accuracy
-            setSpeed(speed)
-            setBearing(bearing)
-            setAccuracy(accuracy)
-            setBearingAccuracyDegrees(8f)
-        }
+    private fun predict(speed: Float = 25f, bearing: Float = 90f, accuracy: Float = 4f, age: Long = 0L, turn: Float? = 0f) =
+        GpsDisplayMotionPredictor.predict(
+            latitude = 28.0,
+            longitude = -16.0,
+            speedMetersPerSecond = speed,
+            bearingDegrees = bearing,
+            accuracyMeters = accuracy,
+            bearingAccuracyDegrees = 8f,
+            fixAgeMs = age,
+            courseDeltaDegrees = turn
+        )
 
     @Test fun predictsForwardBySpeedAndBearingOnlyForDisplay() {
-        val measured = fix()
-        val predicted = GpsDisplayMotionPredictor.predict(measured, 0L)
-        assertEquals(measured.latitude, predicted.latitude, 0.000001)
-        assertTrue(predicted.longitude > measured.longitude)
-        assertTrue(measured.distanceTo(predicted) in 5.0f..6.0f)
+        val predicted = predict()
+        assertNotNull(predicted)
+        assertEquals(28.0, predicted!!.latitude, 0.00001)
+        assertTrue(predicted.longitude > -16.0)
+        val eastMeters = (predicted.longitude + 16.0) * 111_000.0 * kotlin.math.cos(28.0 * Math.PI / 180.0)
+        assertTrue(eastMeters in 5.0..6.0)
     }
 
     @Test fun stationaryOrPoorAccuracyFixIsNotPredicted() {
-        val stationary = fix(speed = 0.2f)
-        val inaccurate = fix(accuracy = 30f)
-        assertEquals(0f, stationary.distanceTo(GpsDisplayMotionPredictor.predict(stationary, 0L)), 0f)
-        assertEquals(0f, inaccurate.distanceTo(GpsDisplayMotionPredictor.predict(inaccurate, 0L)), 0f)
+        assertNull(predict(speed = 0.2f))
+        assertNull(predict(accuracy = 30f))
     }
 
     @Test fun sharpCourseChangeReducesPredictionDistance() {
-        val measured = fix()
-        val straight = GpsDisplayMotionPredictor.predict(measured, 0L, 0f)
-        val turning = GpsDisplayMotionPredictor.predict(measured, 0L, 45f)
-        assertTrue(turning.distanceTo(measured) < straight.distanceTo(measured))
+        val straight = predict(turn = 0f)!!
+        val turning = predict(turn = 45f)!!
+        val straightMeters = hypot((straight.longitude + 16.0) * 98_000.0, (straight.latitude - 28.0) * 111_000.0)
+        val turningMeters = hypot((turning.longitude + 16.0) * 98_000.0, (turning.latitude - 28.0) * 111_000.0)
+        assertTrue(turningMeters < straightMeters)
     }
 
-    @Test fun staleFixIsNotExtrapolatedWithoutBound() {
-        val measured = fix()
-        val predicted = GpsDisplayMotionPredictor.predict(measured, 1_001L)
-        assertEquals(0f, measured.distanceTo(predicted), 0f)
+    @Test fun staleOrUnreliableFixIsNotExtrapolated() {
+        assertNull(predict(age = 1_001L))
+        assertNull(GpsDisplayMotionPredictor.predict(28.0, -16.0, 25f, 90f, 4f, 40f, 0L))
     }
 
-    @Test fun predictionNeverChangesTheMeasuredLocation() {
-        val measured = fix()
-        val originalLatitude = measured.latitude
-        val originalLongitude = measured.longitude
-        GpsDisplayMotionPredictor.predict(measured, 100L)
-        assertEquals(originalLatitude, measured.latitude, 0.0)
-        assertEquals(originalLongitude, measured.longitude, 0.0)
+    @Test fun missingBearingDoesNotInventDirection() {
+        assertNull(GpsDisplayMotionPredictor.predict(28.0, -16.0, 25f, null, 4f, null, 0L))
     }
 }
