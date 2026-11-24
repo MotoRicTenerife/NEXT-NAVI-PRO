@@ -6573,6 +6573,27 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val reliableCourse = markerTarget.hasBearing() && markerTarget.hasSpeed() &&
             markerTarget.speed >= 3f &&
             (!markerTarget.hasBearingAccuracy() || markerTarget.bearingAccuracyDegrees <= 35f)
+        // Compensate a small, bounded part of the render pipeline latency. This predicted
+        // coordinate is display-only: currentLocation, route matching, speed limits,
+        // radar checks and voice guidance continue to consume the measured/filtered fix.
+        if (reliableCourse) {
+            val headingChange = previousMarker?.takeIf { it.hasBearing() }?.let {
+                abs(((markerTarget.bearing - it.bearing + 540f) % 360f) - 180f)
+            } ?: 0f
+            val prediction = GpsDisplayPredictionPolicy.predict(
+                latitude = markerTarget.latitude,
+                longitude = markerTarget.longitude,
+                speedMetersPerSecond = markerTarget.speed,
+                bearingDegrees = markerTarget.bearing,
+                accuracyMeters = markerTarget.accuracy.takeIf { markerTarget.hasAccuracy() },
+                bearingAccuracyDegrees = markerTarget.bearingAccuracyDegrees.takeIf { markerTarget.hasBearingAccuracy() },
+                headingChangeDegrees = headingChange
+            )
+            if (prediction != null) {
+                markerTarget.latitude = prediction.latitude
+                markerTarget.longitude = prediction.longitude
+            }
+        }
         if (!reliableCourse) {
             // At low speed or with a poor course estimate, hold the last stable heading.
             // Never rotate the arrow using a stale Android bearing while stopped.
