@@ -6624,12 +6624,9 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateUserMarker(markerTarget)
             return
         }
-        // Animate across nearly the whole interval between accepted fixes. The previous
-        // distance/speed duration often ended early, leaving the marker visibly paused before
-        // the next fix arrived (especially at low speeds or after smoothing).
-        // Match the animation to the real elapsed time between rendered GPS fixes.
-        // The previous 1,100 ms ceiling made the marker finish early on slower GPS
-        // delivery, then sit still until the next fix arrived.
+        // When course and fix quality permit prediction, animate toward the projected
+        // position over exactly that prediction horizon. Otherwise use only the short
+        // correction animation; do not stretch a stale measured fix across the whole gap.
         val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs, predictionHorizonMs)
         if (durationMs == null) {
             displayedMarkerLocation = Location(markerTarget)
