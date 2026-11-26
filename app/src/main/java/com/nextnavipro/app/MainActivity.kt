@@ -6573,13 +6573,19 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         val reliableCourse = markerTarget.hasBearing() && markerTarget.hasSpeed() &&
             markerTarget.speed >= 3f &&
             (!markerTarget.hasBearingAccuracy() || markerTarget.bearingAccuracyDegrees <= 35f)
-        // Compensate a small, bounded part of the render pipeline latency. This predicted
-        // coordinate is display-only: currentLocation, route matching, speed limits,
-        // radar checks and voice guidance continue to consume the measured/filtered fix.
-        if (reliableCourse) {
+        // Continue the marker's motion from the latest measured fix using a short,
+        // quality-gated display-only dead-reckoning horizon. The previous animation
+        // should already have brought the marker close to this fix; this next target
+        // keeps it moving between GNSS updates instead of moving briefly and then pausing.
+        // currentLocation and every navigation subsystem retain the measured/filtered fix.
+        var predictionHorizonMs: Long? = null
+        if (reliableCourse && movingTimeMs in 200L..1_000L) {
             val headingChange = previousMarker?.takeIf { it.hasBearing() }?.let {
                 abs(((markerTarget.bearing - it.bearing + 540f) % 360f) - 180f)
             } ?: 0f
+            val maxHorizonByDistance = (30_000.0 / markerTarget.speed.toDouble())
+                .toLong().coerceAtLeast(200L)
+            val horizonMs = minOf(movingTimeMs, 1_000L, maxHorizonByDistance)
             val prediction = GpsDisplayPredictionPolicy.predict(
                 latitude = markerTarget.latitude,
                 longitude = markerTarget.longitude,
@@ -6587,11 +6593,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
                 bearingDegrees = markerTarget.bearing,
                 accuracyMeters = markerTarget.accuracy.takeIf { markerTarget.hasAccuracy() },
                 bearingAccuracyDegrees = markerTarget.bearingAccuracyDegrees.takeIf { markerTarget.hasBearingAccuracy() },
-                headingChangeDegrees = headingChange
+                headingChangeDegrees = headingChange,
+                horizonMillis = horizonMs
             )
             if (prediction != null) {
                 markerTarget.latitude = prediction.latitude
                 markerTarget.longitude = prediction.longitude
+                predictionHorizonMs = horizonMs
             }
         }
         if (!reliableCourse) {
@@ -6616,13 +6624,10 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
             updateUserMarker(markerTarget)
             return
         }
-        // Animate across nearly the whole interval between accepted fixes. The previous
-        // distance/speed duration often ended early, leaving the marker visibly paused before
-        // the next fix arrived (especially at low speeds or after smoothing).
-        // Match the animation to the real elapsed time between rendered GPS fixes.
-        // The previous 1,100 ms ceiling made the marker finish early on slower GPS
-        // delivery, then sit still until the next fix arrived.
-        val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs)
+        // When course and fix quality permit prediction, animate toward the projected
+        // position over exactly that prediction horizon. Otherwise use only the short
+        // correction animation; do not stretch a stale measured fix across the whole gap.
+        val durationMs = GpsMarkerAnimationPolicy.durationMillis(movingTimeMs, predictionHorizonMs)
         if (durationMs == null) {
             displayedMarkerLocation = Location(markerTarget)
             updateUserMarker(markerTarget)
