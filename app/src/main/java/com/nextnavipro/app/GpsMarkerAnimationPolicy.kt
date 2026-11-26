@@ -9,7 +9,7 @@ internal object GpsMarkerAnimationPolicy {
     private const val MIN_CORRECTION_ANIMATION_MS = 100L
     private const val MAX_CORRECTION_ANIMATION_MS = 220L
     private const val MAX_FIX_GAP_MS = 2_500L
-    private const val MAX_PREDICTION_ANIMATION_MS = 1_500L
+    private const val MAX_PREDICTION_ANIMATION_MS = 1_000L
 
     fun durationMillis(elapsedBetweenFixesMs: Long, predictionHorizonMs: Long? = null): Long? {
         if (elapsedBetweenFixesMs <= 0L || elapsedBetweenFixesMs > MAX_FIX_GAP_MS) return null
