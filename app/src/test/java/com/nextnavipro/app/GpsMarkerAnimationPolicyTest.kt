@@ -6,18 +6,18 @@ import org.junit.Test
 
 class GpsMarkerAnimationPolicyTest {
     @Test
-    fun animationCoversMostOfTheActualGpsFixInterval() {
-        assertEquals(230L, GpsMarkerAnimationPolicy.durationMillis(250L))
-        assertEquals(460L, GpsMarkerAnimationPolicy.durationMillis(500L))
-        assertEquals(920L, GpsMarkerAnimationPolicy.durationMillis(1_000L))
-        assertEquals(1_840L, GpsMarkerAnimationPolicy.durationMillis(2_000L))
+    fun reliablePredictionUsesItsFullMotionHorizon() {
+        assertEquals(1_000L, GpsMarkerAnimationPolicy.durationMillis(1_000L, 1_000L))
+        assertEquals(1_500L, GpsMarkerAnimationPolicy.durationMillis(1_500L, 1_500L))
+        assertEquals(500L, GpsMarkerAnimationPolicy.durationMillis(500L, 500L))
     }
 
     @Test
-    fun shortIntervalsRemainResponsiveAndLongIntervalsAreBounded() {
-        assertEquals(80L, GpsMarkerAnimationPolicy.durationMillis(80L))
-        assertEquals(110L, GpsMarkerAnimationPolicy.durationMillis(120L))
-        assertEquals(2_200L, GpsMarkerAnimationPolicy.durationMillis(2_500L))
+    fun unreliablePredictionUsesOnlyAShortCorrectionAnimation() {
+        assertEquals(200L, GpsMarkerAnimationPolicy.durationMillis(250L))
+        assertEquals(220L, GpsMarkerAnimationPolicy.durationMillis(500L))
+        assertEquals(100L, GpsMarkerAnimationPolicy.durationMillis(80L))
+        assertEquals(100L, GpsMarkerAnimationPolicy.durationMillis(120L))
     }
 
     @Test
@@ -25,5 +25,6 @@ class GpsMarkerAnimationPolicyTest {
         assertNull(GpsMarkerAnimationPolicy.durationMillis(0L))
         assertNull(GpsMarkerAnimationPolicy.durationMillis(2_501L))
         assertNull(GpsMarkerAnimationPolicy.durationMillis(-1L))
+        assertNull(GpsMarkerAnimationPolicy.durationMillis(1_600L, 1_600L))
     }
 }
