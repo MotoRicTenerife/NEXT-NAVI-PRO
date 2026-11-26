@@ -6579,13 +6579,13 @@ class MainActivity : Activity(), LocationListener, SensorEventListener {
         // keeps it moving between GNSS updates instead of moving briefly and then pausing.
         // currentLocation and every navigation subsystem retain the measured/filtered fix.
         var predictionHorizonMs: Long? = null
-        if (reliableCourse && movingTimeMs in 200L..1_500L) {
+        if (reliableCourse && movingTimeMs in 200L..1_000L) {
             val headingChange = previousMarker?.takeIf { it.hasBearing() }?.let {
                 abs(((markerTarget.bearing - it.bearing + 540f) % 360f) - 180f)
             } ?: 0f
-            val maxHorizonByDistance = (60_000.0 / markerTarget.speed.toDouble())
+            val maxHorizonByDistance = (30_000.0 / markerTarget.speed.toDouble())
                 .toLong().coerceAtLeast(200L)
-            val horizonMs = minOf(movingTimeMs, 1_500L, maxHorizonByDistance)
+            val horizonMs = minOf(movingTimeMs, 1_000L, maxHorizonByDistance)
             val prediction = GpsDisplayPredictionPolicy.predict(
                 latitude = markerTarget.latitude,
                 longitude = markerTarget.longitude,
